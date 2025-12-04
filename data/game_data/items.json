@@ -1,0 +1,287 @@
+{
+    "weapons": [
+        {
+            "id": "sword_rusty",
+            "name": "Rusty Sword",
+            "type": "weapon",
+            "subtype": "sword",
+            "damage": "1d6",
+            "price": 10,
+            "description": "A worn but functional sword."
+        },
+        {
+            "id": "sword_iron",
+            "name": "Iron Sword",
+            "type": "weapon",
+            "subtype": "sword",
+            "damage": "1d8",
+            "price": 50,
+            "description": "A sturdy iron blade."
+        },
+        {
+            "id": "sword_steel",
+            "name": "Steel Sword",
+            "type": "weapon",
+            "subtype": "sword",
+            "damage": "1d10",
+            "price": 150,
+            "description": "A finely crafted steel sword."
+        },
+        {
+            "id": "dagger_simple",
+            "name": "Simple Dagger",
+            "type": "weapon",
+            "subtype": "dagger",
+            "damage": "1d4",
+            "price": 5,
+            "description": "A small but deadly blade."
+        },
+        {
+            "id": "staff_wooden",
+            "name": "Wooden Staff",
+            "type": "weapon",
+            "subtype": "staff",
+            "damage": "1d6",
+            "price": 15,
+            "description": "A sturdy wooden staff."
+        },
+        {
+            "id": "staff_arcane",
+            "name": "Arcane Staff",
+            "type": "weapon",
+            "subtype": "staff",
+            "damage": "1d8",
+            "price": 100,
+            "properties": {"spell_power": 5},
+            "description": "A staff imbued with magical energy."
+        },
+        {
+            "id": "bow_short",
+            "name": "Shortbow",
+            "type": "weapon",
+            "subtype": "bow",
+            "damage": "1d6",
+            "price": 25,
+            "description": "A compact bow for quick shooting."
+        },
+        {
+            "id": "bow_long",
+            "name": "Longbow",
+            "type": "weapon",
+            "subtype": "bow",
+            "damage": "1d8",
+            "price": 75,
+            "description": "A powerful bow for long range."
+        },
+        {
+            "id": "axe_battle",
+            "name": "Battle Axe",
+            "type": "weapon",
+            "subtype": "axe",
+            "damage": "1d10",
+            "price": 100,
+            "description": "A heavy two-handed axe."
+        }
+    ],
+    "armor": [
+        {
+            "id": "armor_leather",
+            "name": "Leather Armor",
+            "type": "armor",
+            "subtype": "light",
+            "ac_bonus": 2,
+            "price": 30,
+            "description": "Light and flexible protection."
+        },
+        {
+            "id": "armor_chain",
+            "name": "Chain Mail",
+            "type": "armor",
+            "subtype": "medium",
+            "ac_bonus": 4,
+            "price": 75,
+            "description": "Interlocking metal rings."
+        },
+        {
+            "id": "armor_plate",
+            "name": "Plate Armor",
+            "type": "armor",
+            "subtype": "heavy",
+            "ac_bonus": 6,
+            "price": 200,
+            "description": "Full metal plate protection."
+        },
+        {
+            "id": "shield_wooden",
+            "name": "Wooden Shield",
+            "type": "armor",
+            "subtype": "shield",
+            "ac_bonus": 1,
+            "price": 15,
+            "description": "Basic wooden protection."
+        },
+        {
+            "id": "shield_iron",
+            "name": "Iron Shield",
+            "type": "armor",
+            "subtype": "shield",
+            "ac_bonus": 2,
+            "price": 50,
+            "description": "Sturdy metal shield."
+        },
+        {
+            "id": "robe_mage",
+            "name": "Mage's Robe",
+            "type": "armor",
+            "subtype": "cloth",
+            "ac_bonus": 1,
+            "properties": {"spell_power": 3},
+            "price": 60,
+            "description": "Enchanted robes for spellcasters."
+        }
+    ],
+    "consumables": [
+        {
+            "id": "potion_health_minor",
+            "name": "Minor Health Potion",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"heal": "2d4+2"},
+            "price": 25,
+            "description": "Restores a small amount of HP."
+        },
+        {
+            "id": "potion_health",
+            "name": "Health Potion",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"heal": "4d4+4"},
+            "price": 50,
+            "description": "Restores a moderate amount of HP."
+        },
+        {
+            "id": "potion_health_greater",
+            "name": "Greater Health Potion",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"heal": "8d4+8"},
+            "price": 150,
+            "description": "Restores a large amount of HP."
+        },
+        {
+            "id": "potion_mana_minor",
+            "name": "Minor Mana Potion",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"restore_mana": 10},
+            "price": 25,
+            "description": "Restores a small amount of mana."
+        },
+        {
+            "id": "potion_mana",
+            "name": "Mana Potion",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"restore_mana": 25},
+            "price": 50,
+            "description": "Restores a moderate amount of mana."
+        },
+        {
+            "id": "potion_strength",
+            "name": "Potion of Strength",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"buff": "strength", "amount": 2, "duration": 60},
+            "price": 75,
+            "description": "Temporarily increases strength."
+        },
+        {
+            "id": "antidote",
+            "name": "Antidote",
+            "type": "consumable",
+            "subtype": "potion",
+            "effect": {"cure": "poison"},
+            "price": 35,
+            "description": "Cures poison effects."
+        },
+        {
+            "id": "torch",
+            "name": "Torch",
+            "type": "consumable",
+            "subtype": "tool",
+            "effect": {"light": 30},
+            "price": 1,
+            "description": "Provides light in dark areas."
+        },
+        {
+            "id": "rations",
+            "name": "Trail Rations",
+            "type": "consumable",
+            "subtype": "food",
+            "effect": {"rest_bonus": 1},
+            "price": 2,
+            "description": "A day's worth of food."
+        }
+    ],
+    "accessories": [
+        {
+            "id": "ring_protection",
+            "name": "Ring of Protection",
+            "type": "accessory",
+            "subtype": "ring",
+            "properties": {"ac_bonus": 1},
+            "price": 200,
+            "description": "A magical ring that protects the wearer."
+        },
+        {
+            "id": "amulet_health",
+            "name": "Amulet of Health",
+            "type": "accessory",
+            "subtype": "amulet",
+            "properties": {"max_hp_bonus": 10},
+            "price": 250,
+            "description": "Increases maximum HP."
+        },
+        {
+            "id": "cloak_shadows",
+            "name": "Cloak of Shadows",
+            "type": "accessory",
+            "subtype": "cloak",
+            "properties": {"stealth_bonus": 2},
+            "price": 175,
+            "description": "Makes the wearer harder to detect."
+        },
+        {
+            "id": "boots_speed",
+            "name": "Boots of Speed",
+            "type": "accessory",
+            "subtype": "boots",
+            "properties": {"initiative_bonus": 2},
+            "price": 200,
+            "description": "Increases movement speed."
+        }
+    ],
+    "quest_items": [
+        {
+            "id": "key_dungeon",
+            "name": "Dungeon Key",
+            "type": "quest_item",
+            "price": 0,
+            "description": "A key to unlock dungeon doors."
+        },
+        {
+            "id": "scroll_ancient",
+            "name": "Ancient Scroll",
+            "type": "quest_item",
+            "price": 0,
+            "description": "Contains mysterious writings."
+        },
+        {
+            "id": "gem_dragon",
+            "name": "Dragon Gem",
+            "type": "quest_item",
+            "price": 0,
+            "description": "A rare gem from a dragon's hoard."
+        }
+    ]
+}

@@ -1,0 +1,245 @@
+{
+    "races": {
+        "human": {
+            "id": "human",
+            "name": "Human",
+            "description": "Versatile and adaptable, humans are the most common race in most worlds.",
+            "stat_bonuses": {
+                "strength": 1,
+                "dexterity": 1,
+                "constitution": 1,
+                "intelligence": 1,
+                "wisdom": 1,
+                "charisma": 1
+            },
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["extra_language", "extra_skill"],
+            "languages": ["common"]
+        },
+        "elf": {
+            "id": "elf",
+            "name": "Elf",
+            "description": "Graceful and long-lived, elves are known for their magic and archery.",
+            "stat_bonuses": {
+                "dexterity": 2
+            },
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["darkvision", "keen_senses", "fey_ancestry", "trance"],
+            "languages": ["common", "elvish"]
+        },
+        "high_elf": {
+            "id": "high_elf",
+            "name": "High Elf",
+            "description": "Elves with a keen mind and mastery of arcane magic.",
+            "parent_race": "elf",
+            "stat_bonuses": {
+                "dexterity": 2,
+                "intelligence": 1
+            },
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["darkvision", "keen_senses", "fey_ancestry", "trance", "cantrip", "extra_language"],
+            "languages": ["common", "elvish"]
+        },
+        "wood_elf": {
+            "id": "wood_elf",
+            "name": "Wood Elf",
+            "description": "Swift elves who blend seamlessly with the forest.",
+            "parent_race": "elf",
+            "stat_bonuses": {
+                "dexterity": 2,
+                "wisdom": 1
+            },
+            "speed": 35,
+            "size": "Medium",
+            "traits": ["darkvision", "keen_senses", "fey_ancestry", "trance", "mask_of_the_wild"],
+            "languages": ["common", "elvish"]
+        },
+        "dwarf": {
+            "id": "dwarf",
+            "name": "Dwarf",
+            "description": "Stout and hardy, dwarves are known for their craftsmanship and resilience.",
+            "stat_bonuses": {
+                "constitution": 2
+            },
+            "speed": 25,
+            "size": "Medium",
+            "traits": ["darkvision", "dwarven_resilience", "dwarven_combat_training", "stonecunning"],
+            "languages": ["common", "dwarvish"]
+        },
+        "hill_dwarf": {
+            "id": "hill_dwarf",
+            "name": "Hill Dwarf",
+            "description": "Dwarves known for their keen senses and remarkable toughness.",
+            "parent_race": "dwarf",
+            "stat_bonuses": {
+                "constitution": 2,
+                "wisdom": 1
+            },
+            "speed": 25,
+            "size": "Medium",
+            "traits": ["darkvision", "dwarven_resilience", "dwarven_combat_training", "stonecunning", "dwarven_toughness"],
+            "languages": ["common", "dwarvish"]
+        },
+        "mountain_dwarf": {
+            "id": "mountain_dwarf",
+            "name": "Mountain Dwarf",
+            "description": "Strong dwarves skilled in armor and warfare.",
+            "parent_race": "dwarf",
+            "stat_bonuses": {
+                "constitution": 2,
+                "strength": 2
+            },
+            "speed": 25,
+            "size": "Medium",
+            "traits": ["darkvision", "dwarven_resilience", "dwarven_combat_training", "stonecunning", "dwarven_armor_training"],
+            "languages": ["common", "dwarvish"]
+        },
+        "halfling": {
+            "id": "halfling",
+            "name": "Halfling",
+            "description": "Small but brave, halflings are known for their luck and good nature.",
+            "stat_bonuses": {
+                "dexterity": 2
+            },
+            "speed": 25,
+            "size": "Small",
+            "traits": ["lucky", "brave", "halfling_nimbleness"],
+            "languages": ["common", "halfling"]
+        },
+        "lightfoot_halfling": {
+            "id": "lightfoot_halfling",
+            "name": "Lightfoot Halfling",
+            "description": "Stealthy halflings who can easily hide from notice.",
+            "parent_race": "halfling",
+            "stat_bonuses": {
+                "dexterity": 2,
+                "charisma": 1
+            },
+            "speed": 25,
+            "size": "Small",
+            "traits": ["lucky", "brave", "halfling_nimbleness", "naturally_stealthy"],
+            "languages": ["common", "halfling"]
+        },
+        "dragonborn": {
+            "id": "dragonborn",
+            "name": "Dragonborn",
+            "description": "Proud dragon-blooded warriors with scales and breath weapons.",
+            "stat_bonuses": {
+                "strength": 2,
+                "charisma": 1
+            },
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["draconic_ancestry", "breath_weapon", "damage_resistance"],
+            "languages": ["common", "draconic"]
+        },
+        "tiefling": {
+            "id": "tiefling",
+            "name": "Tiefling",
+            "description": "Descendants of fiends, tieflings bear the mark of their infernal heritage.",
+            "stat_bonuses": {
+                "charisma": 2,
+                "intelligence": 1
+            },
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["darkvision", "hellish_resistance", "infernal_legacy"],
+            "languages": ["common", "infernal"]
+        },
+        "half_orc": {
+            "id": "half_orc",
+            "name": "Half-Orc",
+            "description": "Strong and fierce, half-orcs combine human versatility with orcish power.",
+            "stat_bonuses": {
+                "strength": 2,
+                "constitution": 1
+            },
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["darkvision", "menacing", "relentless_endurance", "savage_attacks"],
+            "languages": ["common", "orc"]
+        },
+        "gnome": {
+            "id": "gnome",
+            "name": "Gnome",
+            "description": "Small and inventive, gnomes are known for their curiosity and magic.",
+            "stat_bonuses": {
+                "intelligence": 2
+            },
+            "speed": 25,
+            "size": "Small",
+            "traits": ["darkvision", "gnome_cunning"],
+            "languages": ["common", "gnomish"]
+        },
+        "half_elf": {
+            "id": "half_elf",
+            "name": "Half-Elf",
+            "description": "Combining human adaptability with elven grace and charm.",
+            "stat_bonuses": {
+                "charisma": 2
+            },
+            "bonus_stats": 2,
+            "speed": 30,
+            "size": "Medium",
+            "traits": ["darkvision", "fey_ancestry", "skill_versatility"],
+            "languages": ["common", "elvish"]
+        }
+    },
+    "traits": {
+        "darkvision": {
+            "name": "Darkvision",
+            "description": "Can see in dim light within 60 feet as if it were bright light."
+        },
+        "keen_senses": {
+            "name": "Keen Senses",
+            "description": "Proficiency in the Perception skill."
+        },
+        "fey_ancestry": {
+            "name": "Fey Ancestry",
+            "description": "Advantage on saves against being charmed; magic can't put you to sleep."
+        },
+        "trance": {
+            "name": "Trance",
+            "description": "Don't need to sleep; 4 hours of meditation equals 8 hours of sleep."
+        },
+        "lucky": {
+            "name": "Lucky",
+            "description": "When you roll a 1 on an attack, ability check, or save, reroll and use the new result."
+        },
+        "brave": {
+            "name": "Brave",
+            "description": "Advantage on saves against being frightened."
+        },
+        "dwarven_resilience": {
+            "name": "Dwarven Resilience",
+            "description": "Advantage on saves against poison; resistance to poison damage."
+        },
+        "dwarven_toughness": {
+            "name": "Dwarven Toughness",
+            "description": "HP maximum increases by 1 for each level."
+        },
+        "breath_weapon": {
+            "name": "Breath Weapon",
+            "description": "Exhale destructive energy based on draconic ancestry."
+        },
+        "hellish_resistance": {
+            "name": "Hellish Resistance",
+            "description": "Resistance to fire damage."
+        },
+        "relentless_endurance": {
+            "name": "Relentless Endurance",
+            "description": "When reduced to 0 HP, drop to 1 HP instead (once per long rest)."
+        },
+        "savage_attacks": {
+            "name": "Savage Attacks",
+            "description": "On a critical hit, roll one additional damage die."
+        },
+        "gnome_cunning": {
+            "name": "Gnome Cunning",
+            "description": "Advantage on INT, WIS, CHA saves against magic."
+        }
+    }
+}

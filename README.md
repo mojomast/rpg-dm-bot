@@ -48,14 +48,16 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Session Tracking**: Track active sessions and participants
 - **Party System**: Form adventuring parties
 - **Shared Progress**: All players see the same story progression
- - **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
+- **Session Isolation**: Multiple games can run simultaneously without context bleed
+- **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
 
 ### 🤖 AI Dungeon Master
 - **Dynamic Narration**: AI generates immersive story descriptions
 - **Contextual Responses**: Remembers campaign history and character actions
 - **NPC Dialogue**: Generates unique dialogue for NPCs
 - **Combat Descriptions**: Dramatic combat narration
- - **API Tools & Spells Support**: The AI DM can cast spells, call spell/ability tool actions, and manage character resources programmatically.
+- **Retry Logic**: Automatic retry with exponential backoff for API reliability
+- **API Tools & Spells Support**: The AI DM can cast spells, call spell/ability tool actions, and manage character resources programmatically.
 ### 🪄 Spells & Abilities
 - **Spellcasting**: Classes that cast spells (Mage, Cleric, Bard, Warlock, Paladin, Ranger, etc.) have cantrips and leveled spells, spell slots, and upcasting support.
 - **Spellbook**: Characters can learn and prepare spells. Use `/spell learn` to add spells appropriate for your class and level.

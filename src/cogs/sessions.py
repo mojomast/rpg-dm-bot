@@ -77,6 +77,9 @@ class SessionView(discord.ui.View):
         )
         
         for player in players:
+            # Skip players without a character assigned
+            if not player.get('character_id'):
+                continue
             char = await self.bot.db.get_character(player['character_id'])
             if char:
                 char_class = char.get('char_class') or char.get('class', 'Unknown')
@@ -279,6 +282,9 @@ class Sessions(commands.Cog):
         if players:
             player_list = []
             for player in players:
+                # Skip players without a character assigned
+                if not player.get('character_id'):
+                    continue
                 char = await self.db.get_character(player['character_id'])
                 if char:
                     char_class = char.get('char_class') or char.get('class', 'Unknown')

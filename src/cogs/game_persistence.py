@@ -179,6 +179,9 @@ class GamePersistence(commands.Cog):
         players = await self.db.get_session_players(session['id'])
         party_info = []
         for p in players:
+            # Skip players without a character assigned
+            if not p.get('character_id'):
+                continue
             char = await self.db.get_character(p['character_id'])
             if char:
                 party_info.append(char)
@@ -280,6 +283,9 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
         players = await self.db.get_session_players(session['id'])
         party_info = []
         for p in players:
+            # Skip players without a character assigned
+            if not p.get('character_id'):
+                continue
             char = await self.db.get_character(p['character_id'])
             if char:
                 party_info.append(char)
@@ -397,6 +403,9 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         players = await self.db.get_session_players(session['id'])
         party_data = []
         for p in players:
+            # Skip players without a character assigned
+            if not p.get('character_id'):
+                continue
             char = await self.db.get_character(p['character_id'])
             if char:
                 party_data.append({

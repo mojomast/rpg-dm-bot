@@ -823,6 +823,9 @@ class SessionSelectDropdown(discord.ui.Select):
         players = await self.game_master.bot.db.get_session_players(session['id'])
         player_list = ""
         for p in players:
+            # Skip players without a character assigned
+            if not p.get('character_id'):
+                continue
             char = await self.game_master.bot.db.get_character(p['character_id'])
             if char:
                 player_list += f"• **{char['name']}** - Lvl {char['level']} {char['race']} {char['char_class']}\n"
@@ -873,7 +876,7 @@ class SessionManageView(discord.ui.View):
         
         # Check if already in session
         players = await self.game_master.bot.db.get_session_players(self.session['id'])
-        if any(p['character_id'] == char['id'] for p in players):
+        if any(p.get('character_id') == char['id'] for p in players if p.get('character_id')):
             await interaction.response.send_message(
                 f"✅ **{char['name']}** is already in this game!",
                 ephemeral=True
@@ -1174,7 +1177,7 @@ class GameMaster(commands.Cog):
         
         # Check if already in session
         players = await self.db.get_session_players(session_id)
-        if any(p['character_id'] == char['id'] for p in players):
+        if any(p.get('character_id') == char['id'] for p in players if p.get('character_id')):
             await interaction.response.send_message(
                 f"You're already in **{session['name']}**!",
                 ephemeral=True
@@ -1287,6 +1290,9 @@ class GameMaster(commands.Cog):
         # Build detailed party info for the DM including backstories
         party_info = []
         for p in players:
+            # Skip players without a character assigned
+            if not p.get('character_id'):
+                continue
             char = await self.db.get_character(p['character_id'])
             if char:
                 party_info.append(char)
@@ -1431,6 +1437,9 @@ class GameMaster(commands.Cog):
             
             player_names = []
             for p in players:
+                # Skip players without a character assigned
+                if not p.get('character_id'):
+                    continue
                 char = await self.db.get_character(p['character_id'])
                 if char:
                     player_names.append(f"{char['name']} (Lv.{char['level']})")
@@ -2105,6 +2114,9 @@ class GameMaster(commands.Cog):
         
         party_data = []
         for p in players:
+            # Skip players without a character assigned
+            if not p.get('character_id'):
+                continue
             char = await self.db.get_character(p['character_id'])
             if char:
                 party_data.append(char)

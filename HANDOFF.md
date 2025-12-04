@@ -1,14 +1,54 @@
 # RPG Dungeon Master Bot - Handoff Document
 
-**Date:** December 3, 2025  
+**Date:** December 4, 2025  
 **Project:** RPG Dungeon Master Discord Bot (adapted from ussybot)  
-**Status:** Core implementation complete, tests passing (112/127 tests)
+**Status:** Core implementation complete, tests passing (127 tests, some pre-existing failures)
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
 ---
 
-## Latest Changes (December 3, 2025 - Session 2)
+## Latest Changes (December 4, 2025 - Session 3)
+
+### Bug Fixes:
+
+1. **KeyError: 'character_id' Fix**
+   - Players could join sessions without a character properly assigned, causing `KeyError: 'character_id'` when iterating through session participants
+   - Added defensive checks (`if not p.get('character_id'): continue`) throughout the codebase to skip participants without assigned characters
+   - **Files modified:**
+     - `src/cogs/dm_chat.py` - `get_game_context()` party members loop and combat participants loop
+     - `src/cogs/sessions.py` - `view_players()` and session status display
+     - `src/cogs/game_master.py` - Multiple places: session management, join checks, party info building
+     - `src/cogs/game_persistence.py` - Story summary, resume, and save commands
+
+2. **Session Context Isolation (Game Mixing Bug)**
+   - **Problem:** When multiple games were running in a guild, the bot was mixing up game contexts (e.g., "Big Bingo" context bleeding into "bobs bob" game)
+   - **Root Cause:** `get_active_session_id()` returned the first active session for the guild, not the one the player was actually in
+   - **Solution:** 
+     - Added `get_user_active_session()` method to `database.py` that joins `sessions` with `session_participants` to find the user's specific session
+     - Updated `get_active_session_id()` in `dm_chat.py` to take optional `user_id` parameter
+     - Updated `get_game_context()` to use user's session instead of first active session
+   - **Files modified:**
+     - `src/database.py` - Added `get_user_active_session(guild_id, user_id)` method
+     - `src/cogs/dm_chat.py` - Updated `get_active_session_id()`, `process_batched_messages()`, `process_dm_message()`, and `get_game_context()`
+
+3. **LLM API Retry Logic**
+   - **Problem:** 503 errors from LLM provider caused immediate failures
+   - **Solution:** Added retry logic with exponential backoff (1s, 2s, 4s) for transient errors (503, 502, 429) and timeouts
+   - **Files modified:**
+     - `src/llm.py` - Updated `_api_call()` with `max_retries` parameter and retry loop
+
+### Files Modified This Session:
+- `src/database.py` - Added `get_user_active_session()` method
+- `src/llm.py` - Added retry logic with exponential backoff
+- `src/cogs/dm_chat.py` - Session isolation fixes, defensive character_id checks
+- `src/cogs/sessions.py` - Defensive character_id checks  
+- `src/cogs/game_master.py` - Defensive character_id checks
+- `src/cogs/game_persistence.py` - Defensive character_id checks
+
+---
+
+## Previous Changes (December 3, 2025 - Session 2)
 
 ### Issues Fixed:
 

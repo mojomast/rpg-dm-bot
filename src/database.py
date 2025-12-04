@@ -1749,6 +1749,25 @@ class Database:
         """Get all players in a session"""
         return await self.get_session_participants(session_id)
     
+    async def get_user_active_session(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get the active session that a user is participating in for a guild"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            # Find active sessions where this user is a participant
+            cursor = await db.execute("""
+                SELECT s.* FROM sessions s
+                INNER JOIN session_participants sp ON s.id = sp.session_id
+                WHERE s.guild_id = ? AND sp.user_id = ? AND s.status = 'active'
+                ORDER BY s.last_played DESC NULLS LAST
+                LIMIT 1
+            """, (guild_id, user_id))
+            row = await cursor.fetchone()
+            if row:
+                session = dict(row)
+                session['world_state'] = json.loads(session['world_state']) if session.get('world_state') else {}
+                return session
+            return None
+    
     async def get_npcs(self, guild_id: int, location: str = None) -> List[Dict[str, Any]]:
         """Get NPCs for a guild, optionally filtered by location"""
         async with aiosqlite.connect(self.db_path) as db:

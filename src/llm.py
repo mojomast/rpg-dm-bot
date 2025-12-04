@@ -42,8 +42,8 @@ class LLMClient:
         if self.session and not self.session.closed:
             await self.session.close()
     
-    async def _api_call(self, payload: dict) -> dict:
-        """Make an API call with proper error handling"""
+    async def _api_call(self, payload: dict, max_retries: int = 3) -> dict:
+        """Make an API call with proper error handling and retry logic"""
         await self.ensure_session()
         
         headers = {
@@ -72,53 +72,80 @@ class LLMClient:
         
         logger.info("=" * 60)
         
-        async with self._api_lock:
-            try:
-                async with self.session.post(
-                    f"{self.BASE_URL}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=60)
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"LLM API error {response.status}: {error_text}")
-                        raise Exception(f"LLM API error {response.status}: {error_text}")
-                    
-                    result = await response.json()
-                    
-                    # Log full response for debugging
-                    logger.info("=" * 60)
-                    logger.info("LLM API RESPONSE")
-                    logger.info(f"Usage: {result.get('usage', {})}")
-                    
-                    choice = result.get('choices', [{}])[0]
-                    message = choice.get('message', {})
-                    content = message.get('content', '')
-                    tool_calls = message.get('tool_calls', [])
-                    finish_reason = choice.get('finish_reason', 'unknown')
-                    
-                    logger.info(f"Finish reason: {finish_reason}")
-                    
-                    if content:
-                        content_preview = content[:1000] + '...' if len(content) > 1000 else content
-                        logger.info(f"Response content: {content_preview}")
-                    else:
-                        logger.warning("Response content is EMPTY - model may have used all tokens for reasoning")
-                    
-                    if tool_calls:
-                        logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
-                    
-                    logger.info("=" * 60)
-                    
-                    return result
-                    
-            except asyncio.TimeoutError:
-                logger.error("LLM API timeout")
-                raise Exception("LLM request timed out")
-            except Exception as e:
-                logger.error(f"LLM API error: {e}")
-                raise
+        last_error = None
+        for attempt in range(max_retries):
+            async with self._api_lock:
+                try:
+                    async with self.session.post(
+                        f"{self.BASE_URL}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as response:
+                        if response.status == 503 or response.status == 502 or response.status == 429:
+                            # Retryable errors - server overloaded or rate limited
+                            error_text = await response.text()
+                            logger.warning(f"LLM API error {response.status} (attempt {attempt + 1}/{max_retries}): {error_text}")
+                            last_error = Exception(f"LLM API error {response.status}: {error_text}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                                continue
+                            raise last_error
+                        
+                        if response.status != 200:
+                            error_text = await response.text()
+                            logger.error(f"LLM API error {response.status}: {error_text}")
+                            raise Exception(f"LLM API error {response.status}: {error_text}")
+                        
+                        result = await response.json()
+                        
+                        # Log full response for debugging
+                        logger.info("=" * 60)
+                        logger.info("LLM API RESPONSE")
+                        logger.info(f"Usage: {result.get('usage', {})}")
+                        
+                        choice = result.get('choices', [{}])[0]
+                        message = choice.get('message', {})
+                        content = message.get('content', '')
+                        tool_calls = message.get('tool_calls', [])
+                        finish_reason = choice.get('finish_reason', 'unknown')
+                        
+                        logger.info(f"Finish reason: {finish_reason}")
+                        
+                        if content:
+                            content_preview = content[:1000] + '...' if len(content) > 1000 else content
+                            logger.info(f"Response content: {content_preview}")
+                        else:
+                            logger.warning("Response content is EMPTY - model may have used all tokens for reasoning")
+                        
+                        if tool_calls:
+                            logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                        
+                        logger.info("=" * 60)
+                        
+                        return result
+                        
+                except asyncio.TimeoutError:
+                    logger.warning(f"LLM API timeout (attempt {attempt + 1}/{max_retries})")
+                    last_error = Exception("LLM request timed out")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    raise last_error
+                except aiohttp.ClientError as e:
+                    logger.warning(f"LLM API client error (attempt {attempt + 1}/{max_retries}): {e}")
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    raise
+                except Exception as e:
+                    logger.error(f"LLM API error: {e}")
+                    raise
+        
+        # Should not reach here, but just in case
+        if last_error:
+            raise last_error
     
     async def dm_chat(
         self,

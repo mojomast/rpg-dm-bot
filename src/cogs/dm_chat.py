@@ -123,10 +123,14 @@ PLAYER CHARACTER:
             if char.get('backstory'):
                 context_parts.append(f"- Backstory: {char['backstory']}")
         
-        # Get active session with full details
-        sessions = await self.db.get_sessions(guild_id, status='active')
-        if sessions:
-            session = sessions[0]
+        # Get active session with full details - use the user's session, not just first active
+        session = await self.db.get_user_active_session(guild_id, user_id)
+        if not session:
+            # Fallback to first active session if user isn't in one
+            sessions = await self.db.get_sessions(guild_id, status='active')
+            session = sessions[0] if sessions else None
+        
+        if session:
             context_parts.append(f"""
 ACTIVE SESSION: {session['name']}
 Game Description: {session.get('description', 'An adventure awaits!')}""")
@@ -136,6 +140,9 @@ Game Description: {session.get('description', 'An adventure awaits!')}""")
             if players:
                 context_parts.append("\nPARTY MEMBERS:")
                 for p in players:
+                    # Skip players without a character assigned
+                    if not p.get('character_id'):
+                        continue
                     party_char = await self.db.get_character(p['character_id'])
                     if party_char:
                         pc_class = party_char.get('char_class') or party_char.get('class', 'Unknown')
@@ -179,14 +186,24 @@ CURRENT STAGE: {current_stage['title']}
             context_parts.append(f"Turn: {combat['current_turn']}")
             context_parts.append("Combatants:")
             for p in participants:
+                # Skip participants without a character assigned
+                if not p.get('character_id'):
+                    continue
                 char_info = await self.db.get_character(p['character_id'])
                 if char_info:
                     context_parts.append(f"- {char_info['name']}: {p['current_hp']} HP, Initiative {p['initiative']}")
         
         return "\n".join(context_parts) if context_parts else "No active game context."
     
-    async def get_active_session_id(self, guild_id: int) -> Optional[int]:
-        """Get the active session ID for a guild"""
+    async def get_active_session_id(self, guild_id: int, user_id: int = None) -> Optional[int]:
+        """Get the active session ID for a user in a guild, or fallback to first active session"""
+        # First try to get the session the user is actually in
+        if user_id:
+            user_session = await self.db.get_user_active_session(guild_id, user_id)
+            if user_session:
+                return user_session['id']
+        
+        # Fallback to first active session for the guild
         sessions = await self.db.get_sessions(guild_id, status='active')
         return sessions[0]['id'] if sessions else None
     
@@ -202,15 +219,16 @@ CURRENT STAGE: {current_stage['title']}
         guild_id = channel.guild.id
         channel_id = channel.id
         
-        # Get session ID for history tracking
-        session_id = await self.get_active_session_id(guild_id)
+        # Get game context using first player's ID (for their character)
+        # but context includes all party members
+        first_user_id = messages[0]['user_id']
+        
+        # Get session ID for history tracking - use the session the user is actually in
+        session_id = await self.get_active_session_id(guild_id, first_user_id)
         
         # Track activity
         self.last_activity[channel_id] = datetime.utcnow()
         
-        # Get game context using first player's ID (for their character)
-        # but context includes all party members
-        first_user_id = messages[0]['user_id']
         game_context = await self.get_game_context(guild_id, first_user_id, channel_id)
         
         # Build multi-player instruction
@@ -352,8 +370,8 @@ CRITICAL:
         guild_id = message.guild.id
         user_id = message.author.id
         
-        # Get session ID for history tracking
-        session_id = await self.get_active_session_id(guild_id)
+        # Get session ID for history tracking - use the session the user is actually in
+        session_id = await self.get_active_session_id(guild_id, user_id)
         
         # Track activity
         self.last_activity[channel_id] = datetime.utcnow()

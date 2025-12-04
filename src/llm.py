@@ -51,11 +51,26 @@ class LLMClient:
             "Content-Type": "application/json"
         }
         
-        logger.debug("=" * 60)
-        logger.debug("LLM API REQUEST")
-        logger.debug(f"Model: {payload.get('model')}")
-        logger.debug(f"Message count: {len(payload.get('messages', []))}")
-        logger.debug("=" * 60)
+        logger.info("=" * 60)
+        logger.info("LLM API REQUEST")
+        logger.info(f"Model: {payload.get('model')}")
+        logger.info(f"Message count: {len(payload.get('messages', []))}")
+        
+        # Log full messages for debugging
+        for i, msg in enumerate(payload.get('messages', [])):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            if content:
+                # Truncate very long content for readability
+                content_preview = content[:500] + '...' if len(content) > 500 else content
+                logger.info(f"  [{i}] {role}: {content_preview}")
+            if msg.get('tool_calls'):
+                logger.info(f"  [{i}] {role} tool_calls: {json.dumps(msg.get('tool_calls'), indent=2)}")
+        
+        if payload.get('tools'):
+            logger.info(f"Tools available: {[t.get('function', {}).get('name', 'unknown') for t in payload.get('tools', [])]}")
+        
+        logger.info("=" * 60)
         
         async with self._api_lock:
             try:
@@ -71,7 +86,31 @@ class LLMClient:
                         raise Exception(f"LLM API error {response.status}: {error_text}")
                     
                     result = await response.json()
-                    logger.debug(f"Response received: {result.get('usage', {})}")
+                    
+                    # Log full response for debugging
+                    logger.info("=" * 60)
+                    logger.info("LLM API RESPONSE")
+                    logger.info(f"Usage: {result.get('usage', {})}")
+                    
+                    choice = result.get('choices', [{}])[0]
+                    message = choice.get('message', {})
+                    content = message.get('content', '')
+                    tool_calls = message.get('tool_calls', [])
+                    finish_reason = choice.get('finish_reason', 'unknown')
+                    
+                    logger.info(f"Finish reason: {finish_reason}")
+                    
+                    if content:
+                        content_preview = content[:1000] + '...' if len(content) > 1000 else content
+                        logger.info(f"Response content: {content_preview}")
+                    else:
+                        logger.warning("Response content is EMPTY - model may have used all tokens for reasoning")
+                    
+                    if tool_calls:
+                        logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                    
+                    logger.info("=" * 60)
+                    
                     return result
                     
             except asyncio.TimeoutError:
@@ -144,7 +183,7 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.8,  # Higher for more creative DM responses
-            "max_tokens": 1000,
+            "max_tokens": 15000,
         }
         
         if tools:
@@ -254,7 +293,7 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.8,
-            "max_tokens": 1000,
+            "max_tokens": 15000,
         }
         
         if tools:
@@ -301,7 +340,7 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.9,
-            "max_tokens": 500,
+            "max_tokens": 15000,
         }
         
         result = await self._api_call(payload)
@@ -333,7 +372,7 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.9,
-            "max_tokens": 200,
+            "max_tokens": 15000,
         }
         
         result = await self._api_call(payload)
@@ -363,7 +402,7 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.8,
-            "max_tokens": 300,
+            "max_tokens": 15000,
         }
         
         result = await self._api_call(payload)
@@ -374,7 +413,7 @@ class LLMClient:
     async def chat(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 500
+        max_tokens: int = 15000
     ) -> str:
         """Simple chat endpoint without tool support"""
         payload = {
@@ -392,7 +431,7 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         tools: List[Dict] = None,
-        max_tokens: int = 1000
+        max_tokens: int = 15000
     ) -> Dict[str, Any]:
         """Chat with tool calling support - returns dict with content and tool_calls"""
         payload = {

@@ -72,7 +72,7 @@ class CharacterCreationModal(discord.ui.Modal, title="Create Your Character"):
         # Build response embed
         embed = discord.Embed(
             title=f"🎭 Character Created: {char['name']}",
-            description=f"Welcome, {char['name']} the {char['race']} {char['class']}!",
+            description=f"Welcome, {char['name']} the {char['race']} {char['char_class']}!",
             color=discord.Color.green()
         )
         
@@ -224,7 +224,11 @@ class Characters(commands.Cog):
     def db(self):
         return self.bot.db
     
-    character_group = app_commands.Group(name="character", description="Character management commands")
+    character_group = app_commands.Group(
+        name="character", 
+        description="Character management commands",
+        guild_only=True
+    )
     
     @character_group.command(name="create", description="Create a new character")
     @app_commands.describe(
@@ -285,7 +289,7 @@ class Characters(commands.Cog):
         
         embed = discord.Embed(
             title=f"📜 {char['name']}",
-            description=f"Level {char['level']} {char['race']} {char['class']}",
+            description=f"Level {char['level']} {char['race']} {char['char_class']}",
             color=discord.Color.gold()
         )
         
@@ -356,14 +360,15 @@ class Characters(commands.Cog):
         
         embed = discord.Embed(
             title="🎭 Your Characters",
+            description="Use `/character switch [id]` to switch characters",
             color=discord.Color.blue()
         )
         
         for char in characters:
             active = "✅ " if char['is_active'] else ""
             embed.add_field(
-                name=f"{active}{char['name']}",
-                value=f"Level {char['level']} {char['race']} {char['class']}\n"
+                name=f"{active}{char['name']} `ID: {char['id']}`",
+                value=f"Level {char['level']} {char['race']} {char['char_class']}\n"
                       f"HP: {char['hp']}/{char['max_hp']} | Gold: {char['gold']}",
                 inline=True
             )
@@ -387,7 +392,7 @@ class Characters(commands.Cog):
         await self.db.set_active_character(interaction.user.id, interaction.guild.id, character_id)
         
         await interaction.response.send_message(
-            f"✅ Switched to **{char['name']}** the {char['race']} {char['class']}!"
+            f"✅ Switched to **{char['name']}** the {char['race']} {char['char_class']}!"
         )
     
     @character_group.command(name="levelup", description="Level up your character (if eligible)")

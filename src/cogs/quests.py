@@ -167,7 +167,11 @@ class Quests(commands.Cog):
     def db(self):
         return self.bot.db
     
-    quest_group = app_commands.Group(name="quest", description="Quest commands")
+    quest_group = app_commands.Group(
+        name="quest", 
+        description="Quest commands",
+        guild_only=True
+    )
     
     @quest_group.command(name="create", description="Create a new quest (DM only)")
     @app_commands.describe(difficulty="Quest difficulty level")

@@ -165,7 +165,11 @@ class Combat(commands.Cog):
     def db(self):
         return self.bot.db
     
-    combat_group = app_commands.Group(name="combat", description="Combat commands")
+    combat_group = app_commands.Group(
+        name="combat", 
+        description="Combat commands",
+        guild_only=True
+    )
     
     @combat_group.command(name="start", description="Start a combat encounter")
     async def start_combat(self, interaction: discord.Interaction):

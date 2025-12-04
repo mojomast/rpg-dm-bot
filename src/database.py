@@ -330,6 +330,60 @@ class Database:
                 )
             """)
             
+            # ================================================================
+            # CHARACTER SPELLS TABLE (known/prepared spells)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS character_spells (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    spell_id TEXT NOT NULL,
+                    spell_name TEXT NOT NULL,
+                    spell_level INTEGER NOT NULL,
+                    is_prepared INTEGER DEFAULT 1,
+                    is_cantrip INTEGER DEFAULT 0,
+                    source TEXT DEFAULT 'class',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    UNIQUE(character_id, spell_id)
+                )
+            """)
+            
+            # ================================================================
+            # CHARACTER ABILITIES TABLE (class features, racial traits)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS character_abilities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    ability_id TEXT NOT NULL,
+                    ability_name TEXT NOT NULL,
+                    ability_type TEXT DEFAULT 'class',
+                    uses_remaining INTEGER,
+                    max_uses INTEGER,
+                    recharge TEXT DEFAULT 'long_rest',
+                    properties TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    UNIQUE(character_id, ability_id)
+                )
+            """)
+            
+            # ================================================================
+            # SPELL SLOTS TABLE (track available spell slots per character)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS spell_slots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    slot_level INTEGER NOT NULL,
+                    total INTEGER NOT NULL,
+                    remaining INTEGER NOT NULL,
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    UNIQUE(character_id, slot_level)
+                )
+            """)
+            
             await db.commit()
     
     # ========================================================================
@@ -370,13 +424,23 @@ class Database:
             await db.commit()
             return cursor.lastrowid
     
+    def _normalize_character(self, char_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Normalize character dict to use 'char_class' instead of 'class' for consistency"""
+        if char_dict is None:
+            return None
+        # Copy the dict and rename 'class' to 'char_class' if present
+        result = dict(char_dict)
+        if 'class' in result:
+            result['char_class'] = result.pop('class')
+        return result
+    
     async def get_character(self, character_id: int) -> Optional[Dict[str, Any]]:
         """Get character by ID"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM characters WHERE id = ?", (character_id,))
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            return self._normalize_character(dict(row)) if row else None
     
     async def get_active_character(self, user_id: int, guild_id: int) -> Optional[Dict[str, Any]]:
         """Get user's active character in a guild"""
@@ -388,7 +452,7 @@ class Database:
                 ORDER BY updated_at DESC LIMIT 1
             """, (user_id, guild_id))
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            return self._normalize_character(dict(row)) if row else None
     
     async def get_user_characters(self, user_id: int, guild_id: int) -> List[Dict[str, Any]]:
         """Get all characters for a user in a guild"""
@@ -399,7 +463,7 @@ class Database:
                 ORDER BY is_active DESC, updated_at DESC
             """, (user_id, guild_id))
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [self._normalize_character(dict(row)) for row in rows]
     
     async def update_character(self, character_id: int, **kwargs) -> bool:
         """Update character fields"""
@@ -472,35 +536,56 @@ class Database:
     # ========================================================================
     
     async def add_item(self, character_id: int, item_id: str, item_name: str, 
-                       item_type: str, quantity: int = 1, properties: Dict = None) -> int:
-        """Add an item to character's inventory"""
+                       item_type: str, quantity: int = 1, properties: Dict = None,
+                       is_equipped: bool = False, slot: str = None) -> int:
+        """Add an item to character's inventory, optionally equipped"""
         now = datetime.utcnow().isoformat()
         
         async with aiosqlite.connect(self.db_path) as db:
-            # Check if item already exists (stackable)
-            cursor = await db.execute("""
-                SELECT id, quantity FROM inventory 
-                WHERE character_id = ? AND item_id = ? AND is_equipped = 0
-            """, (character_id, item_id))
-            existing = await cursor.fetchone()
-            
-            if existing and item_type in ['consumable', 'material', 'currency']:
-                # Stack the items
-                await db.execute("""
-                    UPDATE inventory SET quantity = quantity + ? WHERE id = ?
-                """, (quantity, existing[0]))
-                await db.commit()
-                return existing[0]
-            else:
-                # Add new item
+            # Check if item already exists (stackable) - only stack if not equipping
+            if not is_equipped:
                 cursor = await db.execute("""
-                    INSERT INTO inventory (character_id, item_id, item_name, item_type, 
-                        quantity, properties, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (character_id, item_id, item_name, item_type, quantity,
-                      json.dumps(properties or {}), now))
-                await db.commit()
-                return cursor.lastrowid
+                    SELECT id, quantity FROM inventory 
+                    WHERE character_id = ? AND item_id = ? AND is_equipped = 0
+                """, (character_id, item_id))
+                existing = await cursor.fetchone()
+                
+                if existing and item_type in ['consumable', 'material', 'currency']:
+                    # Stack the items
+                    await db.execute("""
+                        UPDATE inventory SET quantity = quantity + ? WHERE id = ?
+                    """, (quantity, existing[0]))
+                    await db.commit()
+                    return existing[0]
+            
+            # Determine slot if equipping
+            if is_equipped and not slot:
+                slot = self._get_default_slot(item_type)
+            
+            # Add new item
+            cursor = await db.execute("""
+                INSERT INTO inventory (character_id, item_id, item_name, item_type, 
+                    quantity, is_equipped, slot, properties, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (character_id, item_id, item_name, item_type, quantity,
+                  1 if is_equipped else 0, slot, json.dumps(properties or {}), now))
+            await db.commit()
+            return cursor.lastrowid
+    
+    def _get_default_slot(self, item_type: str) -> str:
+        """Get default equipment slot for an item type"""
+        slot_map = {
+            'weapon': 'main_hand',
+            'armor': 'body',
+            'shield': 'off_hand',
+            'helmet': 'head',
+            'boots': 'feet',
+            'gloves': 'hands',
+            'ring': 'ring',
+            'amulet': 'neck',
+            'cloak': 'back'
+        }
+        return slot_map.get(item_type, 'misc')
     
     async def get_inventory(self, character_id: int) -> List[Dict[str, Any]]:
         """Get all items in character's inventory"""
@@ -600,6 +685,219 @@ class Database:
                 "SELECT gold FROM characters WHERE id = ?", (character_id,))
             row = await cursor.fetchone()
             return row[0] if row else 0
+    
+    # ========================================================================
+    # SPELL & ABILITY METHODS
+    # ========================================================================
+    
+    async def learn_spell(self, character_id: int, spell_id: str, spell_name: str,
+                         spell_level: int, is_cantrip: bool = False, 
+                         source: str = 'class') -> int:
+        """Add a spell to character's known spells"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                cursor = await db.execute("""
+                    INSERT INTO character_spells (character_id, spell_id, spell_name, 
+                        spell_level, is_cantrip, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (character_id, spell_id, spell_name, spell_level, 
+                      1 if is_cantrip else 0, source, now))
+                await db.commit()
+                return cursor.lastrowid
+            except Exception:
+                # Spell already known
+                return -1
+    
+    async def forget_spell(self, character_id: int, spell_id: str) -> bool:
+        """Remove a spell from character's known spells"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                DELETE FROM character_spells 
+                WHERE character_id = ? AND spell_id = ?
+            """, (character_id, spell_id))
+            await db.commit()
+            return cursor.rowcount > 0
+    
+    async def get_character_spells(self, character_id: int, 
+                                   prepared_only: bool = False) -> List[Dict[str, Any]]:
+        """Get all spells known by a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            query = "SELECT * FROM character_spells WHERE character_id = ?"
+            params = [character_id]
+            
+            if prepared_only:
+                query += " AND is_prepared = 1"
+            
+            query += " ORDER BY is_cantrip DESC, spell_level, spell_name"
+            
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def prepare_spell(self, character_id: int, spell_id: str, 
+                           prepare: bool = True) -> bool:
+        """Prepare or unprepare a spell"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                UPDATE character_spells SET is_prepared = ?
+                WHERE character_id = ? AND spell_id = ? AND is_cantrip = 0
+            """, (1 if prepare else 0, character_id, spell_id))
+            await db.commit()
+            return cursor.rowcount > 0
+    
+    async def get_spell_slots(self, character_id: int) -> Dict[int, Dict[str, int]]:
+        """Get spell slots for a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM spell_slots WHERE character_id = ?
+                ORDER BY slot_level
+            """, (character_id,))
+            rows = await cursor.fetchall()
+            
+            slots = {}
+            for row in rows:
+                slots[row['slot_level']] = {
+                    'total': row['total'],
+                    'remaining': row['remaining']
+                }
+            return slots
+    
+    async def set_spell_slots(self, character_id: int, 
+                             slots: Dict[int, int]) -> None:
+        """Set spell slot totals for a character (usually on level up)"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            for level, total in slots.items():
+                await db.execute("""
+                    INSERT INTO spell_slots (character_id, slot_level, total, remaining)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(character_id, slot_level) 
+                    DO UPDATE SET total = ?, remaining = ?
+                """, (character_id, level, total, total, total, total))
+            await db.commit()
+    
+    async def use_spell_slot(self, character_id: int, slot_level: int) -> bool:
+        """Use a spell slot. Returns False if no slots available."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT remaining FROM spell_slots 
+                WHERE character_id = ? AND slot_level = ?
+            """, (character_id, slot_level))
+            row = await cursor.fetchone()
+            
+            if not row or row[0] <= 0:
+                return False
+            
+            await db.execute("""
+                UPDATE spell_slots SET remaining = remaining - 1
+                WHERE character_id = ? AND slot_level = ?
+            """, (character_id, slot_level))
+            await db.commit()
+            return True
+    
+    async def restore_spell_slots(self, character_id: int, 
+                                  levels: List[int] = None) -> None:
+        """Restore spell slots (on rest). If levels is None, restore all."""
+        async with aiosqlite.connect(self.db_path) as db:
+            if levels:
+                for level in levels:
+                    await db.execute("""
+                        UPDATE spell_slots SET remaining = total
+                        WHERE character_id = ? AND slot_level = ?
+                    """, (character_id, level))
+            else:
+                await db.execute("""
+                    UPDATE spell_slots SET remaining = total
+                    WHERE character_id = ?
+                """, (character_id,))
+            await db.commit()
+    
+    async def add_ability(self, character_id: int, ability_id: str, ability_name: str,
+                         ability_type: str = 'class', max_uses: int = None,
+                         recharge: str = 'long_rest', properties: Dict = None) -> int:
+        """Add an ability/feature to a character"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                cursor = await db.execute("""
+                    INSERT INTO character_abilities (character_id, ability_id, ability_name,
+                        ability_type, uses_remaining, max_uses, recharge, properties, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (character_id, ability_id, ability_name, ability_type, 
+                      max_uses, max_uses, recharge, json.dumps(properties or {}), now))
+                await db.commit()
+                return cursor.lastrowid
+            except Exception:
+                return -1
+    
+    async def get_character_abilities(self, character_id: int) -> List[Dict[str, Any]]:
+        """Get all abilities for a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM character_abilities WHERE character_id = ?
+                ORDER BY ability_type, ability_name
+            """, (character_id,))
+            rows = await cursor.fetchall()
+            
+            abilities = []
+            for row in rows:
+                ability = dict(row)
+                ability['properties'] = json.loads(ability['properties'])
+                abilities.append(ability)
+            return abilities
+    
+    async def use_ability(self, character_id: int, ability_id: str) -> bool:
+        """Use an ability. Returns False if no uses remaining."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT uses_remaining, max_uses FROM character_abilities 
+                WHERE character_id = ? AND ability_id = ?
+            """, (character_id, ability_id))
+            row = await cursor.fetchone()
+            
+            if not row:
+                return False
+            
+            # Unlimited use ability
+            if row[1] is None:
+                return True
+            
+            # Check remaining uses
+            if row[0] is not None and row[0] <= 0:
+                return False
+            
+            await db.execute("""
+                UPDATE character_abilities SET uses_remaining = uses_remaining - 1
+                WHERE character_id = ? AND ability_id = ?
+            """, (character_id, ability_id))
+            await db.commit()
+            return True
+    
+    async def restore_abilities(self, character_id: int, 
+                               recharge_type: str = 'long_rest') -> None:
+        """Restore ability uses based on recharge type"""
+        async with aiosqlite.connect(self.db_path) as db:
+            if recharge_type == 'long_rest':
+                # Restore long rest and short rest abilities
+                await db.execute("""
+                    UPDATE character_abilities SET uses_remaining = max_uses
+                    WHERE character_id = ? AND max_uses IS NOT NULL
+                """, (character_id,))
+            else:
+                # Short rest - only restore short_rest abilities
+                await db.execute("""
+                    UPDATE character_abilities SET uses_remaining = max_uses
+                    WHERE character_id = ? AND recharge = 'short_rest' AND max_uses IS NOT NULL
+                """, (character_id,))
+            await db.commit()
     
     # ========================================================================
     # QUEST METHODS
@@ -1489,20 +1787,34 @@ class Database:
             await db.commit()
             return True
     
-    async def get_quests(self, guild_id: int, status: str = None) -> List[Dict[str, Any]]:
-        """Get quests for a guild, optionally filtered by status"""
+    async def get_quests(self, guild_id: int = None, session_id: int = None, status: str = None) -> List[Dict[str, Any]]:
+        """Get quests for a guild or session, optionally filtered by status"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+            
+            # Build query based on parameters
+            conditions = []
+            params = []
+            
+            if guild_id:
+                conditions.append("guild_id = ?")
+                params.append(guild_id)
+            
+            if session_id:
+                conditions.append("session_id = ?")
+                params.append(session_id)
+            
             if status:
-                cursor = await db.execute("""
-                    SELECT * FROM quests WHERE guild_id = ? AND status = ?
-                    ORDER BY created_at DESC
-                """, (guild_id, status))
-            else:
-                cursor = await db.execute("""
-                    SELECT * FROM quests WHERE guild_id = ?
-                    ORDER BY created_at DESC
-                """, (guild_id,))
+                conditions.append("status = ?")
+                params.append(status)
+            
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            
+            cursor = await db.execute(f"""
+                SELECT * FROM quests WHERE {where_clause}
+                ORDER BY created_at DESC
+            """, params)
+            
             rows = await cursor.fetchall()
             quests = []
             for row in rows:
@@ -1510,6 +1822,7 @@ class Database:
                 quest['objectives'] = json.loads(quest['objectives']) if quest.get('objectives') else []
                 quest['rewards'] = json.loads(quest['rewards']) if quest.get('rewards') else {}
                 quests.append(quest)
+            return quests
             return quests
     
     async def get_quest(self, quest_id: int) -> Optional[Dict[str, Any]]:
@@ -1706,6 +2019,15 @@ class Database:
             )
             row = await cursor.fetchone()
             return row['turn_count'] if row else 0
+    
+    async def save_game_state(self, session_id: int, **kwargs) -> bool:
+        """Save game state - creates if doesn't exist, updates if it does"""
+        existing = await self.get_game_state(session_id)
+        if existing:
+            return await self.update_game_state(session_id, **kwargs)
+        else:
+            await self.create_game_state(session_id, **kwargs)
+            return True
     
     # ========================================================================
     # CHARACTER INTERVIEW METHODS

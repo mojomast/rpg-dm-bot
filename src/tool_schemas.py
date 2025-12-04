@@ -946,6 +946,130 @@ GET_PLAYER_MEMORIES_SCHEMA = {
 
 
 # =============================================================================
+# SPELL & ABILITY TOOLS
+# =============================================================================
+
+GET_CHARACTER_SPELLS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_character_spells",
+        "description": "Get all spells known by a character, including cantrips and spell slots.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character's ID"
+                },
+                "prepared_only": {
+                    "type": "boolean",
+                    "description": "If true, only return prepared spells"
+                }
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+CAST_SPELL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "cast_spell",
+        "description": "Cast a spell for a character. Handles spell slot usage, damage/healing rolls, and effects.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character casting the spell"
+                },
+                "spell_id": {
+                    "type": "string",
+                    "description": "The ID of the spell to cast (e.g., 'fireball', 'cure_wounds')"
+                },
+                "slot_level": {
+                    "type": "integer",
+                    "description": "The spell slot level to use (not needed for cantrips)"
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target of the spell (creature name, character name, or 'self')"
+                }
+            },
+            "required": ["character_id", "spell_id"]
+        }
+    }
+}
+
+USE_ABILITY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "use_ability",
+        "description": "Use a class ability or feature for a character. Tracks limited uses.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character using the ability"
+                },
+                "ability_id": {
+                    "type": "string",
+                    "description": "The ID of the ability (e.g., 'second_wind', 'action_surge', 'sneak_attack')"
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target of the ability if applicable"
+                }
+            },
+            "required": ["character_id", "ability_id"]
+        }
+    }
+}
+
+GET_CHARACTER_ABILITIES_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_character_abilities",
+        "description": "Get all class abilities and features for a character.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character's ID"
+                }
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+REST_CHARACTER_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "rest_character",
+        "description": "Have a character take a short or long rest to recover resources.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character's ID"
+                },
+                "rest_type": {
+                    "type": "string",
+                    "enum": ["short", "long"],
+                    "description": "Type of rest - short (1 hour) or long (8 hours)"
+                }
+            },
+            "required": ["character_id", "rest_type"]
+        }
+    }
+}
+
+
+# =============================================================================
 # COLLECT ALL SCHEMAS
 # =============================================================================
 
@@ -994,6 +1118,12 @@ TOOLS_SCHEMA = [
     # Memory
     SAVE_MEMORY_SCHEMA,
     GET_PLAYER_MEMORIES_SCHEMA,
+    # Spells & Abilities
+    GET_CHARACTER_SPELLS_SCHEMA,
+    CAST_SPELL_SCHEMA,
+    USE_ABILITY_SCHEMA,
+    GET_CHARACTER_ABILITIES_SCHEMA,
+    REST_CHARACTER_SCHEMA,
 ]
 
 

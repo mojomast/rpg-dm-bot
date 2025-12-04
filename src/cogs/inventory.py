@@ -129,7 +129,11 @@ class Inventory(commands.Cog):
     def db(self):
         return self.bot.db
     
-    inventory_group = app_commands.Group(name="inventory", description="Inventory commands")
+    inventory_group = app_commands.Group(
+        name="inventory", 
+        description="Inventory commands",
+        guild_only=True
+    )
     
     @inventory_group.command(name="view", description="View your inventory")
     async def view_inventory(self, interaction: discord.Interaction):

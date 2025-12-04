@@ -2,9 +2,74 @@
 
 **Date:** December 3, 2025  
 **Project:** RPG Dungeon Master Discord Bot (adapted from ussybot)  
-**Status:** Core implementation complete, tests passing (104/116)
+**Status:** Core implementation complete, tests passing (112/127 tests)
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
+
+---
+
+## Latest Changes (December 3, 2025 - Session 2)
+
+### Issues Fixed:
+
+1. **Verbose Logging for API Requests**
+   - Updated `src/llm.py` to log full API request/response details at INFO level
+   - Logs now show: message contents (truncated at 500 chars), tool calls, responses
+   - Updated `src/bot.py` to show DEBUG level logs in console for rpg.llm logger
+
+2. **Game Start - Dungeon Master Silent Issue**
+   - The DM wasn't doing anything when a game started because the `begin_game` method wasn't properly passing game context
+   - Fixed `begin_game` in `src/cogs/game_master.py` to:
+     - Use `build_game_start_prompt()` which includes game name, description, and full party info with backstories
+     - Pass character backstories to the DM for quest crafting
+     - Save game state to database for persistence
+     - Log detailed info about game start
+
+3. **Character Info in DM Prompts**
+   - Updated `get_game_context()` in `src/cogs/dm_chat.py` to include:
+     - Game name and description
+     - All party members with HP and backstories
+     - Current game state (scene, location, DM notes)
+     - Session quest information
+
+4. **Created Game Persistence Cog** (`src/cogs/game_persistence.py`)
+   - New cog for managing game persistence between sessions
+   - **Story Commands** (`/story`):
+     - `/story log` - Add events to story log with type (combat, dialogue, discovery, quest, location, note)
+     - `/story recap` - View recent story events
+     - `/story summary` - AI-generated summary of adventure so far
+   - **Game State Commands**:
+     - `/resume` - Resume a paused/inactive game with full context restoration and AI recap
+     - `/save` - Manually save current game state with optional notes
+   - **Quest Commands** (`/quest`):
+     - `/quest current` - View current active quest with objectives
+     - `/quest list` - List all quests for the session
+   - **Auto-logging**: Automatically logs combat events, discoveries, and location changes from DM responses
+
+5. **Database Updates**
+   - Added `save_game_state()` method for create-or-update game state
+   - Updated `get_quests()` to accept optional `session_id` parameter
+
+### Files Modified:
+- `src/llm.py` - Verbose API logging
+- `src/bot.py` - Console log level, added game_persistence cog
+- `src/cogs/game_master.py` - Fixed begin_game to pass full context
+- `src/cogs/dm_chat.py` - Enhanced get_game_context with party/session info
+- `src/cogs/game_persistence.py` - **NEW** - Game/quest persistence cog
+- `src/database.py` - Added save_game_state(), updated get_quests()
+
+---
+
+## Previous Bug Fixes (December 3, 2025 - Session 1)
+
+### Fixed Issues:
+1. **KeyError: 'char_class'** - The database stores character class in a column named `class`, but code inconsistently used `char['char_class']`. Fixed by adding a `_normalize_character()` helper method.
+
+2. **TypeError: 'Command' object is not callable** - In `bot.py`, the `/menu` command tried to call `game_master.game_menu(interaction)` but `game_menu` is a discord command object. Fixed by calling callback properly.
+
+3. **'str' object has no attribute 'get'** - In `game_master.py`, the `llm.chat()` method returns a string directly, but the code tried to call `.get('content', '')` on it. Fixed to handle the string return type.
+
+4. **AttributeError: 'NoneType' object has no attribute 'get_member'** - Commands crashed in DMs. Fixed by adding `guild_only=True` to all command groups.
 
 ---
 
@@ -26,7 +91,7 @@ A Discord bot that enables multiplayer RPG gaming with an AI Dungeon Master powe
 - **Config:** python-dotenv for environment variables
 
 ### Key Design Patterns
-- **Cog Architecture:** 8 modular cogs for different gameplay systems
+- **Cog Architecture:** 10 modular cogs for different gameplay systems
 - **Database Abstraction:** Single `Database` class with async methods for all persistence
 - **LLM Integration:** Tool-based function calling (OpenAI format) with multi-round execution loops
 - **Tool Executor:** `ToolExecutor` class processes LLM function calls and executes game mechanics

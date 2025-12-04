@@ -79,9 +79,10 @@ class SessionView(discord.ui.View):
         for player in players:
             char = await self.bot.db.get_character(player['character_id'])
             if char:
+                char_class = char.get('char_class') or char.get('class', 'Unknown')
                 embed.add_field(
                     name=char['name'],
-                    value=f"Level {char['level']} {char['race']} {char['char_class']}",
+                    value=f"Level {char['level']} {char['race']} {char_class}",
                     inline=True
                 )
         
@@ -162,7 +163,11 @@ class Sessions(commands.Cog):
     def db(self):
         return self.bot.db
     
-    session_group = app_commands.Group(name="session", description="Session commands")
+    session_group = app_commands.Group(
+        name="session", 
+        description="Session commands",
+        guild_only=True
+    )
     
     @session_group.command(name="create", description="Create a new game session")
     async def create_session(self, interaction: discord.Interaction):
@@ -276,7 +281,8 @@ class Sessions(commands.Cog):
             for player in players:
                 char = await self.db.get_character(player['character_id'])
                 if char:
-                    player_list.append(f"• {char['name']} (Lv.{char['level']} {char['char_class']})")
+                    char_class = char.get('char_class') or char.get('class', 'Unknown')
+                    player_list.append(f"• {char['name']} (Lv.{char['level']} {char_class})")
             if player_list:
                 embed.add_field(
                     name="Party Members",

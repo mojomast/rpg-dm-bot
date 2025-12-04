@@ -23,6 +23,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Equipment Slots**: Weapon, armor, accessory slots with stat bonuses
 - **Gold Economy**: Earn and spend gold at shops
 - **Crafting**: Combine items to create new ones
+ - **Auto-Equip**: Starter kits and purchased equipment can be automatically equipped to appropriate slots (e.g., weapons to main hand, armor to body).
 
 ### 📜 Quest System
 - **Quest Planning**: DMs can create detailed quest plans with objectives
@@ -47,12 +48,21 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Session Tracking**: Track active sessions and participants
 - **Party System**: Form adventuring parties
 - **Shared Progress**: All players see the same story progression
+ - **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
 
 ### 🤖 AI Dungeon Master
 - **Dynamic Narration**: AI generates immersive story descriptions
 - **Contextual Responses**: Remembers campaign history and character actions
 - **NPC Dialogue**: Generates unique dialogue for NPCs
 - **Combat Descriptions**: Dramatic combat narration
+ - **API Tools & Spells Support**: The AI DM can cast spells, call spell/ability tool actions, and manage character resources programmatically.
+### 🪄 Spells & Abilities
+- **Spellcasting**: Classes that cast spells (Mage, Cleric, Bard, Warlock, Paladin, Ranger, etc.) have cantrips and leveled spells, spell slots, and upcasting support.
+- **Spellbook**: Characters can learn and prepare spells. Use `/spell learn` to add spells appropriate for your class and level.
+- **Spell Slots**: Spell slots are tracked and used when casting. Recover slots via long rest or through DM control. Use `/spell slots` to view available spell slots.
+- **Casting**: `/spell cast` supports cantrips (no slots), leveled spells with slot selection and upcasting, damage/healing/result summarization, and short description UI.
+- **Class Abilities**: Abilities like Second Wind, Action Surge, Sneak Attack, and Divine Smite are available and tracked with use counts.
+
 
 ## 🚀 Quick Start
 
@@ -107,6 +117,15 @@ python run.py
 | `/combat item` | Use an item |
 | `/combat flee` | Attempt to flee |
 | `/combat status` | View combat status |
+### Spells (`/spell`)
+| Command | Description |
+|---------|-------------|
+| `/spell cast` | Cast a spell from your known spells (opens a selection UI if unspecified) |
+| `/spell list` | View all spells your character knows and their prepared state |
+| `/spell learn` | Learn a new spell from your class spell list based on your level |
+| `/spell info` | Get detailed spell info (damage, saving throw, components, upcasting) |
+| `/spell slots` | View and manage your spell slots |
+
 
 ### Inventory Commands (`/inventory`)
 | Command | Description |
@@ -145,6 +164,7 @@ python run.py
 | `/session start` | Start a session |
 | `/session end` | End current session |
 | `/session players` | View party members |
+| `/game list` | Browse and manage available games using an interactive UI |
 
 ### Dice Commands (`/roll`)
 | Command | Description |
@@ -175,6 +195,7 @@ python run.py
 2. **Join a Campaign**: Use `/session join` to join an existing campaign
 3. **Interact with the World**: @mention the bot to talk to the DM
 4. **Roll Dice**: Use `/roll dice 1d20` for any rolls needed
+5. **Learn & Cast Spells**: If your class supports magic, use `/spell learn` to pick spells and `/spell cast` to cast them during play.
 
 ### For Dungeon Masters
 
@@ -182,6 +203,7 @@ python run.py
 2. **Plan Quests**: Use `/dm quest create` to set up adventures
 3. **Create NPCs**: Use `/dm npc create` to populate your world
 4. **Run Sessions**: Use `/session start` when ready to play
+5. **Manage Sessions**: Use `/game list` for a UI-driven game management experience including join, begin, pause, and reset conversation history.
 
 ## 🏗️ Project Structure
 
@@ -209,6 +231,7 @@ rpg-dm-bot/
 │       ├── quests.py      # Quest system
 │       ├── npcs.py        # NPC interactions
 │       ├── dice.py        # Dice rolling
+│       ├── spells.py      # Spells, spell slot management, and casting UI
 │       ├── sessions.py    # Session management
 │       ├── dm_chat.py     # AI chat/narration
 │       └── game_master.py # Game flow management

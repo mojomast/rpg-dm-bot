@@ -34,7 +34,7 @@ class TestCharacters:
         assert char is not None
         assert char['name'] == "Theron"
         assert char['race'] == "elf"
-        assert char['class'] == "ranger"
+        assert char['char_class'] == "ranger"
         assert char['level'] == 1
         assert char['strength'] == 16
         assert char['is_active'] == 1

@@ -191,6 +191,18 @@ class ToolExecutor:
             elif tool_name == "get_player_memories":
                 return await self._get_player_memories(context, tool_args)
             
+            # Spell & Ability tools
+            elif tool_name == "get_character_spells":
+                return await self._get_character_spells(tool_args)
+            elif tool_name == "cast_spell":
+                return await self._cast_spell(context, tool_args)
+            elif tool_name == "use_ability":
+                return await self._use_ability(tool_args)
+            elif tool_name == "get_character_abilities":
+                return await self._get_character_abilities(tool_args)
+            elif tool_name == "rest_character":
+                return await self._rest_character(tool_args)
+            
             else:
                 return f"Error: Unknown tool '{tool_name}'"
                 
@@ -220,7 +232,7 @@ class ToolExecutor:
         equipped = await self.db.get_equipped_items(char['id'])
         equipped_str = ", ".join([f"{i['item_name']} ({i['slot']})" for i in equipped]) or "None"
         
-        return f"""**{char['name']}** - Level {char['level']} {char['race']} {char['class']}
+        return f"""**{char['name']}** - Level {char['level']} {char['race']} {char['char_class']}
 HP: {char['hp']}/{char['max_hp']} | Mana: {char['mana']}/{char['max_mana']} | Gold: {char['gold']}
 STR: {char['strength']} | DEX: {char['dexterity']} | CON: {char['constitution']}
 INT: {char['intelligence']} | WIS: {char['wisdom']} | CHA: {char['charisma']}
@@ -854,10 +866,11 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
         if not participants:
             return "No players in session."
         
-        lines = [f"**Party ({session['name']}):**"]
+        lines = [f"**Party ({session['name']}) - Session ID: {session['id']}:**"]
         for p in participants:
             if p.get('character_name'):
-                lines.append(f"- {p['character_name']} (Lvl {p['level']} {p['character_class']})")
+                char_id = p.get('character_id', '?')
+                lines.append(f"- {p['character_name']} [ID: {char_id}] (Lvl {p['level']} {p['character_class']})")
             else:
                 lines.append(f"- <@{p['user_id']}> (no character)")
         
@@ -931,3 +944,311 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             lines.append(f"- {key}: {value}")
         
         return "\n".join(lines)
+    
+    # =========================================================================
+    # SPELL & ABILITY TOOL IMPLEMENTATIONS
+    # =========================================================================
+    
+    async def _get_character_spells(self, args: Dict) -> str:
+        """Get character's known spells"""
+        char_id = args.get('character_id')
+        prepared_only = args.get('prepared_only', False)
+        
+        if not char_id:
+            return "Error: character_id required"
+        
+        spells = await self.db.get_character_spells(char_id, prepared_only)
+        slots = await self.db.get_spell_slots(char_id)
+        
+        if not spells:
+            return "This character doesn't know any spells."
+        
+        lines = ["**Known Spells:**"]
+        
+        # Group by level
+        cantrips = [s for s in spells if s['is_cantrip']]
+        leveled = {}
+        for s in spells:
+            if not s['is_cantrip']:
+                lvl = s['spell_level']
+                if lvl not in leveled:
+                    leveled[lvl] = []
+                leveled[lvl].append(s)
+        
+        if cantrips:
+            lines.append(f"✨ Cantrips: {', '.join([s['spell_name'] for s in cantrips])}")
+        
+        for lvl in sorted(leveled.keys()):
+            slot_info = f" ({slots.get(lvl, {}).get('remaining', 0)} slots)" if slots else ""
+            lines.append(f"📖 Level {lvl}{slot_info}: {', '.join([s['spell_name'] for s in leveled[lvl]])}")
+        
+        if slots:
+            lines.append("\n**Spell Slots:**")
+            for lvl, data in sorted(slots.items()):
+                lines.append(f"  Level {lvl}: {data['remaining']}/{data['total']}")
+        
+        return "\n".join(lines)
+    
+    async def _cast_spell(self, context: Dict, args: Dict) -> str:
+        """Cast a spell for a character"""
+        import json
+        import os
+        
+        char_id = args.get('character_id')
+        spell_id = args.get('spell_id')
+        slot_level = args.get('slot_level')
+        target = args.get('target', 'target')
+        
+        if not char_id or not spell_id:
+            return "Error: character_id and spell_id required"
+        
+        # Load spell data
+        spells_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'game_data', 'spells.json')
+        try:
+            with open(spells_file, 'r', encoding='utf-8') as f:
+                spells_data = json.load(f)
+        except FileNotFoundError:
+            return "Error: Spell data not found"
+        
+        spell = spells_data.get('spells', {}).get(spell_id)
+        if not spell:
+            return f"Error: Unknown spell '{spell_id}'"
+        
+        # Check if character knows the spell
+        known_spells = await self.db.get_character_spells(char_id)
+        if not any(s['spell_id'] == spell_id for s in known_spells):
+            return f"Character doesn't know {spell['name']}!"
+        
+        char = await self.db.get_character(char_id)
+        char_name = char['name'] if char else "Character"
+        
+        # Handle cantrips (no slot needed)
+        is_cantrip = spell['level'] == 0
+        
+        if not is_cantrip:
+            # Use spell slot
+            if not slot_level:
+                slot_level = spell['level']
+            
+            if slot_level < spell['level']:
+                return f"Cannot cast {spell['name']} with a level {slot_level} slot (requires level {spell['level']})"
+            
+            success = await self.db.use_spell_slot(char_id, slot_level)
+            if not success:
+                return f"No level {slot_level} spell slots remaining!"
+        
+        # Calculate effects
+        result_parts = [f"✨ **{char_name}** casts **{spell['name']}**!"]
+        
+        if target:
+            result_parts.append(f"*Target: {target}*")
+        
+        # Handle damage
+        if spell.get('damage'):
+            damage_dice = spell['damage']
+            
+            # Apply cantrip scaling based on level
+            if is_cantrip and spell.get('scaling') and char:
+                char_level = char.get('level', 1)
+                for level_threshold, scaled_damage in sorted(spell['scaling'].items(), key=lambda x: int(x[0]), reverse=True):
+                    if char_level >= int(level_threshold):
+                        damage_dice = scaled_damage
+                        break
+            
+            # Apply upcast bonus
+            upcast_levels = (slot_level - spell['level']) if slot_level else 0
+            if upcast_levels > 0 and spell.get('upcast') and '+1d' in spell.get('upcast', ''):
+                import re
+                match = re.search(r'\+1d(\d+)', spell['upcast'])
+                if match:
+                    damage_dice = f"{damage_dice}+{upcast_levels}d{match.group(1)}"
+            
+            roll_result = self.dice.roll(damage_dice)
+            damage_type = spell.get('damage_type', 'magical')
+            result_parts.append(f"💥 **{roll_result['total']}** {damage_type} damage!")
+            result_parts.append(f"🎲 Rolled {damage_dice}: {roll_result['rolls']}")
+            
+            if spell.get('save'):
+                result_parts.append(f"🛡️ {spell['save'].upper()} save for half damage")
+        
+        # Handle healing
+        elif spell.get('healing'):
+            healing_dice = spell['healing'].replace(' + spellcasting modifier', '')
+            
+            # Add spellcasting modifier
+            if char:
+                char_class = char.get('char_class', '').lower()
+                if char_class in ['cleric', 'paladin', 'ranger', 'druid']:
+                    mod = (char.get('wisdom', 10) - 10) // 2
+                elif char_class in ['bard', 'warlock']:
+                    mod = (char.get('charisma', 10) - 10) // 2
+                else:
+                    mod = (char.get('intelligence', 10) - 10) // 2
+                
+                if mod > 0:
+                    healing_dice = f"{healing_dice}+{mod}"
+            
+            # Apply upcast
+            upcast_levels = (slot_level - spell['level']) if slot_level else 0
+            if upcast_levels > 0 and spell.get('upcast') and '+1d' in spell.get('upcast', ''):
+                import re
+                match = re.search(r'\+1d(\d+)', spell['upcast'])
+                if match:
+                    healing_dice = f"{healing_dice}+{upcast_levels}d{match.group(1)}"
+            
+            roll_result = self.dice.roll(healing_dice)
+            result_parts.append(f"💚 **{roll_result['total']}** HP healed!")
+            result_parts.append(f"🎲 Rolled {healing_dice}: {roll_result['rolls']}")
+        
+        # Handle effects
+        elif spell.get('effect'):
+            result_parts.append(f"✨ Effect: {spell['effect']}")
+        
+        # Show spell description snippet
+        if spell.get('description'):
+            result_parts.append(f"*{spell['description'][:150]}...*" if len(spell.get('description', '')) > 150 else f"*{spell['description']}*")
+        
+        return "\n".join(result_parts)
+    
+    async def _use_ability(self, args: Dict) -> str:
+        """Use a class ability"""
+        import json
+        import os
+        
+        char_id = args.get('character_id')
+        ability_id = args.get('ability_id')
+        target = args.get('target')
+        
+        if not char_id or not ability_id:
+            return "Error: character_id and ability_id required"
+        
+        # Check if character has the ability
+        abilities = await self.db.get_character_abilities(char_id)
+        ability = next((a for a in abilities if a['ability_id'] == ability_id), None)
+        
+        if not ability:
+            return f"Character doesn't have the ability '{ability_id}'!"
+        
+        # Try to use it (checks uses remaining)
+        success = await self.db.use_ability(char_id, ability_id)
+        
+        if not success:
+            return f"No uses remaining for {ability['ability_name']}! Rest to recover."
+        
+        char = await self.db.get_character(char_id)
+        char_name = char['name'] if char else "Character"
+        
+        # Load ability data for effects
+        classes_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'game_data', 'classes.json')
+        try:
+            with open(classes_file, 'r', encoding='utf-8') as f:
+                classes_data = json.load(f)
+        except FileNotFoundError:
+            classes_data = {}
+        
+        ability_info = classes_data.get('abilities', {}).get(ability_id, {})
+        description = ability_info.get('description', ability['ability_name'])
+        
+        result_parts = [f"⚡ **{char_name}** uses **{ability['ability_name']}**!"]
+        
+        if target:
+            result_parts.append(f"*Target: {target}*")
+        
+        result_parts.append(f"📜 {description}")
+        
+        # Handle specific abilities
+        if ability_id == 'second_wind' and char:
+            # Heal 1d10 + level
+            healing = self.dice.roll(f"1d10+{char.get('level', 1)}")
+            new_hp = min(char['hp'] + healing['total'], char['max_hp'])
+            await self.db.update_character(char_id, hp=new_hp)
+            result_parts.append(f"💚 Recovered **{healing['total']}** HP! (Now at {new_hp}/{char['max_hp']})")
+        
+        elif ability_id == 'action_surge':
+            result_parts.append("⚔️ You can take an additional action this turn!")
+        
+        elif ability_id == 'sneak_attack' and char:
+            level = char.get('level', 1)
+            sneak_dice = f"{(level + 1) // 2}d6"
+            damage = self.dice.roll(sneak_dice)
+            result_parts.append(f"🗡️ Sneak Attack deals **{damage['total']}** extra damage!")
+            result_parts.append(f"🎲 Rolled {sneak_dice}: {damage['rolls']}")
+        
+        elif ability_id == 'bardic_inspiration':
+            result_parts.append("🎵 Target gains a d6 inspiration die to add to a roll!")
+        
+        elif ability_id == 'lay_on_hands' and char:
+            pool = char.get('level', 1) * 5
+            result_parts.append(f"✋ Healing pool: {pool} HP available")
+        
+        # Show uses remaining
+        if ability.get('max_uses'):
+            uses_after = ability.get('uses_remaining', 0) - 1
+            result_parts.append(f"*({uses_after}/{ability['max_uses']} uses remaining)*")
+        
+        return "\n".join(result_parts)
+    
+    async def _get_character_abilities(self, args: Dict) -> str:
+        """Get character's class abilities"""
+        char_id = args.get('character_id')
+        
+        if not char_id:
+            return "Error: character_id required"
+        
+        abilities = await self.db.get_character_abilities(char_id)
+        
+        if not abilities:
+            return "Character has no special abilities."
+        
+        lines = ["**Class Abilities:**"]
+        
+        for a in abilities:
+            uses_text = ""
+            if a.get('max_uses'):
+                uses_text = f" ({a.get('uses_remaining', 0)}/{a['max_uses']} uses)"
+            
+            lines.append(f"⚡ **{a['ability_name']}**{uses_text}")
+        
+        return "\n".join(lines)
+    
+    async def _rest_character(self, args: Dict) -> str:
+        """Have a character take a rest"""
+        char_id = args.get('character_id')
+        rest_type = args.get('rest_type', 'long')
+        
+        if not char_id:
+            return "Error: character_id required"
+        
+        char = await self.db.get_character(char_id)
+        if not char:
+            return "Character not found."
+        
+        char_name = char['name']
+        result_parts = []
+        
+        if rest_type == 'long':
+            # Long rest: full HP, all spell slots, all abilities
+            await self.db.update_character(char_id, hp=char['max_hp'])
+            await self.db.restore_spell_slots(char_id)
+            await self.db.restore_abilities(char_id, 'long_rest')
+            
+            result_parts.append(f"🌙 **{char_name}** takes a long rest...")
+            result_parts.append(f"💚 HP fully restored: {char['max_hp']}/{char['max_hp']}")
+            result_parts.append("💫 All spell slots recovered")
+            result_parts.append("⚡ All abilities recharged")
+            
+        else:  # Short rest
+            # Short rest: spend hit dice (simplified), some abilities
+            await self.db.restore_abilities(char_id, 'short_rest')
+            
+            # Heal some HP (1d8 + con mod per hit die spent, simplified to just 1)
+            con_mod = (char.get('constitution', 10) - 10) // 2
+            healing = self.dice.roll(f"1d8+{con_mod}")['total']
+            new_hp = min(char['hp'] + healing, char['max_hp'])
+            await self.db.update_character(char_id, hp=new_hp)
+            
+            result_parts.append(f"☕ **{char_name}** takes a short rest...")
+            result_parts.append(f"💚 Recovered {healing} HP (now {new_hp}/{char['max_hp']})")
+            result_parts.append("⚡ Short rest abilities recharged")
+        
+        return "\n".join(result_parts)

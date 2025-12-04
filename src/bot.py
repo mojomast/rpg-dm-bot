@@ -5,6 +5,7 @@ An AI-powered Discord bot for running tabletop RPG games
 
 import os
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
@@ -29,9 +30,11 @@ logging.basicConfig(
     ]
 )
 
-logging.getLogger().handlers[1].setLevel(logging.INFO)
+# Show INFO and above in console (including our LLM API logs)
+logging.getLogger().handlers[1].setLevel(logging.DEBUG)
 logging.getLogger('aiosqlite').setLevel(logging.WARNING)
 logging.getLogger('discord').setLevel(logging.INFO)
+logging.getLogger('rpg.llm').setLevel(logging.DEBUG)
 
 logger = logging.getLogger('rpg')
 logger.info(f"Logging to file: {log_filename}")
@@ -113,6 +116,8 @@ class RPGBot(commands.Bot):
             'src.cogs.sessions',
             'src.cogs.dm_chat',
             'src.cogs.game_master',
+            'src.cogs.game_persistence',
+            'src.cogs.spells',
         ]
         
         for cog in cogs:
@@ -284,12 +289,14 @@ async def help_command(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="menu", description="Open the interactive game menu")
+@app_commands.guild_only()
 async def menu(interaction: discord.Interaction):
     """Show interactive menu - redirects to /game menu"""
     # Get the GameMaster cog
     game_master = bot.get_cog('GameMaster')
     if game_master:
-        await game_master.game_menu(interaction)
+        # Call the underlying callback method, not the Command object
+        await game_master.game_menu.callback(game_master, interaction)
     else:
         embed = discord.Embed(
             title="🎲 RPG Menu",

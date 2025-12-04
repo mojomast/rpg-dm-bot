@@ -210,7 +210,7 @@ Only respond with the NPC's dialogue and actions (in *asterisks* for actions).""
                 *self.parent.conversation_history
             ]
             
-            response = await self.parent.bot.llm.chat(messages, max_tokens=300)
+            response = await self.parent.bot.llm.chat(messages, max_tokens=15000)
             npc_response = response
             
         except Exception as e:
@@ -252,7 +252,11 @@ class NPCs(commands.Cog):
     def db(self):
         return self.bot.db
     
-    npc_group = app_commands.Group(name="npc", description="NPC commands")
+    npc_group = app_commands.Group(
+        name="npc", 
+        description="NPC commands",
+        guild_only=True
+    )
     
     @npc_group.command(name="create", description="Create a new NPC (DM only)")
     @app_commands.describe(npc_type="Type of NPC to create")

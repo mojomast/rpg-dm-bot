@@ -45,6 +45,7 @@ DM_CAPABILITIES = """**Your Capabilities:**
 - Remember character backstories and player preferences
 - Adapt the story based on player choices
 - Award experience and treasure appropriately
+- Create and manage locations, story items, and events
 
 **Available Tools (use these to manage the game):**
 
@@ -66,18 +67,51 @@ Combat Tools:
 - `roll_initiative` - Roll initiative for all combatants
 - `deal_damage` - Deal damage to a combatant
 - `apply_status` - Apply a status effect
-- `end_combat` - End the current combat
+- `end_combat` - End combat normally
+- `end_combat_with_rewards` - End combat with auto XP/loot distribution (USE THIS for victories!)
 
 Quest Management:
 - `create_quest` - Create a new quest
 - `update_quest` - Modify quest details
 - `complete_objective` - Mark objective complete
-- `give_quest_rewards` - Distribute quest rewards
+- `give_quest_rewards` - Distribute quest rewards manually
+- `complete_quest_with_rewards` - Complete quest and auto-distribute rewards (PREFERRED!)
 
 NPC Tools:
 - `get_npc_info` - Get NPC details for roleplay
 - `create_npc` - Create a new NPC on the fly
+- `generate_npc` - AI-assisted NPC creation with templates
 - `update_npc_relationship` - Change NPC disposition
+- `get_npcs_at_location` - See what NPCs are at a location
+
+Location & Movement Tools:
+- `create_location` - Create a new location in the world
+- `get_location` - Get details about a location
+- `get_nearby_locations` - Find connected/nearby areas
+- `update_location` - Modify location properties
+- `move_party_to_location` - Move entire party to a location
+- `move_character_to_location` - Move a single character
+- `get_characters_at_location` - See who's at a location
+- `explore_location` - Player explores area (finds NPCs, items, events, exits)
+
+Story Item Tools:
+- `create_story_item` - Create a narrative-important item
+- `reveal_story_item` - Character discovers an item
+- `transfer_story_item` - Move item to new holder
+- `get_story_items` - List story items in play
+- `pickup_story_item` - Character picks up an item (marks discovered, transfers)
+- `drop_story_item` - Character drops item at current location
+
+Story Event Tools:
+- `create_story_event` - Create a campaign event
+- `trigger_event` - Activate a pending event
+- `resolve_event` - Complete an event with outcome
+- `get_active_events` - See ongoing events
+
+Rest & Recovery:
+- `rest_character` - Basic rest (legacy)
+- `long_rest` - Full 8-hour rest (full HP/mana, clears effects, logs to session)
+- `short_rest` - 1-hour rest (25% HP, 50% mana recovery)
 
 Dice Rolling:
 - `roll_dice` - Roll any dice for checks/saves
@@ -88,10 +122,25 @@ Session Tools:
 - `get_party_info` - Get info about all party members
 - `add_story_entry` - Log important story events
 - `get_story_log` - Recall recent story events
+- `get_comprehensive_session_state` - Get FULL context (party, location, NPCs, quests, events)
 
 Memory Tools:
 - `save_memory` - Remember something about a player
 - `get_player_memories` - Recall player preferences
+
+Spell & Ability Tools:
+- `get_character_spells` - View character's known spells and spell slots
+- `cast_spell` - Cast a spell (uses spell slot, applies effects)
+- `get_character_abilities` - View character's class features and abilities
+- `use_ability` - Use a class ability (tracks uses/cooldowns)
+
+Skill Check Tools:
+- `roll_skill_check` - Roll skill check with appropriate stat modifier
+
+Leveling & Progression:
+- Characters level up automatically when XP thresholds are reached
+- Use `add_experience` to award XP after encounters/quests
+- Level ups grant: +HP, +mana (for casters), new abilities, skill points
 
 **CRITICAL RULES:**
 1. ALWAYS use tools to make mechanical changes (HP, gold, items, XP)
@@ -99,7 +148,16 @@ Memory Tools:
 3. Track combat properly - use initiative and turn order
 4. Be consistent with the rules but prioritize fun
 5. Reward creativity and good roleplay with bonuses
-6. When in doubt, ask for a roll to determine outcomes"""
+6. When in doubt, ask for a roll to determine outcomes
+7. Use `explore_location` when players look around or search
+8. Use `pickup_story_item` when players take narrative items
+9. Use `long_rest`/`short_rest` for proper recovery with session tracking
+10. Use `end_combat_with_rewards` when combat ends in victory for auto XP/loot
+11. Use `complete_quest_with_rewards` to auto-distribute quest rewards
+12. Use `get_comprehensive_session_state` at session start to get full context
+13. Use `get_character_spells` to check what spells a character knows before combat
+14. Use `cast_spell` when players want to cast - it handles slot usage automatically
+15. Award XP for roleplay, creative solutions, and combat victories"""
 
 DM_NARRATION_STYLE = """**Narration Guidelines:**
 
@@ -186,13 +244,196 @@ PHASE 2: [Name]
 This plan is for YOUR reference - adapt based on player actions!"""
 
 
+# =============================================================================
+# WORLD-BUILDING PROMPTS
+# =============================================================================
+
+LOCATION_DESCRIPTION_STYLE = """**Location Description Guidelines:**
+
+When describing locations, make them feel alive and memorable:
+
+**Essential Elements:**
+- Atmosphere: Lighting, sounds, smells, temperature
+- Scale: Size, layout, notable features
+- Activity: Who/what is present, what's happening
+- Interactive Elements: Things players can examine, touch, or use
+- Hidden Details: Secrets for observant players to discover
+
+**Location Types:**
+- **Towns/Cities**: Focus on culture, commerce, notable buildings, local color
+- **Dungeons**: Emphasize danger, mystery, clues to history, tactical terrain
+- **Wilderness**: Weather, wildlife, terrain challenges, natural beauty/danger
+- **Interiors**: Furnishings, atmosphere, occupants, points of interest
+
+**Transitions:**
+- When players travel, describe the journey briefly
+- Arriving at a new location should feel significant
+- Reference previous visits to familiar locations
+- Note changes since last visit (new NPCs, weather, events)
+
+**Example Structure:**
+1. First impression (1-2 sentences)
+2. Sensory details (sight, sound, smell)
+3. Notable features or inhabitants
+4. Hook or element that invites exploration"""
+
+STORY_EVENT_GUIDELINES = """**Story Event Management:**
+
+Story events add dynamism and urgency to the campaign:
+
+**Event Types:**
+- **Main Plot**: Core story beats that drive the campaign forward
+- **Side Events**: Optional encounters that enrich the world
+- **Random Events**: Unexpected occurrences that add variety
+- **Scheduled Events**: Time-sensitive happenings (festivals, executions, arrivals)
+
+**Running Events:**
+1. Foreshadow upcoming events when appropriate
+2. Introduce events dramatically when they trigger
+3. Give players agency in how they respond
+4. Track consequences of player choices
+5. Resolve events satisfyingly (success, failure, or complication)
+
+**Event Pacing:**
+- Don't overwhelm players with too many simultaneous events
+- Allow breathing room between major events
+- Let players drive the pace when possible
+- Inject urgency when the story needs momentum
+
+**Linking Events:**
+- Connect events to character backstories when possible
+- Callback to previous events and their consequences
+- Build event chains that feel organic
+- Allow player actions to spawn new events"""
+
+STORY_ITEM_DISCOVERY = """**Story Item Management:**
+
+Story items are special narrative objects that drive the plot:
+
+**Item Categories:**
+- **Artifacts**: Powerful magical items with history
+- **Clues**: Evidence that advances investigation
+- **Keys**: Items that unlock access or progress
+- **McGuffins**: Objects of desire that drive conflict
+- **Letters/Documents**: Information carriers
+- **Personal Effects**: Items tied to NPCs or backstories
+
+**Discovery Moments:**
+- Make finding story items feel significant
+- Describe the item with sensory detail
+- Hint at its importance or history
+- Let players examine and interact with it
+
+**Item Lore:**
+- Each story item should have a history
+- Connect items to the world and its inhabitants
+- Reveal lore gradually through examination, research, or NPCs
+- Some lore should only be discoverable through specific means
+
+**Using Story Items:**
+- Items should create narrative opportunities
+- Track who holds each significant item
+- Items can be lost, stolen, or traded
+- Some items may have hidden properties"""
+
+NPC_GENERATION_GUIDANCE = """**NPC Creation Guidelines:**
+
+Create memorable NPCs that enrich the world:
+
+**Core Elements:**
+- **Name**: Fitting for their culture/background
+- **Appearance**: 1-2 distinctive physical traits
+- **Personality**: 2-3 defining characteristics
+- **Voice**: Unique speech pattern or verbal quirks
+- **Secret**: Something they're hiding or deeply desire
+- **Motivation**: What drives their actions
+
+**NPC Templates:**
+
+*MERCHANT*: Friendly but shrewd, knows local gossip, always looking for profit
+- Secret: Hidden side business or knows something dangerous
+- Voice: Talks about value, uses trade metaphors
+
+*GUARD*: Professional, wary of strangers, loyal to their post
+- Secret: Corruption, hidden sympathies, or personal mission
+- Voice: Formal, references duty and law
+
+*SCHOLAR*: Curious, absent-minded, passionate about their subject
+- Secret: Forbidden knowledge, past failure, or hidden discovery
+- Voice: Uses academic terms, gets excited about topics
+
+*INNKEEPER*: Welcoming, loves stories, protective of establishment
+- Secret: Hears everything, may have checkered past
+- Voice: Warm, offers food/drink, trades in rumors
+
+*NOBLE*: Proud, politically savvy, concerned with status
+- Secret: Family scandal, debt, forbidden love, or plot
+- Voice: Formal, expects deference, speaks in allegiances
+
+*CRIMINAL*: Streetwise, cautious, loyal to their own
+- Secret: Code of honor, redemption desire, or big score planned
+- Voice: Slang, indirect references, tests trust
+
+*MYSTIC*: Cryptic, insightful, somewhat otherworldly
+- Secret: True nature, prophetic burden, or past tragedy
+- Voice: Metaphorical, references fate and omens
+
+**Customization:**
+- Mix traits from multiple templates
+- Add unique quirks based on player requests
+- Connect NPCs to existing characters and events
+- Let NPCs grow and change based on interactions"""
+
+PROACTIVE_DM_GUIDELINES = """
+**KEEPING THE GAME ALIVE:**
+
+You are responsible for keeping the game engaging and moving forward. Never let the game stall.
+
+After EVERY response, ensure you:
+1. Describe the outcome of the player's action
+2. Advance the scene or story in some way
+3. Present new information, choices, or challenges
+4. End with a prompt that invites the next action
+
+If a player seems unsure what to do:
+- Offer 2-3 clear options without being prescriptive
+- Have an NPC offer a suggestion or hint
+- Describe something new that catches their attention
+
+If players are taking too long:
+- Introduce a time-sensitive element
+- Have something happen that demands response
+- Move the story forward and describe what happens next
+
+**ACTION PROMPTS TO USE:**
+- "What do you do?"
+- "How do you respond?"
+- "Do you [option A] or [option B]?"
+- "[Character name], what's your move?"
+- "The choice is yours. What happens next?"
+- "Time is running out. What's the plan?"
+
+**THINGS TO AVOID:**
+- Ending on pure description with no hook
+- Waiting for players to figure out what's "supposed" to happen
+- Letting combat drag without narrative beats
+- Forgetting to acknowledge player actions
+- Being so open-ended that players don't know what to do
+"""
+
+
 def build_dm_system_prompt(
     session_context: Dict[str, Any] = None,
     party_info: List[Dict] = None,
     active_quest: Dict = None,
     combat_state: Dict = None,
     user_memories: Dict[str, Any] = None,
-    custom_instructions: str = None
+    custom_instructions: str = None,
+    current_location: Dict[str, Any] = None,
+    npcs_present: List[Dict] = None,
+    active_events: List[Dict] = None,
+    nearby_locations: List[Dict] = None,
+    story_items_here: List[Dict] = None
 ) -> str:
     """
     Build the DM system prompt with game context.
@@ -204,6 +445,11 @@ def build_dm_system_prompt(
         combat_state: Current combat state if in combat
         user_memories: Memories about players
         custom_instructions: Custom DM style preferences
+        current_location: Where the party currently is
+        npcs_present: NPCs at the current location
+        active_events: Active story events
+        nearby_locations: Connected locations/exits
+        story_items_here: Story items at current location
         
     Returns:
         Complete system prompt string
@@ -230,15 +476,92 @@ Setting: {session_context.get('setting', 'Fantasy World')}
 Session Notes: {session_context.get('session_notes', 'None')}
 """)
     
+    # Add current location context
+    if current_location:
+        loc_section = f"""
+**CURRENT LOCATION:**
+📍 **{current_location.get('name', 'Unknown')}** ({current_location.get('location_type', 'unknown')})
+{current_location.get('description', 'No description')}"""
+        
+        if current_location.get('current_weather'):
+            loc_section += f"\nWeather: {current_location['current_weather']}"
+        
+        danger = current_location.get('danger_level', 0)
+        if danger > 0:
+            danger_text = "⚠️ Low" if danger < 3 else "🔶 Moderate" if danger < 5 else "🔴 High" if danger < 8 else "☠️ Deadly"
+            loc_section += f"\nDanger Level: {danger_text}"
+        
+        if current_location.get('points_of_interest'):
+            poi = current_location['points_of_interest']
+            if isinstance(poi, list):
+                loc_section += f"\nPoints of Interest: {', '.join(poi)}"
+        
+        sections.append(loc_section)
+    
+    # Add nearby locations / exits
+    if nearby_locations:
+        exits = []
+        for loc in nearby_locations:
+            direction = f"({loc.get('direction', 'path')})" if loc.get('direction') else ""
+            exits.append(f"  - {loc.get('name', 'Unknown')} {direction}")
+        sections.append(f"""
+**EXITS / NEARBY AREAS:**
+{chr(10).join(exits)}
+""")
+    
+    # Add NPCs present
+    if npcs_present:
+        npc_lines = []
+        for npc in npcs_present:
+            merchant = " 🛒" if npc.get('is_merchant') else ""
+            disposition = npc.get('npc_type', 'neutral')
+            npc_lines.append(f"  - **{npc.get('name', 'Unknown')}**{merchant} ({disposition})")
+            if npc.get('personality'):
+                npc_lines.append(f"    _{npc['personality'][:80]}..._")
+        sections.append(f"""
+**NPCs PRESENT:**
+{chr(10).join(npc_lines)}
+""")
+    
+    # Add story items at location
+    if story_items_here:
+        items_lines = []
+        for item in story_items_here:
+            discovered = "✨" if item.get('is_discovered') else "🔍"
+            items_lines.append(f"  {discovered} {item.get('name', 'Unknown')} ({item.get('item_type', 'misc')})")
+        sections.append(f"""
+**STORY ITEMS HERE:**
+{chr(10).join(items_lines)}
+""")
+    
+    # Add active events
+    if active_events:
+        event_lines = []
+        for event in active_events:
+            event_lines.append(f"  ⚡ **{event.get('name', 'Unknown')}** ({event.get('event_type', 'unknown')})")
+            if event.get('description'):
+                event_lines.append(f"    _{event['description'][:100]}..._")
+        sections.append(f"""
+**ACTIVE EVENTS:**
+{chr(10).join(event_lines)}
+""")
+    
     # Add party info
     if party_info:
-        party_text = "\n".join([
-            f"- {p.get('character_name', 'Unknown')} ({p.get('character_class', '?')} Lvl {p.get('level', 1)})"
-            for p in party_info
-        ])
+        party_lines = []
+        for p in party_info:
+            hp = p.get('hp', 0)
+            max_hp = p.get('max_hp', 1)
+            hp_pct = int((hp / max(max_hp, 1)) * 100)
+            hp_bar = "🟢" if hp_pct > 50 else "🟡" if hp_pct > 25 else "🔴"
+            party_lines.append(
+                f"  {hp_bar} {p.get('character_name', p.get('name', 'Unknown'))} "
+                f"({p.get('character_class', p.get('char_class', '?'))} Lvl {p.get('level', 1)}) "
+                f"- {hp}/{max_hp} HP"
+            )
         sections.append(f"""
 **THE PARTY:**
-{party_text}
+{chr(10).join(party_lines)}
 """)
     
     # Add active quest
@@ -738,3 +1061,517 @@ If players are taking too long:
 - Forgetting to acknowledge player actions
 - Being so open-ended that players don't know what to do
 """
+
+
+# =============================================================================
+# WORLD-BUILDING CONTEXT BUILDERS
+# =============================================================================
+
+def build_location_context(
+    current_location: Dict[str, Any] = None,
+    nearby_locations: List[Dict] = None,
+    npcs_present: List[Dict] = None
+) -> str:
+    """Build context about the current location for the DM."""
+    if not current_location:
+        return ""
+    
+    sections = []
+    
+    # Current location info
+    location_text = f"""
+**CURRENT LOCATION:**
+Name: {current_location.get('name', 'Unknown')}
+Type: {current_location.get('location_type', 'Unknown')}
+Description: {current_location.get('description', 'No description')}
+Weather: {current_location.get('current_weather', 'Normal')}
+Danger Level: {current_location.get('danger_level', 0)}/10"""
+    
+    # Points of interest
+    pois = current_location.get('points_of_interest', [])
+    if pois:
+        poi_text = ", ".join(pois) if isinstance(pois, list) else pois
+        location_text += f"\nPoints of Interest: {poi_text}"
+    
+    # DM-only secrets
+    secrets = current_location.get('hidden_secrets')
+    if secrets:
+        location_text += f"\n[DM ONLY] Hidden Secrets: {secrets}"
+    
+    sections.append(location_text)
+    
+    # Nearby locations
+    if nearby_locations:
+        nearby_text = "\n**NEARBY LOCATIONS:**\n" + "\n".join([
+            f"- {loc.get('name', '?')} ({loc.get('location_type', '?')})"
+            for loc in nearby_locations
+        ])
+        sections.append(nearby_text)
+    
+    # NPCs present
+    if npcs_present:
+        npc_text = "\n**NPCs PRESENT:**\n" + "\n".join([
+            f"- {npc.get('name', '?')} - {npc.get('personality', 'Unknown')[:50]}..."
+            for npc in npcs_present
+        ])
+        sections.append(npc_text)
+    
+    return "\n".join(sections)
+
+
+def build_active_events_context(
+    active_events: List[Dict] = None,
+    pending_events: List[Dict] = None
+) -> str:
+    """Build context about active and pending story events."""
+    if not active_events and not pending_events:
+        return ""
+    
+    sections = []
+    
+    if active_events:
+        active_text = "\n**ACTIVE STORY EVENTS:**"
+        for event in active_events:
+            active_text += f"\n- [{event.get('event_type', 'event').upper()}] {event.get('name', 'Unknown')}"
+            active_text += f"\n  Status: {event.get('status', 'active')}"
+            if event.get('dm_notes'):
+                active_text += f"\n  [DM] {event.get('dm_notes')[:100]}..."
+        sections.append(active_text)
+    
+    if pending_events:
+        pending_text = "\n**PENDING EVENTS (may trigger soon):**"
+        for event in pending_events[:3]:  # Show max 3 pending
+            pending_text += f"\n- {event.get('name', 'Unknown')}"
+            trigger = event.get('trigger_conditions')
+            if trigger:
+                pending_text += f" (triggers: {trigger[:50]}...)"
+        sections.append(pending_text)
+    
+    return "\n".join(sections)
+
+
+def build_story_items_context(
+    story_items: List[Dict] = None,
+    in_party_possession: bool = True
+) -> str:
+    """Build context about story items."""
+    if not story_items:
+        return ""
+    
+    header = "**STORY ITEMS IN PARTY'S POSSESSION:**" if in_party_possession else "**KNOWN STORY ITEMS:**"
+    
+    items_text = f"\n{header}"
+    for item in story_items:
+        items_text += f"\n- {item.get('name', 'Unknown')} ({item.get('item_type', 'item')})"
+        if item.get('lore'):
+            items_text += f"\n  Lore: {item.get('lore')[:100]}..."
+        if item.get('dm_notes'):
+            items_text += f"\n  [DM] {item.get('dm_notes')[:80]}..."
+    
+    return items_text
+
+
+def build_npc_generation_prompt(
+    template: str = None,
+    custom_traits: Dict[str, Any] = None,
+    location: str = None,
+    purpose: str = None
+) -> str:
+    """Build prompt for generating an NPC with template and customization."""
+    
+    base_prompt = """You are creating a memorable NPC for a fantasy RPG.
+
+**GENERATION GUIDELINES:**
+- Give them a fitting name for their culture/setting
+- Describe 1-2 distinctive physical features
+- Define 2-3 personality traits
+- Create a unique voice/speech pattern
+- Give them a secret or hidden motivation
+- Ensure they feel like a real person, not a stereotype
+"""
+    
+    if template:
+        template_guidance = {
+            "merchant": "Base this NPC on the MERCHANT template: shrewd but fair trader, knows gossip, motivated by profit. Add a hidden side business or dangerous knowledge.",
+            "guard": "Base this NPC on the GUARD template: professional, wary, loyal. Add hints of corruption, hidden sympathies, or a personal mission.",
+            "scholar": "Base this NPC on the SCHOLAR template: curious, absent-minded, passionate about knowledge. Add forbidden lore, past failures, or a hidden discovery.",
+            "innkeeper": "Base this NPC on the INNKEEPER template: welcoming, loves stories, protective of their establishment. They hear everything and may have a checkered past.",
+            "noble": "Base this NPC on the NOBLE template: proud, politically savvy, status-conscious. Add family scandal, debt, forbidden love, or political plotting.",
+            "criminal": "Base this NPC on the CRIMINAL template: streetwise, cautious, loyal to their crew. Add a code of honor, desire for redemption, or plans for a big score.",
+            "mystic": "Base this NPC on the MYSTIC template: cryptic, insightful, otherworldly. Add hidden true nature, prophetic burden, or tragic past.",
+            "peasant": "Base this NPC on the PEASANT template: humble, hardworking, struggling. Add local knowledge, hidden talents, or desperate circumstances.",
+            "adventurer": "Create a fellow adventurer NPC: experienced, capable, with their own quest. Add rivalry potential, shared history, or complementary skills.",
+            "villain": "Create a memorable antagonist: compelling motivation, genuine threat, but understandable goals. Add redemption potential or sympathetic backstory."
+        }
+        base_prompt += f"\n**TEMPLATE:**\n{template_guidance.get(template.lower(), f'Use the {template} archetype as a starting point.')}\n"
+    
+    if custom_traits:
+        custom_text = "\n**CUSTOMIZATIONS:**"
+        for key, value in custom_traits.items():
+            custom_text += f"\n- {key}: {value}"
+        base_prompt += custom_text + "\n"
+    
+    if location:
+        base_prompt += f"\n**LOCATION:** This NPC is found in/near: {location}\n"
+    
+    if purpose:
+        base_prompt += f"\n**PURPOSE:** This NPC's role in the story: {purpose}\n"
+    
+    base_prompt += """
+**OUTPUT FORMAT:**
+Provide the NPC details in this format:
+- Name: [Full name]
+- Appearance: [1-2 distinctive physical traits]
+- Personality: [2-3 defining traits]
+- Voice: [How they speak - accent, vocabulary, mannerisms]
+- Secret: [What they're hiding or deeply desire]
+- Motivation: [What drives their daily actions]
+- Hook: [How players might interact with or need this NPC]
+
+Make this NPC memorable and useful for gameplay!"""
+    
+    return base_prompt
+
+
+# =============================================================================
+# WORLDBUILDING / CAMPAIGN GENERATION PROMPTS
+# =============================================================================
+
+def build_world_generation_prompt(settings: Dict[str, Any]) -> str:
+    """Build a prompt for generating the campaign world setting."""
+    
+    prompt = f"""You are a master worldbuilder creating a {settings.get('world_theme', 'fantasy')} campaign setting.
+
+**WORLD PARAMETERS:**
+- Theme: {settings.get('world_theme', 'fantasy')}
+- Scale: {settings.get('world_scale', 'regional')} 
+- Magic Level: {settings.get('magic_level', 'high')}
+- Technology: {settings.get('technology_level', 'medieval')}
+- Tone: {settings.get('tone', 'heroic')}
+- Campaign Name: {settings.get('name', 'Untitled Campaign')}
+"""
+
+    if settings.get('world_description'):
+        prompt += f"\n**DM'S VISION:**\n{settings.get('world_description')}\n"
+    
+    if settings.get('key_events'):
+        prompt += f"\n**KEY HISTORICAL EVENTS:**\n{settings.get('key_events')}\n"
+    
+    if settings.get('special_rules'):
+        prompt += f"\n**SPECIAL RULES/MECHANICS:**\n{settings.get('special_rules')}\n"
+
+    prompt += """
+**GENERATE A WORLD SETTING WITH:**
+1. A compelling world name that evokes the theme
+2. A rich description (2-3 paragraphs) covering geography, culture, and atmosphere
+3. Key historical background that shapes the current era
+4. The current state of the world - what conflicts or opportunities exist?
+5. What makes this world unique and interesting for adventure?
+
+**OUTPUT FORMAT (JSON):**
+```json
+{
+    "name": "World name",
+    "description": "Rich 2-3 paragraph description",
+    "history": "Key historical events and background",
+    "current_state": "What's happening now that creates adventure opportunities",
+    "unique_aspects": "What makes this world special"
+}
+```
+
+Be creative and evocative! Create a world players will want to explore."""
+
+    return prompt
+
+
+def build_locations_generation_prompt(
+    world_setting: Dict[str, Any],
+    settings: Dict[str, Any],
+    num_locations: int = 5
+) -> str:
+    """Build a prompt for generating campaign locations."""
+    
+    prompt = f"""You are creating locations for a {settings.get('world_theme', 'fantasy')} campaign.
+
+**THE WORLD:**
+{world_setting.get('name', 'Unknown World')}
+{world_setting.get('description', 'A world of adventure.')}
+
+**WORLD PARAMETERS:**
+- Theme: {settings.get('world_theme', 'fantasy')}
+- Scale: {settings.get('world_scale', 'regional')}
+- Magic Level: {settings.get('magic_level', 'high')}
+- Technology: {settings.get('technology_level', 'medieval')}
+- Tone: {settings.get('tone', 'heroic')}
+
+**GENERATE {num_locations} DIVERSE LOCATIONS:**
+Include a mix of:
+- Urban areas (cities, towns, villages)
+- Wilderness (forests, mountains, swamps)
+- Dungeons/ruins (ancient sites, caves, abandoned places)
+- Landmarks (monuments, magical sites, natural wonders)
+
+Each location should:
+1. Have a unique, evocative name
+2. Fit the world's theme and tone
+3. Offer adventure opportunities
+4. Connect logically to other locations
+5. Have 2-3 points of interest within
+
+**OUTPUT FORMAT (JSON array):**
+```json
+[
+    {{
+        "name": "Location name",
+        "type": "city|town|village|dungeon|wilderness|landmark|ruins",
+        "description": "Vivid 2-3 sentence description",
+        "danger_level": 1-5,
+        "points_of_interest": ["Notable feature 1", "Notable feature 2"],
+        "atmosphere": "The mood/feeling of this place",
+        "secrets": "What hidden things exist here",
+        "connections": ["Connected location names or directions"]
+    }}
+]
+```
+
+Create locations that feel alive and full of potential adventure!"""
+
+    return prompt
+
+
+def build_npcs_generation_prompt(
+    world_setting: Dict[str, Any],
+    locations: List[Dict[str, Any]],
+    settings: Dict[str, Any],
+    num_npcs: int = 8
+) -> str:
+    """Build a prompt for generating campaign NPCs."""
+    
+    location_names = [loc.get('name', 'Unknown') for loc in locations]
+    
+    prompt = f"""You are creating memorable NPCs for a {settings.get('world_theme', 'fantasy')} campaign.
+
+**THE WORLD:**
+{world_setting.get('name', 'Unknown World')}
+{world_setting.get('description', 'A world of adventure.')}
+
+**KNOWN LOCATIONS:**
+{', '.join(location_names)}
+
+**WORLD PARAMETERS:**
+- Theme: {settings.get('world_theme', 'fantasy')}
+- Magic Level: {settings.get('magic_level', 'high')}
+- Tone: {settings.get('tone', 'heroic')}
+
+**GENERATE {num_npcs} DIVERSE NPCs:**
+Include a mix of:
+- Quest givers (people with problems needing heroes)
+- Merchants (traders, craftsmen, shopkeepers)
+- Allies (potential companions, helpful contacts)
+- Neutral figures (locals, travelers, officials)
+- Antagonists (villains, rivals, obstacles)
+
+Each NPC should:
+1. Have a fitting, memorable name
+2. Have a clear role and motivation
+3. Be tied to a specific location
+4. Have personality quirks that make them memorable
+5. Offer potential hooks for player interaction
+
+**OUTPUT FORMAT (JSON array):**
+```json
+[
+    {{
+        "name": "NPC full name",
+        "type": "quest_giver|merchant|ally|neutral|antagonist",
+        "role": "Their job or position (e.g., 'Village Elder', 'Wandering Merchant')",
+        "location": "Name of location where they're found",
+        "description": "Physical appearance in 1-2 sentences",
+        "personality": "Key personality traits",
+        "motivation": "What drives them",
+        "secret": "Something they're hiding",
+        "hook": "How players might interact with them",
+        "is_merchant": true/false,
+        "is_party_member_candidate": true/false
+    }}
+]
+```
+
+Make each NPC feel like a real person with their own life and goals!"""
+
+    return prompt
+
+
+def build_factions_generation_prompt(
+    world_setting: Dict[str, Any],
+    settings: Dict[str, Any],
+    num_factions: int = 3
+) -> str:
+    """Build a prompt for generating campaign factions."""
+    
+    prompt = f"""You are creating factions and organizations for a {settings.get('world_theme', 'fantasy')} campaign.
+
+**THE WORLD:**
+{world_setting.get('name', 'Unknown World')}
+{world_setting.get('description', 'A world of adventure.')}
+{world_setting.get('current_state', '')}
+
+**WORLD PARAMETERS:**
+- Theme: {settings.get('world_theme', 'fantasy')}
+- Scale: {settings.get('world_scale', 'regional')}
+- Tone: {settings.get('tone', 'heroic')}
+
+**GENERATE {num_factions} DIVERSE FACTIONS:**
+Include a mix of:
+- Political powers (kingdoms, councils, noble houses)
+- Religious organizations (churches, cults, orders)
+- Criminal elements (thieves guilds, smugglers, cartels)
+- Guilds & associations (merchant leagues, adventurer companies, crafters)
+- Secret societies (hidden cabals, ancient orders, conspiracies)
+
+Each faction should:
+1. Have a compelling name and clear identity
+2. Have goals that may conflict or align with players
+3. Wield a specific type of power/influence
+4. Have internal tensions or weaknesses
+5. Offer quest opportunities and potential allies/enemies
+
+**OUTPUT FORMAT (JSON array):**
+```json
+[
+    {{
+        "name": "Faction name",
+        "type": "guild|kingdom|cult|merchant_group|secret_society|military_order|criminal_syndicate",
+        "description": "What they are and what they represent",
+        "goals": "What they're trying to achieve",
+        "methods": "How they operate",
+        "alignment": "good|neutral|evil",
+        "power_base": "Source of their influence",
+        "weakness": "Their vulnerability or internal conflict",
+        "player_hooks": "How players might get involved with them"
+    }}
+]
+```
+
+Create factions that add political depth and intrigue to the world!"""
+
+    return prompt
+
+
+def build_quests_generation_prompt(
+    world_setting: Dict[str, Any],
+    locations: List[Dict[str, Any]],
+    npcs: List[Dict[str, Any]],
+    factions: List[Dict[str, Any]],
+    settings: Dict[str, Any],
+    num_quests: int = 3
+) -> str:
+    """Build a prompt for generating campaign quest hooks."""
+    
+    # Summarize available elements
+    location_names = [loc.get('name', 'Unknown') for loc in locations[:5]]
+    quest_giver_npcs = [npc for npc in npcs if npc.get('type') == 'quest_giver']
+    faction_names = [f.get('name', 'Unknown') for f in factions]
+    
+    prompt = f"""You are creating quest hooks for a {settings.get('world_theme', 'fantasy')} campaign.
+
+**THE WORLD:**
+{world_setting.get('name', 'Unknown World')}
+{world_setting.get('current_state', 'A time of adventure and opportunity.')}
+
+**AVAILABLE LOCATIONS:**
+{', '.join(location_names)}
+
+**POTENTIAL QUEST GIVERS:**
+{chr(10).join([f"- {npc.get('name', 'Unknown')} ({npc.get('role', 'NPC')})" for npc in quest_giver_npcs[:5]])}
+
+**FACTIONS IN PLAY:**
+{', '.join(faction_names)}
+
+**WORLD PARAMETERS:**
+- Theme: {settings.get('world_theme', 'fantasy')}
+- Tone: {settings.get('tone', 'heroic')}
+
+**GENERATE {num_quests} QUEST HOOKS:**
+Include a mix of:
+- Main story hooks (tie into world's current state/conflicts)
+- Side adventures (interesting but optional)
+- Character-focused quests (personal growth opportunities)
+
+Each quest should:
+1. Have an intriguing title that hints at the adventure
+2. Have clear initial objectives (what to do first)
+3. Connect to existing NPCs, locations, or factions when possible
+4. Offer meaningful rewards (gold, XP, items, reputation)
+5. Have potential for complications or twists
+
+**OUTPUT FORMAT (JSON array):**
+```json
+[
+    {{
+        "title": "Quest title",
+        "type": "main|side|character",
+        "description": "The situation and call to action",
+        "objectives": ["First objective", "Second objective"],
+        "difficulty": "easy|medium|hard",
+        "location": "Primary location for this quest",
+        "quest_giver": "NPC who offers this quest (if any)",
+        "faction_involvement": "Related faction (if any)",
+        "rewards": {{
+            "gold": 100,
+            "xp": 50,
+            "items": ["Possible item rewards"],
+            "reputation": "Faction reputation gain"
+        }},
+        "complications": "Potential twists or challenges",
+        "hooks": "Different ways players might discover this quest"
+    }}
+]
+```
+
+Create quests that will draw players into the world and make them want to explore!"""
+
+    return prompt
+
+
+def build_starting_scenario_prompt(
+    world_setting: Dict[str, Any],
+    locations: List[Dict[str, Any]],
+    npcs: List[Dict[str, Any]],
+    quests: List[Dict[str, Any]],
+    settings: Dict[str, Any]
+) -> str:
+    """Build a prompt for generating the campaign's starting scenario."""
+    
+    starting_location = locations[0] if locations else {"name": "a mysterious place"}
+    quest_hooks = [q.get('title', 'adventure') for q in quests[:2]]
+    
+    prompt = f"""You are writing the opening narration for a {settings.get('world_theme', 'fantasy')} campaign.
+
+**THE WORLD:**
+{world_setting.get('name', 'Unknown World')}
+{world_setting.get('description', 'A world of adventure.')}
+
+**STARTING LOCATION:**
+{starting_location.get('name', 'Unknown')} - {starting_location.get('description', 'A place of adventure.')}
+
+**INITIAL QUEST HOOKS:**
+{', '.join(quest_hooks)}
+
+**TONE:** {settings.get('tone', 'heroic')}
+
+**WRITE THE OPENING SCENE:**
+Create a 2-3 paragraph opening that:
+1. Sets the atmosphere and mood
+2. Establishes where the party is and why they're there
+3. Hints at the adventures to come
+4. Ends with a hook that prompts the players to take action
+
+Use second person ("You find yourselves...") and create vivid sensory details.
+This should make players excited to start their adventure!
+
+**OUTPUT:** Just the narrative text, no JSON formatting."""
+
+    return prompt
+
+

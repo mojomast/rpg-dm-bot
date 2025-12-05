@@ -1070,6 +1070,1120 @@ REST_CHARACTER_SCHEMA = {
 
 
 # =============================================================================
+# LOCATION TOOLS
+# =============================================================================
+
+CREATE_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "create_location",
+        "description": "Create a new location in the world (town, dungeon, wilderness, etc.).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name of the location"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Detailed description of the location"
+                },
+                "location_type": {
+                    "type": "string",
+                    "enum": ["town", "city", "village", "dungeon", "wilderness", "landmark", "interior", "road", "generic"],
+                    "description": "Type of location"
+                },
+                "points_of_interest": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Notable features or areas within this location"
+                },
+                "current_weather": {
+                    "type": "string",
+                    "description": "Current weather at the location"
+                },
+                "danger_level": {
+                    "type": "integer",
+                    "description": "Danger level 0-10 (0=safe, 10=deadly)"
+                },
+                "hidden_secrets": {
+                    "type": "string",
+                    "description": "DM-only notes about secrets at this location"
+                }
+            },
+            "required": ["name", "description"]
+        }
+    }
+}
+
+GET_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_location",
+        "description": "Get details about a specific location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {
+                    "type": "integer",
+                    "description": "The location's ID"
+                }
+            },
+            "required": ["location_id"]
+        }
+    }
+}
+
+GET_NEARBY_LOCATIONS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_nearby_locations",
+        "description": "Get locations connected to the current location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {
+                    "type": "integer",
+                    "description": "The location's ID to find connections from"
+                }
+            },
+            "required": ["location_id"]
+        }
+    }
+}
+
+UPDATE_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "update_location",
+        "description": "Update a location's properties (weather, NPCs present, etc.).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {
+                    "type": "integer",
+                    "description": "The location's ID"
+                },
+                "description": {"type": "string"},
+                "current_weather": {"type": "string"},
+                "danger_level": {"type": "integer"},
+                "points_of_interest": {"type": "array", "items": {"type": "string"}},
+                "hidden_secrets": {"type": "string"}
+            },
+            "required": ["location_id"]
+        }
+    }
+}
+
+MOVE_PARTY_TO_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "move_party_to_location",
+        "description": "Move the party to a new location, updating the game state.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {
+                    "type": "integer",
+                    "description": "The destination location's ID"
+                },
+                "travel_description": {
+                    "type": "string",
+                    "description": "Optional description of the journey"
+                }
+            },
+            "required": ["location_id"]
+        }
+    }
+}
+
+
+# =============================================================================
+# STORY ITEM TOOLS
+# =============================================================================
+
+CREATE_STORY_ITEM_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "create_story_item",
+        "description": "Create a narrative-important item (artifact, clue, key, letter, etc.).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name of the story item"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Physical description of the item"
+                },
+                "item_type": {
+                    "type": "string",
+                    "enum": ["artifact", "clue", "key", "mcguffin", "letter", "document", "personal_effect", "misc"],
+                    "description": "Type of story item"
+                },
+                "lore": {
+                    "type": "string",
+                    "description": "History and backstory of the item"
+                },
+                "discovery_conditions": {
+                    "type": "string",
+                    "description": "How players can discover this item"
+                },
+                "dm_notes": {
+                    "type": "string",
+                    "description": "DM-only notes about the item's significance"
+                }
+            },
+            "required": ["name", "description"]
+        }
+    }
+}
+
+REVEAL_STORY_ITEM_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "reveal_story_item",
+        "description": "Mark a story item as discovered by the party.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "integer",
+                    "description": "The story item's ID"
+                }
+            },
+            "required": ["item_id"]
+        }
+    }
+}
+
+TRANSFER_STORY_ITEM_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "transfer_story_item",
+        "description": "Transfer a story item to a new holder (character, NPC, or location).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "integer",
+                    "description": "The story item's ID"
+                },
+                "new_holder_id": {
+                    "type": "integer",
+                    "description": "ID of the new holder (character or NPC)"
+                },
+                "holder_type": {
+                    "type": "string",
+                    "enum": ["character", "npc", "location", "none"],
+                    "description": "Type of the new holder"
+                }
+            },
+            "required": ["item_id", "holder_type"]
+        }
+    }
+}
+
+GET_STORY_ITEMS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_story_items",
+        "description": "Get story items, optionally filtered by holder or discovery status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "holder_id": {
+                    "type": "integer",
+                    "description": "Filter by holder ID"
+                },
+                "is_discovered": {
+                    "type": "boolean",
+                    "description": "Filter by discovery status"
+                }
+            },
+            "required": []
+        }
+    }
+}
+
+
+# =============================================================================
+# STORY EVENT TOOLS
+# =============================================================================
+
+CREATE_STORY_EVENT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "create_story_event",
+        "description": "Create a campaign event (main plot beat, side event, scheduled happening).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name of the event"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Description of what happens"
+                },
+                "event_type": {
+                    "type": "string",
+                    "enum": ["main_plot", "side_event", "random", "scheduled"],
+                    "description": "Type of story event"
+                },
+                "trigger_conditions": {
+                    "type": "string",
+                    "description": "Conditions that trigger this event"
+                },
+                "location_id": {
+                    "type": "integer",
+                    "description": "Location where the event occurs"
+                },
+                "dm_notes": {
+                    "type": "string",
+                    "description": "DM-only notes about running this event"
+                }
+            },
+            "required": ["name", "description"]
+        }
+    }
+}
+
+TRIGGER_EVENT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "trigger_event",
+        "description": "Activate a pending story event.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "integer",
+                    "description": "The event's ID"
+                }
+            },
+            "required": ["event_id"]
+        }
+    }
+}
+
+RESOLVE_EVENT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "resolve_event",
+        "description": "Complete a story event with its outcome.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "integer",
+                    "description": "The event's ID"
+                },
+                "outcome": {
+                    "type": "string",
+                    "enum": ["success", "failure", "partial", "complicated"],
+                    "description": "How the event was resolved"
+                },
+                "resolution_notes": {
+                    "type": "string",
+                    "description": "Notes about how the event concluded"
+                }
+            },
+            "required": ["event_id", "outcome"]
+        }
+    }
+}
+
+GET_ACTIVE_EVENTS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_active_events",
+        "description": "Get all currently active story events.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}
+
+
+# =============================================================================
+# CROSS-SYSTEM WIRING TOOLS
+# These tools integrate multiple game systems for seamless gameplay
+# =============================================================================
+
+MOVE_CHARACTER_TO_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "move_character_to_location",
+        "description": "Move a character to a new location. Updates character's position and can trigger location events. Returns who else is at that location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character's ID"
+                },
+                "location_id": {
+                    "type": "integer",
+                    "description": "The target location's ID"
+                }
+            },
+            "required": ["character_id", "location_id"]
+        }
+    }
+}
+
+GET_CHARACTERS_AT_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_characters_at_location",
+        "description": "Get all characters currently at a specific location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {
+                    "type": "integer",
+                    "description": "The location's ID"
+                }
+            },
+            "required": ["location_id"]
+        }
+    }
+}
+
+GET_NPCS_AT_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_npcs_at_location",
+        "description": "Get all NPCs currently at a specific location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {
+                    "type": "integer",
+                    "description": "The location's ID"
+                }
+            },
+            "required": ["location_id"]
+        }
+    }
+}
+
+EXPLORE_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "explore_location",
+        "description": "Have a character explore their current location. Returns NPCs present, discoverable story items, active events at the location, and connected locations. Perfect for 'look around' or 'search area' actions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character exploring"
+                },
+                "perception_roll": {
+                    "type": "integer",
+                    "description": "Optional perception roll result to determine what hidden things are found"
+                }
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+PICKUP_STORY_ITEM_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "pickup_story_item",
+        "description": "Have a character pick up a story item. Marks it as discovered, transfers ownership to the character, and logs the discovery event.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character picking up the item"
+                },
+                "item_id": {
+                    "type": "integer",
+                    "description": "The story item's ID"
+                },
+                "discovery_context": {
+                    "type": "string",
+                    "description": "How/where the item was found (e.g., 'hidden in the desk drawer')"
+                }
+            },
+            "required": ["character_id", "item_id"]
+        }
+    }
+}
+
+DROP_STORY_ITEM_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "drop_story_item",
+        "description": "Have a character drop/leave a story item at the current location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character dropping the item"
+                },
+                "item_id": {
+                    "type": "integer",
+                    "description": "The story item's ID"
+                }
+            },
+            "required": ["character_id", "item_id"]
+        }
+    }
+}
+
+LONG_REST_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "long_rest",
+        "description": "Character takes a long rest (8 hours). Fully restores HP and mana, clears temporary status effects, advances time, and logs the rest in session history.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character resting"
+                },
+                "location_description": {
+                    "type": "string",
+                    "description": "Where the character is resting (e.g., 'at the tavern', 'in the forest camp')"
+                },
+                "interrupted": {
+                    "type": "boolean",
+                    "description": "Whether the rest was interrupted (partial recovery only)"
+                }
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+SHORT_REST_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "short_rest",
+        "description": "Character takes a short rest (1 hour). Restores some HP (25%) and mana (50%), advances time by 1 hour.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character resting"
+                }
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+END_COMBAT_WITH_REWARDS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "end_combat_with_rewards",
+        "description": "End combat and automatically distribute XP and loot to all participating characters. Syncs combat damage back to character HP. Use this instead of end_combat when combat ends in victory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "combat_id": {
+                    "type": "integer",
+                    "description": "The combat encounter's ID"
+                },
+                "victory": {
+                    "type": "boolean",
+                    "description": "Whether the party won the combat"
+                },
+                "bonus_xp": {
+                    "type": "integer",
+                    "description": "Additional XP to award beyond enemy XP values"
+                },
+                "bonus_gold": {
+                    "type": "integer",
+                    "description": "Additional gold to distribute"
+                },
+                "loot_items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "string"},
+                            "item_name": {"type": "string"},
+                            "item_type": {"type": "string"},
+                            "quantity": {"type": "integer"},
+                            "properties": {"type": "object"}
+                        }
+                    },
+                    "description": "Items dropped by enemies to distribute"
+                }
+            },
+            "required": ["combat_id", "victory"]
+        }
+    }
+}
+
+COMPLETE_QUEST_WITH_REWARDS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "complete_quest_with_rewards",
+        "description": "Complete a quest and automatically distribute rewards to all party members. Updates quest status and logs story event.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "quest_id": {
+                    "type": "integer",
+                    "description": "The quest's ID"
+                },
+                "character_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Characters who participated in completing the quest"
+                },
+                "bonus_rewards": {
+                    "type": "object",
+                    "properties": {
+                        "xp": {"type": "integer"},
+                        "gold": {"type": "integer"}
+                    },
+                    "description": "Additional rewards beyond the quest's base rewards"
+                }
+            },
+            "required": ["quest_id", "character_ids"]
+        }
+    }
+}
+
+GET_COMPREHENSIVE_SESSION_STATE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_comprehensive_session_state",
+        "description": "Get the complete state of a game session including party status, current location, active quests, NPCs present, active events, and recent story. Use this to get full context for decision-making.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "integer",
+                    "description": "The session's ID"
+                }
+            },
+            "required": ["session_id"]
+        }
+    }
+}
+
+
+# =============================================================================
+# ENHANCED NPC TOOLS
+# =============================================================================
+
+GENERATE_NPC_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_npc",
+        "description": "Generate a new NPC using templates and customization. Creates a unique, memorable character.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "enum": ["merchant", "guard", "scholar", "innkeeper", "noble", "criminal", "mystic", "peasant", "adventurer", "villain"],
+                    "description": "Base template for the NPC"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional specific name for the NPC"
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Where this NPC is found"
+                },
+                "purpose": {
+                    "type": "string",
+                    "description": "The NPC's narrative purpose"
+                },
+                "custom_traits": {
+                    "type": "object",
+                    "description": "Custom personality traits or features"
+                }
+            },
+            "required": ["template"]
+        }
+    }
+}
+
+SET_NPC_SECRET_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "set_npc_secret",
+        "description": "Set or update an NPC's hidden secret or motivation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "npc_id": {
+                    "type": "integer",
+                    "description": "The NPC's ID"
+                },
+                "secret": {
+                    "type": "string",
+                    "description": "The NPC's secret or hidden motivation"
+                }
+            },
+            "required": ["npc_id", "secret"]
+        }
+    }
+}
+
+
+# =============================================================================
+# NPC PARTY MEMBER TOOLS
+# =============================================================================
+
+ADD_NPC_TO_PARTY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "add_npc_to_party",
+        "description": "Add an NPC as a companion/party member. They will travel with and assist the party in combat.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "npc_id": {
+                    "type": "integer",
+                    "description": "The NPC's ID to add to party"
+                },
+                "party_role": {
+                    "type": "string",
+                    "enum": ["tank", "healer", "damage", "support", "utility", "guide"],
+                    "description": "The NPC's role in the party"
+                },
+                "combat_stats": {
+                    "type": "object",
+                    "description": "Optional combat stats override: {hp, ac, attack_bonus, damage, abilities}",
+                    "properties": {
+                        "hp": {"type": "integer"},
+                        "max_hp": {"type": "integer"},
+                        "ac": {"type": "integer"},
+                        "attack_bonus": {"type": "integer"},
+                        "damage": {"type": "string"},
+                        "abilities": {"type": "array", "items": {"type": "string"}}
+                    }
+                }
+            },
+            "required": ["npc_id"]
+        }
+    }
+}
+
+REMOVE_NPC_FROM_PARTY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "remove_npc_from_party",
+        "description": "Remove an NPC companion from the party.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "npc_id": {
+                    "type": "integer",
+                    "description": "The NPC's ID to remove"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Why the NPC is leaving (for story purposes)"
+                }
+            },
+            "required": ["npc_id"]
+        }
+    }
+}
+
+GET_PARTY_NPCS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_party_npcs",
+        "description": "Get all NPC companions currently in the party.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}
+
+UPDATE_NPC_LOYALTY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "update_npc_loyalty",
+        "description": "Change an NPC party member's loyalty based on party actions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "npc_id": {
+                    "type": "integer",
+                    "description": "The NPC's ID"
+                },
+                "loyalty_change": {
+                    "type": "integer",
+                    "description": "Amount to change loyalty (positive or negative, scale 0-100)"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "What caused the loyalty change"
+                }
+            },
+            "required": ["npc_id", "loyalty_change"]
+        }
+    }
+}
+
+NPC_PARTY_ACTION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "npc_party_action",
+        "description": "Have an NPC party member take an action (attack, use ability, help, etc.).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "npc_id": {
+                    "type": "integer",
+                    "description": "The NPC's ID"
+                },
+                "action_type": {
+                    "type": "string",
+                    "enum": ["attack", "defend", "heal", "support", "ability", "flee"],
+                    "description": "Type of action"
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target of the action (enemy name or 'party' for support actions)"
+                },
+                "ability_name": {
+                    "type": "string",
+                    "description": "If action_type is 'ability', which ability to use"
+                }
+            },
+            "required": ["npc_id", "action_type"]
+        }
+    }
+}
+
+
+# =============================================================================
+# GENERATIVE AI WORLDBUILDING TOOLS
+# =============================================================================
+
+GENERATE_WORLD_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_world",
+        "description": "Generate or expand the game world based on the campaign theme. Creates locations, factions, and lore.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "theme": {
+                    "type": "string",
+                    "description": "The campaign theme/setting (e.g., 'Duke Nukem style alien invasion', 'dark fantasy')"
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["region", "city", "dungeon", "full_world"],
+                    "description": "How much world to generate"
+                },
+                "focus_elements": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Specific elements to include (e.g., ['alien tech', 'neon cities', 'strip clubs'])"
+                },
+                "tone": {
+                    "type": "string",
+                    "enum": ["comedic", "serious", "grimdark", "heroic", "absurdist", "mixed"],
+                    "description": "The tone of the generated content"
+                }
+            },
+            "required": ["theme"]
+        }
+    }
+}
+
+GENERATE_KEY_NPCS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_key_npcs",
+        "description": "Generate key NPCs for a campaign based on the setting and goals. Creates important characters like allies, rivals, and potential party members.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "campaign_theme": {
+                    "type": "string",
+                    "description": "The campaign theme/setting"
+                },
+                "goals": {
+                    "type": "string",
+                    "description": "The party's main goals or quest"
+                },
+                "npc_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["ally", "mentor", "rival", "villain", "quest_giver", "love_interest", "comic_relief", "mysterious_stranger", "key_figure"]
+                    },
+                    "description": "Types of NPCs to generate"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of NPCs to generate (default 3)"
+                },
+                "make_party_members": {
+                    "type": "boolean",
+                    "description": "If true, generate NPCs suitable for joining the party as companions"
+                }
+            },
+            "required": ["campaign_theme"]
+        }
+    }
+}
+
+GENERATE_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_location",
+        "description": "Generate a detailed location with points of interest, NPCs, and potential encounters.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_type": {
+                    "type": "string",
+                    "enum": ["town", "city", "dungeon", "wilderness", "stronghold", "ruins", "tavern", "shop", "temple", "secret_base"],
+                    "description": "Type of location to generate"
+                },
+                "theme": {
+                    "type": "string",
+                    "description": "Theme/style for the location (e.g., 'alien-infested warehouse')"
+                },
+                "purpose": {
+                    "type": "string",
+                    "description": "Narrative purpose of the location (e.g., 'where the party finds the alien artifact')"
+                },
+                "danger_level": {
+                    "type": "string",
+                    "enum": ["safe", "low", "medium", "high", "deadly"],
+                    "description": "How dangerous the location is"
+                },
+                "generate_npcs": {
+                    "type": "boolean",
+                    "description": "Whether to generate NPCs for this location"
+                },
+                "generate_loot": {
+                    "type": "boolean",
+                    "description": "Whether to generate loot/items at this location"
+                }
+            },
+            "required": ["location_type"]
+        }
+    }
+}
+
+GENERATE_QUEST_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_quest",
+        "description": "Generate a quest with objectives, rewards, and story hooks based on the current game state.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "quest_type": {
+                    "type": "string",
+                    "enum": ["main", "side", "fetch", "kill", "escort", "mystery", "rescue", "exploration", "boss"],
+                    "description": "Type of quest to generate"
+                },
+                "difficulty": {
+                    "type": "string",
+                    "enum": ["easy", "medium", "hard", "epic"],
+                    "description": "Quest difficulty"
+                },
+                "theme": {
+                    "type": "string",
+                    "description": "Theme/context for the quest"
+                },
+                "related_npc_id": {
+                    "type": "integer",
+                    "description": "Optional NPC who gives or is involved in the quest"
+                },
+                "location_id": {
+                    "type": "integer",
+                    "description": "Optional location where the quest takes place"
+                },
+                "auto_create": {
+                    "type": "boolean",
+                    "description": "If true, automatically create the quest in the database"
+                }
+            },
+            "required": ["quest_type"]
+        }
+    }
+}
+
+GENERATE_ENCOUNTER_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_encounter",
+        "description": "Generate a combat or social encounter appropriate for the party.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "encounter_type": {
+                    "type": "string",
+                    "enum": ["combat", "social", "puzzle", "trap", "boss", "ambush", "random"],
+                    "description": "Type of encounter"
+                },
+                "difficulty": {
+                    "type": "string",
+                    "enum": ["easy", "medium", "hard", "deadly"],
+                    "description": "Encounter difficulty"
+                },
+                "theme": {
+                    "type": "string",
+                    "description": "Theme for the encounter (e.g., 'alien invaders', 'robot guards')"
+                },
+                "party_level": {
+                    "type": "integer",
+                    "description": "Average party level (auto-detected if not provided)"
+                },
+                "party_size": {
+                    "type": "integer",
+                    "description": "Number of party members (auto-detected if not provided)"
+                },
+                "auto_start_combat": {
+                    "type": "boolean",
+                    "description": "If true and encounter_type is 'combat', automatically start the combat"
+                }
+            },
+            "required": ["encounter_type"]
+        }
+    }
+}
+
+GENERATE_BACKSTORY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_backstory",
+        "description": "Generate or expand a character's backstory, creating connections to the world.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {
+                    "type": "integer",
+                    "description": "The character to generate backstory for"
+                },
+                "hooks": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Story hooks to incorporate (e.g., ['orphan', 'seeking revenge', 'hidden power'])"
+                },
+                "connection_to_plot": {
+                    "type": "string",
+                    "description": "How to connect the backstory to the main plot"
+                },
+                "depth": {
+                    "type": "string",
+                    "enum": ["brief", "moderate", "detailed"],
+                    "description": "How detailed the backstory should be"
+                }
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+GENERATE_LOOT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_loot",
+        "description": "Generate appropriate loot/rewards based on context.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "type": "string",
+                    "description": "Context for the loot (e.g., 'defeated alien boss', 'ancient treasure chest')"
+                },
+                "value_tier": {
+                    "type": "string",
+                    "enum": ["poor", "common", "uncommon", "rare", "epic", "legendary"],
+                    "description": "Value/rarity tier of the loot"
+                },
+                "item_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["weapon", "armor", "consumable", "gold", "treasure", "key_item", "junk"]
+                    },
+                    "description": "Types of items to include"
+                },
+                "party_level": {
+                    "type": "integer",
+                    "description": "Party level for scaling (auto-detected if not provided)"
+                },
+                "auto_distribute": {
+                    "type": "boolean",
+                    "description": "If true, automatically give loot to party members"
+                }
+            },
+            "required": ["context"]
+        }
+    }
+}
+
+INITIALIZE_CAMPAIGN_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "initialize_campaign",
+        "description": "Initialize a new campaign by generating world, key NPCs, starting location, and initial quest hook all at once.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "campaign_name": {
+                    "type": "string",
+                    "description": "Name of the campaign"
+                },
+                "theme": {
+                    "type": "string",
+                    "description": "Campaign theme/setting (e.g., 'Duke Nukem style action, aliens invading a neon-lit city')"
+                },
+                "tone": {
+                    "type": "string",
+                    "enum": ["comedic", "serious", "grimdark", "heroic", "absurdist", "mixed"],
+                    "description": "Overall tone of the campaign"
+                },
+                "starting_scenario": {
+                    "type": "string",
+                    "description": "Description of how the adventure begins"
+                },
+                "key_npcs_to_generate": {
+                    "type": "integer",
+                    "description": "Number of key NPCs to generate (default 3)"
+                },
+                "include_potential_ally": {
+                    "type": "boolean",
+                    "description": "If true, generate at least one NPC suitable for joining the party"
+                }
+            },
+            "required": ["campaign_name", "theme"]
+        }
+    }
+}
+
+
+# =============================================================================
 # COLLECT ALL SCHEMAS
 # =============================================================================
 
@@ -1095,6 +2209,7 @@ TOOLS_SCHEMA = [
     NEXT_TURN_SCHEMA,
     GET_COMBAT_STATUS_SCHEMA,
     END_COMBAT_SCHEMA,
+    END_COMBAT_WITH_REWARDS_SCHEMA,
     # Dice
     ROLL_DICE_SCHEMA,
     ROLL_ATTACK_SCHEMA,
@@ -1105,16 +2220,26 @@ TOOLS_SCHEMA = [
     UPDATE_QUEST_SCHEMA,
     COMPLETE_OBJECTIVE_SCHEMA,
     GIVE_QUEST_REWARDS_SCHEMA,
+    COMPLETE_QUEST_WITH_REWARDS_SCHEMA,
     GET_QUESTS_SCHEMA,
     # NPC
     GET_NPC_INFO_SCHEMA,
     CREATE_NPC_SCHEMA,
     UPDATE_NPC_RELATIONSHIP_SCHEMA,
     GET_NPCS_SCHEMA,
+    GENERATE_NPC_SCHEMA,
+    SET_NPC_SECRET_SCHEMA,
+    # NPC Party Members
+    ADD_NPC_TO_PARTY_SCHEMA,
+    REMOVE_NPC_FROM_PARTY_SCHEMA,
+    GET_PARTY_NPCS_SCHEMA,
+    UPDATE_NPC_LOYALTY_SCHEMA,
+    NPC_PARTY_ACTION_SCHEMA,
     # Session
     GET_PARTY_INFO_SCHEMA,
     ADD_STORY_ENTRY_SCHEMA,
     GET_STORY_LOG_SCHEMA,
+    GET_COMPREHENSIVE_SESSION_STATE_SCHEMA,
     # Memory
     SAVE_MEMORY_SCHEMA,
     GET_PLAYER_MEMORIES_SCHEMA,
@@ -1124,6 +2249,39 @@ TOOLS_SCHEMA = [
     USE_ABILITY_SCHEMA,
     GET_CHARACTER_ABILITIES_SCHEMA,
     REST_CHARACTER_SCHEMA,
+    LONG_REST_SCHEMA,
+    SHORT_REST_SCHEMA,
+    # Locations
+    CREATE_LOCATION_SCHEMA,
+    GET_LOCATION_SCHEMA,
+    GET_NEARBY_LOCATIONS_SCHEMA,
+    UPDATE_LOCATION_SCHEMA,
+    MOVE_PARTY_TO_LOCATION_SCHEMA,
+    MOVE_CHARACTER_TO_LOCATION_SCHEMA,
+    GET_CHARACTERS_AT_LOCATION_SCHEMA,
+    GET_NPCS_AT_LOCATION_SCHEMA,
+    EXPLORE_LOCATION_SCHEMA,
+    # Story Items
+    CREATE_STORY_ITEM_SCHEMA,
+    REVEAL_STORY_ITEM_SCHEMA,
+    TRANSFER_STORY_ITEM_SCHEMA,
+    GET_STORY_ITEMS_SCHEMA,
+    PICKUP_STORY_ITEM_SCHEMA,
+    DROP_STORY_ITEM_SCHEMA,
+    # Story Events
+    CREATE_STORY_EVENT_SCHEMA,
+    TRIGGER_EVENT_SCHEMA,
+    RESOLVE_EVENT_SCHEMA,
+    GET_ACTIVE_EVENTS_SCHEMA,
+    # Generative AI / Worldbuilding
+    GENERATE_WORLD_SCHEMA,
+    GENERATE_KEY_NPCS_SCHEMA,
+    GENERATE_LOCATION_SCHEMA,
+    GENERATE_QUEST_SCHEMA,
+    GENERATE_ENCOUNTER_SCHEMA,
+    GENERATE_BACKSTORY_SCHEMA,
+    GENERATE_LOOT_SCHEMA,
+    INITIALIZE_CAMPAIGN_SCHEMA,
 ]
 
 
@@ -1162,14 +2320,37 @@ class ToolSchemas:
                          GIVE_GOLD_SCHEMA, TAKE_GOLD_SCHEMA],
             "combat": [START_COMBAT_SCHEMA, ADD_ENEMY_SCHEMA, ROLL_INITIATIVE_SCHEMA,
                       DEAL_DAMAGE_SCHEMA, HEAL_COMBATANT_SCHEMA, APPLY_STATUS_SCHEMA,
-                      NEXT_TURN_SCHEMA, GET_COMBAT_STATUS_SCHEMA, END_COMBAT_SCHEMA],
+                      NEXT_TURN_SCHEMA, GET_COMBAT_STATUS_SCHEMA, END_COMBAT_SCHEMA,
+                      END_COMBAT_WITH_REWARDS_SCHEMA],
             "dice": [ROLL_DICE_SCHEMA, ROLL_ATTACK_SCHEMA, ROLL_SAVE_SCHEMA, 
                     ROLL_SKILL_CHECK_SCHEMA],
             "quest": [CREATE_QUEST_SCHEMA, UPDATE_QUEST_SCHEMA, COMPLETE_OBJECTIVE_SCHEMA,
-                     GIVE_QUEST_REWARDS_SCHEMA, GET_QUESTS_SCHEMA],
+                     GIVE_QUEST_REWARDS_SCHEMA, COMPLETE_QUEST_WITH_REWARDS_SCHEMA, 
+                     GET_QUESTS_SCHEMA],
             "npc": [GET_NPC_INFO_SCHEMA, CREATE_NPC_SCHEMA, UPDATE_NPC_RELATIONSHIP_SCHEMA,
-                   GET_NPCS_SCHEMA],
-            "session": [GET_PARTY_INFO_SCHEMA, ADD_STORY_ENTRY_SCHEMA, GET_STORY_LOG_SCHEMA],
-            "memory": [SAVE_MEMORY_SCHEMA, GET_PLAYER_MEMORIES_SCHEMA]
+                   GET_NPCS_SCHEMA, GENERATE_NPC_SCHEMA, SET_NPC_SECRET_SCHEMA,
+                   ADD_NPC_TO_PARTY_SCHEMA, REMOVE_NPC_FROM_PARTY_SCHEMA,
+                   GET_PARTY_NPCS_SCHEMA, UPDATE_NPC_LOYALTY_SCHEMA, NPC_PARTY_ACTION_SCHEMA],
+            "session": [GET_PARTY_INFO_SCHEMA, ADD_STORY_ENTRY_SCHEMA, GET_STORY_LOG_SCHEMA,
+                       GET_COMPREHENSIVE_SESSION_STATE_SCHEMA],
+            "memory": [SAVE_MEMORY_SCHEMA, GET_PLAYER_MEMORIES_SCHEMA],
+            "spells": [GET_CHARACTER_SPELLS_SCHEMA, CAST_SPELL_SCHEMA, USE_ABILITY_SCHEMA,
+                      GET_CHARACTER_ABILITIES_SCHEMA, REST_CHARACTER_SCHEMA,
+                      LONG_REST_SCHEMA, SHORT_REST_SCHEMA],
+            "location": [CREATE_LOCATION_SCHEMA, GET_LOCATION_SCHEMA, 
+                        GET_NEARBY_LOCATIONS_SCHEMA, UPDATE_LOCATION_SCHEMA,
+                        MOVE_PARTY_TO_LOCATION_SCHEMA, MOVE_CHARACTER_TO_LOCATION_SCHEMA,
+                        GET_CHARACTERS_AT_LOCATION_SCHEMA, GET_NPCS_AT_LOCATION_SCHEMA,
+                        EXPLORE_LOCATION_SCHEMA],
+            "story_item": [CREATE_STORY_ITEM_SCHEMA, REVEAL_STORY_ITEM_SCHEMA,
+                          TRANSFER_STORY_ITEM_SCHEMA, GET_STORY_ITEMS_SCHEMA,
+                          PICKUP_STORY_ITEM_SCHEMA, DROP_STORY_ITEM_SCHEMA],
+            "story_event": [CREATE_STORY_EVENT_SCHEMA, TRIGGER_EVENT_SCHEMA,
+                           RESOLVE_EVENT_SCHEMA, GET_ACTIVE_EVENTS_SCHEMA],
+            "worldbuilding": [GENERATE_WORLD_SCHEMA, GENERATE_KEY_NPCS_SCHEMA,
+                             GENERATE_LOCATION_SCHEMA, GENERATE_QUEST_SCHEMA,
+                             GENERATE_ENCOUNTER_SCHEMA, GENERATE_BACKSTORY_SCHEMA,
+                             GENERATE_LOOT_SCHEMA, INITIALIZE_CAMPAIGN_SCHEMA],
         }
         return categories.get(category.lower(), [])
+

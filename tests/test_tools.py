@@ -326,7 +326,7 @@ class TestCombatTools:
         )
         
         # Extract combatant ID from result
-        combat = await tool_executor.db.get_active_combat(mock_context['channel_id'])
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
         combatants = await tool_executor.db.get_combatants(combat['id'])
         enemy_id = combatants[0]['id']
         
@@ -348,7 +348,7 @@ class TestCombatTools:
             mock_context
         )
         
-        combat = await tool_executor.db.get_active_combat(mock_context['channel_id'])
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
         combatants = await tool_executor.db.get_combatants(combat['id'])
         enemy_id = combatants[0]['id']
         
@@ -369,7 +369,7 @@ class TestCombatTools:
             mock_context
         )
         
-        combat = await tool_executor.db.get_active_combat(mock_context['channel_id'])
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
         combatants = await tool_executor.db.get_combatants(combat['id'])
         orc_id = combatants[0]['id']
         
@@ -399,7 +399,7 @@ class TestCombatTools:
             mock_context
         )
         
-        combat = await tool_executor.db.get_active_combat(mock_context['channel_id'])
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
         combatants = await tool_executor.db.get_combatants(combat['id'])
         enemy_id = combatants[0]['id']
         
@@ -649,7 +649,7 @@ class TestMemoryTools:
             mock_context
         )
         
-        assert "saved" in result.lower() or "memory" in result.lower()
+        assert "remembered" in result.lower() or "saved" in result.lower() or "memory" in result.lower()
 
     async def test_get_player_memories(self, tool_executor, mock_context):
         """Test retrieving player memories"""

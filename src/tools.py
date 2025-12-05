@@ -5,11 +5,12 @@ Handles execution of LLM tool calls for game mechanics.
 
 import random
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import logging
 
 from src.tool_schemas import TOOLS_SCHEMA, get_tool_names
+from src.mechanics_tracker import get_tracker, MechanicType
 
 logger = logging.getLogger('rpg.tools')
 
@@ -97,6 +98,34 @@ class ToolExecutor:
         self.db = db
         self.dice = DiceRoller()
     
+    async def _get_session_for_context(self, context: Dict[str, Any]) -> Optional[Dict]:
+        """Get the correct session for the given context.
+        
+        Uses session_id from context if available (preferred for session isolation),
+        otherwise falls back to user's active session, then guild's active session.
+        """
+        session_id = context.get('session_id')
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        
+        # If we have a specific session_id, use it
+        if session_id:
+            session = await self.db.get_session(session_id)
+            if session:
+                return session
+        
+        # Fall back to user's active session (preferred over any guild session)
+        if user_id and guild_id:
+            user_session = await self.db.get_user_active_session(guild_id, user_id)
+            if user_session:
+                return user_session
+        
+        # Last resort: get any active session for the guild
+        if guild_id:
+            return await self.db.get_active_session(guild_id)
+        
+        return None
+    
     async def execute_tool(self, tool_name: str, tool_args: Dict[str, Any], 
                           context: Dict[str, Any]) -> str:
         """Execute a tool by name with arguments"""
@@ -177,6 +206,18 @@ class ToolExecutor:
             elif tool_name == "get_npcs":
                 return await self._get_npcs(context, tool_args)
             
+            # NPC Party Member tools
+            elif tool_name == "add_npc_to_party":
+                return await self._add_npc_to_party(context, tool_args)
+            elif tool_name == "remove_npc_from_party":
+                return await self._remove_npc_from_party(tool_args)
+            elif tool_name == "get_party_npcs":
+                return await self._get_party_npcs(context)
+            elif tool_name == "update_npc_loyalty":
+                return await self._update_npc_loyalty(tool_args)
+            elif tool_name == "npc_party_action":
+                return await self._npc_party_action(context, tool_args)
+            
             # Session tools
             elif tool_name == "get_party_info":
                 return await self._get_party_info(context)
@@ -202,6 +243,86 @@ class ToolExecutor:
                 return await self._get_character_abilities(tool_args)
             elif tool_name == "rest_character":
                 return await self._rest_character(tool_args)
+            
+            # Location tools
+            elif tool_name == "create_location":
+                return await self._create_location(context, tool_args)
+            elif tool_name == "get_location":
+                return await self._get_location(tool_args)
+            elif tool_name == "get_nearby_locations":
+                return await self._get_nearby_locations(tool_args)
+            elif tool_name == "update_location":
+                return await self._update_location(tool_args)
+            elif tool_name == "move_party_to_location":
+                return await self._move_party_to_location(context, tool_args)
+            
+            # Story Item tools
+            elif tool_name == "create_story_item":
+                return await self._create_story_item(context, tool_args)
+            elif tool_name == "reveal_story_item":
+                return await self._reveal_story_item(tool_args)
+            elif tool_name == "transfer_story_item":
+                return await self._transfer_story_item(tool_args)
+            elif tool_name == "get_story_items":
+                return await self._get_story_items(context, tool_args)
+            
+            # Story Event tools
+            elif tool_name == "create_story_event":
+                return await self._create_story_event(context, tool_args)
+            elif tool_name == "trigger_event":
+                return await self._trigger_event(tool_args)
+            elif tool_name == "resolve_event":
+                return await self._resolve_event(tool_args)
+            elif tool_name == "get_active_events":
+                return await self._get_active_events(context)
+            
+            # Enhanced NPC tools  
+            elif tool_name == "generate_npc":
+                return await self._generate_npc(context, tool_args)
+            elif tool_name == "set_npc_secret":
+                return await self._set_npc_secret(tool_args)
+            
+            # Cross-system wiring tools
+            elif tool_name == "move_character_to_location":
+                return await self._move_character_to_location(tool_args)
+            elif tool_name == "get_characters_at_location":
+                return await self._get_characters_at_location(tool_args)
+            elif tool_name == "get_npcs_at_location":
+                return await self._get_npcs_at_location(tool_args)
+            elif tool_name == "explore_location":
+                return await self._explore_location(context, tool_args)
+            elif tool_name == "pickup_story_item":
+                return await self._pickup_story_item(context, tool_args)
+            elif tool_name == "drop_story_item":
+                return await self._drop_story_item(context, tool_args)
+            elif tool_name == "long_rest":
+                return await self._long_rest(context, tool_args)
+            elif tool_name == "short_rest":
+                return await self._short_rest(tool_args)
+            elif tool_name == "end_combat_with_rewards":
+                return await self._end_combat_with_rewards(context, tool_args)
+            elif tool_name == "complete_quest_with_rewards":
+                return await self._complete_quest_with_rewards(context, tool_args)
+            elif tool_name == "get_comprehensive_session_state":
+                return await self._get_comprehensive_session_state(tool_args)
+            
+            # Generative AI / Worldbuilding tools
+            elif tool_name == "generate_world":
+                return await self._generate_world(context, tool_args)
+            elif tool_name == "generate_key_npcs":
+                return await self._generate_key_npcs(context, tool_args)
+            elif tool_name == "generate_location":
+                return await self._generate_location(context, tool_args)
+            elif tool_name == "generate_quest":
+                return await self._generate_quest(context, tool_args)
+            elif tool_name == "generate_encounter":
+                return await self._generate_encounter(context, tool_args)
+            elif tool_name == "generate_backstory":
+                return await self._generate_backstory(context, tool_args)
+            elif tool_name == "generate_loot":
+                return await self._generate_loot(context, tool_args)
+            elif tool_name == "initialize_campaign":
+                return await self._initialize_campaign(context, tool_args)
             
             else:
                 return f"Error: Unknown tool '{tool_name}'"
@@ -366,18 +487,20 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Start a combat encounter"""
         guild_id = context.get('guild_id')
         channel_id = context.get('channel_id')
-        session_id = context.get('session_id')
         description = args.get('description', 'Combat begins!')
         
         # Check for existing combat
-        existing = await self.db.get_active_combat(channel_id)
+        existing = await self.db.get_active_combat(channel_id=channel_id)
         if existing:
             return "Error: Combat already active in this channel. End it first with end_combat."
         
+        # Get session using proper isolation
+        session = await self._get_session_for_context(context)
+        session_id = session['id'] if session else None
+        
         encounter_id = await self.db.create_combat(guild_id, channel_id, session_id)
         
-        # Add all party members to combat
-        session = await self.db.get_active_session(guild_id)
+        # Add all party members from THIS session to combat
         if session:
             participants = await self.db.get_session_participants(session['id'])
             for p in participants:
@@ -400,7 +523,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         init_bonus = args.get('initiative_bonus', 0)
         stats = args.get('stats', {})
         
-        combat = await self.db.get_active_combat(channel_id)
+        combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat. Start combat first."
         
@@ -414,7 +537,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Roll initiative for all combatants"""
         channel_id = context.get('channel_id')
         
-        combat = await self.db.get_active_combat(channel_id)
+        combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat."
         
@@ -423,9 +546,8 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         
         for c in combatants:
             roll = self.dice.roll(f"1d20+{c['initiative']}")
-            # Update initiative in database
-            async with self.db.db_path as conn:
-                pass  # Would update here
+            # Update initiative with rolled value
+            await self.db.update_combatant_initiative(c['id'], roll['total'])
             results.append((c['name'], roll['total'], c['is_player']))
         
         # Sort by initiative
@@ -479,7 +601,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Advance to next turn"""
         channel_id = context.get('channel_id')
         
-        combat = await self.db.get_active_combat(channel_id)
+        combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat."
         
@@ -495,7 +617,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Get current combat status"""
         channel_id = context.get('channel_id')
         
-        combat = await self.db.get_active_combat(channel_id)
+        combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "No active combat."
         
@@ -517,7 +639,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         outcome = args.get('outcome', 'victory')
         xp_reward = args.get('xp_reward', 0)
         
-        combat = await self.db.get_active_combat(channel_id)
+        combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "No active combat to end."
         
@@ -551,11 +673,24 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         user_id = context.get('user_id')
         guild_id = context.get('guild_id')
         char = await self.db.get_active_character(user_id, guild_id)
+        char_name = char['name'] if char else 'Unknown'
         
         await self.db.log_dice_roll(
             user_id, guild_id, 'general', dice, result['rolls'],
             result['modifier'], result['total'],
             char['id'] if char else None, purpose
+        )
+        
+        # Track in mechanics tracker
+        tracker = get_tracker()
+        tracker.add_dice_roll(
+            character_name=char_name,
+            dice=dice,
+            rolls=result['rolls'],
+            modifier=result['modifier'],
+            total=result['total'],
+            critical=result.get('critical', False),
+            fumble=result.get('fumble', False)
         )
         
         # Format result
@@ -585,7 +720,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         damage_type = args.get('damage_type', 'physical')
         
         channel_id = context.get('channel_id')
-        combat = await self.db.get_active_combat(channel_id)
+        combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat for attack roll."
         
@@ -642,6 +777,19 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         roll = self.dice.roll(f"1d20+{modifier}")
         success = roll['total'] >= dc
         
+        # Track in mechanics tracker
+        tracker = get_tracker()
+        tracker.add_saving_throw(
+            character_name=char['name'],
+            save_type=save_type,
+            dc=dc,
+            roll=roll['rolls'][0],
+            modifier=modifier,
+            total=roll['total'],
+            success=success,
+            reason=reason
+        )
+        
         result = "✅ **SUCCESS!**" if success else "❌ **FAILED!**"
         special = " (NAT 20!)" if roll['critical'] else " (NAT 1!)" if roll['fumble'] else ""
         
@@ -664,6 +812,21 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         roll = self.dice.roll(f"1d20+{modifier}")
         success = roll['total'] >= dc
         
+        # Track in mechanics tracker
+        tracker = get_tracker()
+        tracker.add_skill_check(
+            character_name=char['name'],
+            skill=skill,
+            stat=stat,
+            dc=dc,
+            roll=roll['rolls'][0],
+            modifier=modifier,
+            total=roll['total'],
+            success=success,
+            critical=roll.get('critical', False),
+            fumble=roll.get('fumble', False)
+        )
+        
         result = "✅ **SUCCESS!**" if success else "❌ **FAILED!**"
         special = " (NAT 20!)" if roll['critical'] else " (NAT 1!)" if roll['fumble'] else ""
         
@@ -677,7 +840,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Create a new quest"""
         guild_id = context.get('guild_id')
         user_id = context.get('user_id')
-        session = await self.db.get_active_session(guild_id)
+        session = await self._get_session_for_context(context)
         
         quest_id = await self.db.create_quest(
             guild_id=guild_id,
@@ -798,7 +961,7 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
         """Create a new NPC"""
         guild_id = context.get('guild_id')
         user_id = context.get('user_id')
-        session = await self.db.get_active_session(guild_id)
+        session = await self._get_session_for_context(context)
         
         npc_id = await self.db.create_npc(
             guild_id=guild_id,
@@ -855,8 +1018,7 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _get_party_info(self, context: Dict) -> str:
         """Get party information"""
-        guild_id = context.get('guild_id')
-        session = await self.db.get_active_session(guild_id)
+        session = await self._get_session_for_context(context)
         
         if not session:
             return "No active session."
@@ -878,8 +1040,7 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _add_story_entry(self, context: Dict, args: Dict) -> str:
         """Add story log entry"""
-        guild_id = context.get('guild_id')
-        session = await self.db.get_active_session(guild_id)
+        session = await self._get_session_for_context(context)
         
         if not session:
             return "No active session to log story."
@@ -892,8 +1053,7 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _get_story_log(self, context: Dict, args: Dict) -> str:
         """Get story log"""
-        guild_id = context.get('guild_id')
-        session = await self.db.get_active_session(guild_id)
+        session = await self._get_session_for_context(context)
         
         if not session:
             return "No active session."
@@ -1252,3 +1412,1531 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             result_parts.append("⚡ Short rest abilities recharged")
         
         return "\n".join(result_parts)
+    
+    # =========================================================================
+    # LOCATION TOOL IMPLEMENTATIONS
+    # =========================================================================
+    
+    async def _create_location(self, context: Dict, args: Dict) -> str:
+        """Create a new location"""
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        session = await self._get_session_for_context(context)
+        
+        location_id = await self.db.create_location(
+            guild_id=guild_id,
+            name=args.get('name'),
+            created_by=user_id,
+            session_id=session['id'] if session else None,
+            description=args.get('description'),
+            location_type=args.get('location_type', 'generic'),
+            points_of_interest=args.get('points_of_interest', []),
+            current_weather=args.get('current_weather'),
+            danger_level=args.get('danger_level', 0),
+            hidden_secrets=args.get('hidden_secrets')
+        )
+        
+        return f"📍 Location created: **{args['name']}** (ID: {location_id})"
+    
+    async def _get_location(self, args: Dict) -> str:
+        """Get location details"""
+        location_id = args.get('location_id')
+        
+        loc = await self.db.get_location(location_id)
+        if not loc:
+            return "Error: Location not found"
+        
+        pois = ", ".join(loc.get('points_of_interest', [])) or "None"
+        
+        return f"""📍 **{loc['name']}** ({loc['location_type']})
+{loc['description'] or 'No description'}
+Weather: {loc.get('current_weather') or 'Normal'}
+Danger Level: {loc.get('danger_level', 0)}/10
+Points of Interest: {pois}"""
+    
+    async def _get_nearby_locations(self, args: Dict) -> str:
+        """Get connected locations"""
+        location_id = args.get('location_id')
+        
+        locations = await self.db.get_nearby_locations(location_id)
+        if not locations:
+            return "No nearby locations found."
+        
+        lines = ["**Nearby Locations:**"]
+        for loc in locations:
+            danger = "⚠️" if loc.get('danger_level', 0) >= 5 else ""
+            lines.append(f"{danger}[{loc['id']}] **{loc['name']}** ({loc['location_type']})")
+        
+        return "\n".join(lines)
+    
+    async def _update_location(self, args: Dict) -> str:
+        """Update location"""
+        location_id = args.get('location_id')
+        updates = {k: v for k, v in args.items() if k != 'location_id' and v is not None}
+        
+        if not updates:
+            return "No updates provided"
+        
+        await self.db.update_location(location_id, **updates)
+        return f"Location {location_id} updated: {', '.join(updates.keys())}"
+    
+    async def _move_party_to_location(self, context: Dict, args: Dict) -> str:
+        """Move party to new location"""
+        location_id = args.get('location_id')
+        travel_desc = args.get('travel_description', '')
+        
+        session = await self._get_session_for_context(context)
+        if not session:
+            return "Error: No active session"
+        
+        loc = await self.db.get_location(location_id)
+        if not loc:
+            return "Error: Location not found"
+        
+        # Update game state with new location
+        await self.db.save_game_state(session['id'], current_location=loc['name'])
+        
+        # Log the travel
+        await self.db.add_story_log_entry(session['id'], 'travel', 
+            f"Party traveled to {loc['name']}. {travel_desc}")
+        
+        return f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}"
+    
+    # =========================================================================
+    # STORY ITEM TOOL IMPLEMENTATIONS
+    # =========================================================================
+    
+    async def _create_story_item(self, context: Dict, args: Dict) -> str:
+        """Create a story item"""
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        session = await self._get_session_for_context(context)
+        
+        item_id = await self.db.create_story_item(
+            guild_id=guild_id,
+            name=args.get('name'),
+            created_by=user_id,
+            session_id=session['id'] if session else None,
+            description=args.get('description'),
+            item_type=args.get('item_type', 'misc'),
+            lore=args.get('lore'),
+            discovery_conditions=args.get('discovery_conditions'),
+            dm_notes=args.get('dm_notes')
+        )
+        
+        return f"📜 Story item created: **{args['name']}** (ID: {item_id})"
+    
+    async def _reveal_story_item(self, args: Dict) -> str:
+        """Reveal a story item"""
+        item_id = args.get('item_id')
+        
+        item = await self.db.get_story_item(item_id)
+        if not item:
+            return "Error: Story item not found"
+        
+        await self.db.reveal_story_item(item_id)
+        
+        lore_hint = f"\n*{item.get('lore', '')[:100]}...*" if item.get('lore') else ""
+        return f"✨ **{item['name']}** has been discovered!\n{item['description']}{lore_hint}"
+    
+    async def _transfer_story_item(self, args: Dict) -> str:
+        """Transfer story item"""
+        item_id = args.get('item_id')
+        holder_id = args.get('new_holder_id')
+        holder_type = args.get('holder_type', 'none')
+        
+        item = await self.db.get_story_item(item_id)
+        if not item:
+            return "Error: Story item not found"
+        
+        await self.db.transfer_story_item(item_id, holder_id, holder_type)
+        
+        if holder_type == 'none':
+            return f"**{item['name']}** has been dropped/placed."
+        else:
+            return f"**{item['name']}** transferred to {holder_type} #{holder_id}."
+    
+    async def _get_story_items(self, context: Dict, args: Dict) -> str:
+        """Get story items"""
+        guild_id = context.get('guild_id')
+        session = await self._get_session_for_context(context)
+        
+        items = await self.db.get_story_items(
+            session_id=session['id'] if session else None,
+            holder_id=args.get('holder_id'),
+            is_discovered=args.get('is_discovered')
+        )
+        
+        if not items:
+            return "No story items found."
+        
+        lines = ["**Story Items:**"]
+        for item in items:
+            status = "✨" if item['is_discovered'] else "🔒"
+            holder = f" - held by {item['holder_type']} #{item['current_holder_id']}" if item['current_holder_id'] else ""
+            lines.append(f"{status} [{item['id']}] **{item['name']}** ({item['item_type']}){holder}")
+        
+        return "\n".join(lines)
+    
+    # =========================================================================
+    # STORY EVENT TOOL IMPLEMENTATIONS  
+    # =========================================================================
+    
+    async def _create_story_event(self, context: Dict, args: Dict) -> str:
+        """Create a story event"""
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        session = await self._get_session_for_context(context)
+        
+        event_id = await self.db.create_story_event(
+            guild_id=guild_id,
+            name=args.get('name'),
+            created_by=user_id,
+            session_id=session['id'] if session else None,
+            description=args.get('description'),
+            event_type=args.get('event_type', 'side_event'),
+            trigger_conditions=args.get('trigger_conditions'),
+            location_id=args.get('location_id'),
+            dm_notes=args.get('dm_notes')
+        )
+        
+        return f"📅 Story event created: **{args['name']}** (ID: {event_id})"
+    
+    async def _trigger_event(self, args: Dict) -> str:
+        """Activate a pending event"""
+        event_id = args.get('event_id')
+        
+        event = await self.db.get_story_event(event_id)
+        if not event:
+            return "Error: Event not found"
+        
+        await self.db.trigger_event(event_id)
+        
+        return f"⚡ **{event['name']}** has begun!\n{event['description']}"
+    
+    async def _resolve_event(self, args: Dict) -> str:
+        """Complete a story event"""
+        event_id = args.get('event_id')
+        outcome = args.get('outcome', 'success')
+        notes = args.get('resolution_notes')
+        
+        event = await self.db.get_story_event(event_id)
+        if not event:
+            return "Error: Event not found"
+        
+        await self.db.resolve_event(event_id, outcome, notes)
+        
+        emoji = "🎉" if outcome == 'success' else "💔" if outcome == 'failure' else "⚖️"
+        return f"{emoji} **{event['name']}** resolved: {outcome.upper()}\n{notes or ''}"
+    
+    async def _get_active_events(self, context: Dict) -> str:
+        """Get active events"""
+        session = await self._get_session_for_context(context)
+        
+        if not session:
+            return "No active session."
+        
+        active = await self.db.get_active_events(session['id'])
+        pending = await self.db.get_pending_events(session['id'])
+        
+        lines = []
+        if active:
+            lines.append("**Active Events:**")
+            for e in active:
+                lines.append(f"⚡ [{e['id']}] **{e['name']}** ({e['event_type']})")
+        
+        if pending:
+            lines.append("\n**Pending Events:**")
+            for e in pending:
+                trigger = f" - {e['trigger_conditions'][:30]}..." if e.get('trigger_conditions') else ""
+                lines.append(f"⏳ [{e['id']}] **{e['name']}**{trigger}")
+        
+        return "\n".join(lines) if lines else "No events active or pending."
+    
+    # =========================================================================
+    # ENHANCED NPC TOOL IMPLEMENTATIONS
+    # =========================================================================
+    
+    async def _generate_npc(self, context: Dict, args: Dict) -> str:
+        """Generate an NPC from template"""
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        session = await self._get_session_for_context(context)
+        
+        template = args.get('template', 'generic')
+        name = args.get('name')
+        location = args.get('location')
+        purpose = args.get('purpose')
+        custom_traits = args.get('custom_traits', {})
+        
+        # Template-based personality generation
+        template_data = {
+            'merchant': {'npc_type': 'neutral', 'personality': 'Shrewd but fair, always looking for a good deal. Knows local gossip.', 'is_merchant': True},
+            'guard': {'npc_type': 'neutral', 'personality': 'Professional and vigilant, loyal to their post and the law.', 'is_merchant': False},
+            'scholar': {'npc_type': 'friendly', 'personality': 'Curious and knowledgeable, easily distracted by intellectual topics.', 'is_merchant': False},
+            'innkeeper': {'npc_type': 'friendly', 'personality': 'Welcoming and hospitable, loves to hear stories from travelers.', 'is_merchant': True},
+            'noble': {'npc_type': 'neutral', 'personality': 'Proud and politically aware, concerned with status and alliances.', 'is_merchant': False},
+            'criminal': {'npc_type': 'hostile', 'personality': 'Streetwise and cautious, speaks in coded language.', 'is_merchant': False},
+            'mystic': {'npc_type': 'neutral', 'personality': 'Cryptic and enigmatic, speaks in riddles and prophecies.', 'is_merchant': False},
+            'peasant': {'npc_type': 'friendly', 'personality': 'Humble and hardworking, knows the local area well.', 'is_merchant': False},
+            'adventurer': {'npc_type': 'friendly', 'personality': 'Bold and confident, eager to share tales of adventure.', 'is_merchant': False},
+            'villain': {'npc_type': 'hostile', 'personality': 'Calculating and dangerous, has their own sinister agenda.', 'is_merchant': False},
+        }
+        
+        base = template_data.get(template, {'npc_type': 'neutral', 'personality': 'A mysterious figure.', 'is_merchant': False})
+        
+        # Apply custom traits
+        personality = base['personality']
+        if custom_traits:
+            trait_str = ", ".join([f"{k}: {v}" for k, v in custom_traits.items()])
+            personality += f" Additional traits: {trait_str}"
+        
+        # Create the NPC
+        npc_id = await self.db.create_npc(
+            guild_id=guild_id,
+            name=name or f"Unknown {template.title()}",
+            description=f"A {template} encountered by the party.",
+            personality=personality,
+            location=location,
+            npc_type=base['npc_type'],
+            is_merchant=base['is_merchant'],
+            created_by=user_id,
+            session_id=session['id'] if session else None
+        )
+        
+        return f"👤 NPC Generated: **{name or f'Unknown {template.title()}'}** (ID: {npc_id})\nTemplate: {template.title()}\nPersonality: {personality[:100]}..."
+    
+    async def _set_npc_secret(self, args: Dict) -> str:
+        """Set an NPC's hidden secret"""
+        npc_id = args.get('npc_id')
+        secret = args.get('secret')
+        
+        npc = await self.db.get_npc(npc_id)
+        if not npc:
+            return "Error: NPC not found"
+        
+        # Store secret in dialogue_context (using existing field)
+        current_context = npc.get('dialogue_context') or '{}'
+        try:
+            context_data = json.loads(current_context)
+        except:
+            context_data = {}
+        
+        context_data['secret'] = secret
+        await self.db.update_npc(npc_id, dialogue_context=json.dumps(context_data))
+        
+        return f"🔒 Secret set for **{npc['name']}**: {secret[:50]}..."
+
+    # =========================================================================
+    # CROSS-SYSTEM WIRING TOOL IMPLEMENTATIONS
+    # These tools integrate multiple game systems for seamless gameplay
+    # =========================================================================
+    
+    async def _move_character_to_location(self, args: Dict) -> str:
+        """Move a character to a new location"""
+        char_id = args.get('character_id')
+        location_id = args.get('location_id')
+        
+        result = await self.db.move_character_to_location(char_id, location_id)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        char = result.get('character', {})
+        location = result.get('location', {})
+        others = result.get('others_present', [])
+        npcs = result.get('npcs_at_location', [])
+        
+        lines = [f"🚶 **{char.get('name', 'Character')}** moved to **{location.get('name', 'Unknown')}**"]
+        lines.append(f"_{location.get('description', '')}_")
+        
+        if others:
+            names = [o.get('name', 'Unknown') for o in others]
+            lines.append(f"\n👥 Also here: {', '.join(names)}")
+        
+        if npcs:
+            npc_names = [n.get('name', 'Unknown') for n in npcs]
+            lines.append(f"🧑 NPCs present: {', '.join(npc_names)}")
+        
+        return "\n".join(lines)
+    
+    async def _get_characters_at_location(self, args: Dict) -> str:
+        """Get all characters at a location"""
+        location_id = args.get('location_id')
+        
+        characters = await self.db.get_characters_at_location(location_id)
+        location = await self.db.get_location(location_id)
+        
+        if not location:
+            return "Error: Location not found"
+        
+        if not characters:
+            return f"No characters at **{location['name']}**"
+        
+        lines = [f"👥 Characters at **{location['name']}**:"]
+        for char in characters:
+            lines.append(f"  - {char['name']} (Level {char['level']} {char['char_class']})")
+        
+        return "\n".join(lines)
+    
+    async def _get_npcs_at_location(self, args: Dict) -> str:
+        """Get all NPCs at a location"""
+        location_id = args.get('location_id')
+        
+        npcs = await self.db.get_npcs_at_location(location_id)
+        location = await self.db.get_location(location_id)
+        
+        if not location:
+            return "Error: Location not found"
+        
+        if not npcs:
+            return f"No NPCs at **{location['name']}**"
+        
+        lines = [f"🧑 NPCs at **{location['name']}**:"]
+        for npc in npcs:
+            disposition = npc.get('npc_type', 'neutral')
+            merchant = " 🛒" if npc.get('is_merchant') else ""
+            lines.append(f"  - **{npc['name']}**{merchant} ({disposition})")
+            if npc.get('personality'):
+                lines.append(f"    _{npc['personality'][:60]}..._")
+        
+        return "\n".join(lines)
+    
+    async def _explore_location(self, context: Dict, args: Dict) -> str:
+        """Explore the current location - returns NPCs, items, events, connections"""
+        char_id = args.get('character_id')
+        perception = args.get('perception_roll')
+        
+        result = await self.db.explore_location(char_id, perception)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        location = result.get('location', {})
+        npcs = result.get('npcs', [])
+        items = result.get('story_items', [])
+        events = result.get('events', [])
+        connections = result.get('connections', [])
+        characters = result.get('other_characters', [])
+        
+        lines = [f"🔍 **Exploring {location.get('name', 'Unknown')}**"]
+        lines.append(f"_{location.get('description', '')}_")
+        
+        if characters:
+            names = [c.get('name') for c in characters]
+            lines.append(f"\n👥 **Party members here:** {', '.join(names)}")
+        
+        if npcs:
+            lines.append(f"\n🧑 **NPCs present:**")
+            for npc in npcs:
+                merchant = " (Merchant)" if npc.get('is_merchant') else ""
+                lines.append(f"  - {npc['name']}{merchant}")
+        
+        if items:
+            lines.append(f"\n📦 **Items found:**")
+            for item in items:
+                status = "✨ NEW!" if not item.get('is_discovered') else ""
+                lines.append(f"  - {item['name']} {status}")
+        
+        if events:
+            lines.append(f"\n⚡ **Active events here:**")
+            for event in events:
+                lines.append(f"  - {event['name']}")
+        
+        if connections:
+            lines.append(f"\n🚪 **Exits:**")
+            for conn in connections:
+                direction = f"({conn.get('direction', 'path')})" if conn.get('direction') else ""
+                lines.append(f"  - {conn.get('to_name', 'Unknown')} {direction}")
+        
+        if not (npcs or items or events or connections):
+            lines.append("\n_The area seems quiet and unremarkable._")
+        
+        return "\n".join(lines)
+    
+    async def _pickup_story_item(self, context: Dict, args: Dict) -> str:
+        """Character picks up a story item"""
+        char_id = args.get('character_id')
+        item_id = args.get('item_id')
+        discovery_context = args.get('discovery_context', 'found during exploration')
+        
+        result = await self.db.pickup_story_item(char_id, item_id, discovery_context)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        char = result.get('character', {})
+        item = result.get('item', {})
+        
+        lines = [f"✨ **{char.get('name', 'Character')}** picks up **{item.get('name', 'item')}**!"]
+        lines.append(f"_{item.get('description', '')}_")
+        
+        if item.get('lore') and not item.get('is_discovered'):
+            lines.append(f"\n📜 *{item.get('lore')[:200]}...*")
+        
+        return "\n".join(lines)
+    
+    async def _drop_story_item(self, context: Dict, args: Dict) -> str:
+        """Character drops a story item at current location"""
+        char_id = args.get('character_id')
+        item_id = args.get('item_id')
+        
+        result = await self.db.drop_story_item(char_id, item_id)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        char = result.get('character', {})
+        item = result.get('item', {})
+        location = result.get('location', {})
+        
+        return f"📦 **{char.get('name', 'Character')}** drops **{item.get('name', 'item')}** at {location.get('name', 'this location')}."
+    
+    async def _long_rest(self, context: Dict, args: Dict) -> str:
+        """Character takes a long rest - full recovery"""
+        char_id = args.get('character_id')
+        location_desc = args.get('location_description', 'at camp')
+        interrupted = args.get('interrupted', False)
+        
+        session_id = None
+        session = await self._get_session_for_context(context)
+        if session:
+            session_id = session['id']
+        
+        result = await self.db.long_rest(char_id, session_id, location_desc, interrupted)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        char = result.get('character', {})
+        hp_restored = result.get('hp_restored', 0)
+        mana_restored = result.get('mana_restored', 0)
+        effects_cleared = result.get('effects_cleared', 0)
+        
+        lines = [f"🌙 **{char.get('name', 'Character')}** takes a long rest {location_desc}"]
+        
+        if interrupted:
+            lines.append("⚠️ _Rest interrupted! Only partial recovery._")
+            lines.append(f"Recovered {hp_restored} HP, {mana_restored} mana")
+        else:
+            lines.append("✨ _Eight hours pass peacefully..._")
+            lines.append(f"💚 HP fully restored: {char.get('hp', 0)}/{char.get('max_hp', 0)}")
+            lines.append(f"💙 Mana fully restored: {char.get('mana', 0)}/{char.get('max_mana', 0)}")
+        
+        if effects_cleared > 0:
+            lines.append(f"🧹 {effects_cleared} status effect(s) cleared")
+        
+        return "\n".join(lines)
+    
+    async def _short_rest(self, args: Dict) -> str:
+        """Character takes a short rest - partial recovery"""
+        char_id = args.get('character_id')
+        
+        result = await self.db.short_rest(char_id)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        char = result.get('character', {})
+        hp_restored = result.get('hp_restored', 0)
+        mana_restored = result.get('mana_restored', 0)
+        
+        lines = [f"⏰ **{char.get('name', 'Character')}** takes a short rest (1 hour)"]
+        lines.append(f"💚 Recovered {hp_restored} HP → {char.get('hp', 0)}/{char.get('max_hp', 0)}")
+        lines.append(f"💙 Recovered {mana_restored} mana → {char.get('mana', 0)}/{char.get('max_mana', 0)}")
+        
+        return "\n".join(lines)
+    
+    async def _end_combat_with_rewards(self, context: Dict, args: Dict) -> str:
+        """End combat and distribute rewards"""
+        combat_id = args.get('combat_id')
+        victory = args.get('victory', True)
+        bonus_xp = args.get('bonus_xp', 0)
+        bonus_gold = args.get('bonus_gold', 0)
+        loot_items = args.get('loot_items', [])
+        
+        # If no combat_id provided, try to get active combat
+        if not combat_id:
+            channel_id = context.get('channel_id')
+            session = await self._get_session_for_context(context)
+            if session:
+                combat = await self.db.get_combat_for_channel(session['id'], channel_id)
+                if combat:
+                    combat_id = combat['id']
+        
+        if not combat_id:
+            return "Error: No active combat found"
+        
+        result = await self.db.end_combat_with_rewards(
+            combat_id=combat_id,
+            victory=victory,
+            bonus_xp=bonus_xp,
+            bonus_gold=bonus_gold,
+            loot_items=loot_items
+        )
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        lines = []
+        
+        if victory:
+            lines.append("⚔️ **VICTORY!** Combat concluded.")
+        else:
+            lines.append("💀 **DEFEAT!** The party falls...")
+            return "\n".join(lines)
+        
+        xp_awards = result.get('xp_awards', {})
+        gold_awards = result.get('gold_awards', {})
+        loot_distributed = result.get('loot_distributed', [])
+        total_xp = result.get('total_xp', 0)
+        total_gold = result.get('total_gold', 0)
+        
+        if xp_awards:
+            lines.append(f"\n📈 **Experience Earned:** {total_xp} XP each")
+            for char_name, xp in xp_awards.items():
+                level_up = " 🎉 LEVEL UP!" if result.get('level_ups', {}).get(char_name) else ""
+                lines.append(f"  - {char_name}: +{xp} XP{level_up}")
+        
+        if gold_awards:
+            lines.append(f"\n💰 **Gold Looted:** {total_gold} gold (split)")
+            for char_name, gold in gold_awards.items():
+                lines.append(f"  - {char_name}: +{gold} gold")
+        
+        if loot_distributed:
+            lines.append(f"\n🎁 **Items Found:**")
+            for item in loot_distributed:
+                lines.append(f"  - {item.get('item_name', 'Unknown')} → {item.get('character_name', 'Party')}")
+        
+        # Sync damage back to characters
+        sync_result = result.get('damage_synced', {})
+        if sync_result:
+            lines.append(f"\n❤️ **Post-Combat HP:**")
+            for char_name, hp_data in sync_result.items():
+                lines.append(f"  - {char_name}: {hp_data.get('current_hp', 0)}/{hp_data.get('max_hp', 0)} HP")
+        
+        return "\n".join(lines)
+    
+    async def _complete_quest_with_rewards(self, context: Dict, args: Dict) -> str:
+        """Complete a quest and distribute rewards to participants"""
+        quest_id = args.get('quest_id')
+        character_ids = args.get('character_ids', [])
+        bonus_rewards = args.get('bonus_rewards', {})
+        
+        result = await self.db.complete_quest_with_rewards(
+            quest_id=quest_id,
+            character_ids=character_ids,
+            bonus_xp=bonus_rewards.get('xp', 0),
+            bonus_gold=bonus_rewards.get('gold', 0)
+        )
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        quest = result.get('quest', {})
+        xp_per_char = result.get('xp_per_character', 0)
+        gold_per_char = result.get('gold_per_character', 0)
+        rewarded_chars = result.get('rewarded_characters', [])
+        
+        lines = [f"🎊 **QUEST COMPLETE: {quest.get('title', 'Unknown')}**"]
+        lines.append(f"_{quest.get('description', '')}_")
+        
+        if rewarded_chars:
+            lines.append(f"\n🏆 **Rewards distributed:**")
+            for char in rewarded_chars:
+                level_up = " 🎉 LEVEL UP!" if char.get('leveled_up') else ""
+                lines.append(f"  - **{char['name']}**: +{xp_per_char} XP, +{gold_per_char} gold{level_up}")
+        
+        return "\n".join(lines)
+    
+    async def _get_comprehensive_session_state(self, args: Dict) -> str:
+        """Get complete session state for context"""
+        session_id = args.get('session_id')
+        
+        result = await self.db.get_comprehensive_session_state(session_id)
+        
+        if result.get('error'):
+            return f"Error: {result['error']}"
+        
+        session = result.get('session', {})
+        party = result.get('party', [])
+        location = result.get('current_location')
+        npcs = result.get('npcs_present', [])
+        active_quest = result.get('active_quest')
+        events = result.get('active_events', [])
+        recent_story = result.get('recent_story', [])
+        
+        lines = [f"📋 **Session State: {session.get('name', 'Unknown')}**"]
+        lines.append(f"Setting: {session.get('setting', 'Unknown')}")
+        
+        # Party info
+        if party:
+            lines.append(f"\n👥 **Party ({len(party)} members):**")
+            for char in party:
+                hp_pct = int((char.get('hp', 0) / max(char.get('max_hp', 1), 1)) * 100)
+                hp_bar = "🟢" if hp_pct > 50 else "🟡" if hp_pct > 25 else "🔴"
+                lines.append(f"  {hp_bar} {char['name']} - Lv{char['level']} {char['char_class']} ({char['hp']}/{char['max_hp']} HP)")
+        
+        # Current location
+        if location:
+            lines.append(f"\n📍 **Current Location:** {location.get('name', 'Unknown')}")
+            lines.append(f"  _{location.get('description', '')[:100]}..._")
+        
+        # NPCs present
+        if npcs:
+            npc_names = [n.get('name', 'Unknown') for n in npcs]
+            lines.append(f"\n🧑 **NPCs Present:** {', '.join(npc_names)}")
+        
+        # Active quest
+        if active_quest:
+            lines.append(f"\n📜 **Active Quest:** {active_quest.get('title', 'Unknown')}")
+            objectives = active_quest.get('objectives', [])
+            completed = sum(1 for o in objectives if o.get('completed'))
+            lines.append(f"  Progress: {completed}/{len(objectives)} objectives")
+        
+        # Active events
+        if events:
+            event_names = [e.get('name', 'Unknown') for e in events]
+            lines.append(f"\n⚡ **Active Events:** {', '.join(event_names)}")
+        
+        # Recent story
+        if recent_story:
+            lines.append(f"\n📖 **Recent Events:**")
+            for entry in recent_story[-3:]:  # Last 3 entries
+                lines.append(f"  - {entry.get('entry_text', '')[:80]}...")
+        
+        return "\n".join(lines)
+    
+    # =========================================================================
+    # NPC PARTY MEMBER TOOL IMPLEMENTATIONS
+    # =========================================================================
+    
+    async def _add_npc_to_party(self, context: Dict, args: Dict) -> str:
+        """Add an NPC as a party member/companion"""
+        npc_id = args.get('npc_id')
+        party_role = args.get('party_role')
+        combat_stats = args.get('combat_stats', {})
+        
+        npc = await self.db.get_npc(npc_id)
+        if not npc:
+            return f"Error: NPC with ID {npc_id} not found."
+        
+        # Default combat stats based on NPC type if not provided
+        if not combat_stats:
+            default_stats = {
+                'hp': 20, 'max_hp': 20, 'ac': 12, 
+                'attack_bonus': 3, 'damage': '1d8+1',
+                'abilities': []
+            }
+            # Adjust based on NPC type
+            if npc.get('npc_type') == 'hostile':
+                default_stats['attack_bonus'] = 5
+                default_stats['damage'] = '1d10+3'
+            combat_stats = default_stats
+        
+        success = await self.db.add_npc_to_party(npc_id, party_role, combat_stats)
+        
+        if success:
+            role_str = f" as {party_role}" if party_role else ""
+            return f"🤝 **{npc['name']}** has joined the party{role_str}! They will travel with you and assist in combat."
+        else:
+            return f"Error: Could not add {npc['name']} to the party."
+    
+    async def _remove_npc_from_party(self, args: Dict) -> str:
+        """Remove an NPC from the party"""
+        npc_id = args.get('npc_id')
+        reason = args.get('reason', 'departed')
+        
+        npc = await self.db.get_npc(npc_id)
+        if not npc:
+            return f"Error: NPC with ID {npc_id} not found."
+        
+        success = await self.db.remove_npc_from_party(npc_id)
+        
+        if success:
+            return f"👋 **{npc['name']}** has left the party. Reason: {reason}"
+        else:
+            return f"Error: Could not remove {npc['name']} from the party."
+    
+    async def _get_party_npcs(self, context: Dict) -> str:
+        """Get all NPC companions in the party"""
+        session = await self._get_session_for_context(context)
+        
+        if not session:
+            return "No active session."
+        
+        party_npcs = await self.db.get_party_npcs(session['id'])
+        
+        if not party_npcs:
+            return "No NPC companions in the party."
+        
+        lines = ["🤝 **Party Companions:**"]
+        for npc in party_npcs:
+            role = npc.get('party_role', 'companion')
+            loyalty = npc.get('loyalty', 50)
+            loyalty_desc = "Devoted" if loyalty >= 80 else "Loyal" if loyalty >= 60 else "Friendly" if loyalty >= 40 else "Uncertain" if loyalty >= 20 else "Disloyal"
+            
+            combat_stats = npc.get('combat_stats', {})
+            hp_str = ""
+            if combat_stats:
+                hp = combat_stats.get('hp', '?')
+                max_hp = combat_stats.get('max_hp', '?')
+                hp_str = f" | HP: {hp}/{max_hp}"
+            
+            lines.append(f"  [{npc['id']}] **{npc['name']}** ({role}) - {loyalty_desc} ({loyalty}/100){hp_str}")
+        
+        return "\n".join(lines)
+    
+    async def _update_npc_loyalty(self, args: Dict) -> str:
+        """Update an NPC party member's loyalty"""
+        npc_id = args.get('npc_id')
+        loyalty_change = args.get('loyalty_change', 0)
+        reason = args.get('reason', 'unspecified')
+        
+        npc = await self.db.get_npc(npc_id)
+        if not npc:
+            return f"Error: NPC with ID {npc_id} not found."
+        
+        new_loyalty = await self.db.update_npc_loyalty(npc_id, loyalty_change)
+        
+        change_str = f"+{loyalty_change}" if loyalty_change > 0 else str(loyalty_change)
+        emoji = "💚" if loyalty_change > 0 else "💔"
+        
+        return f"{emoji} **{npc['name']}**'s loyalty changed by {change_str} ({reason}). Loyalty: {new_loyalty}/100"
+    
+    async def _npc_party_action(self, context: Dict, args: Dict) -> str:
+        """Have an NPC party member take an action"""
+        npc_id = args.get('npc_id')
+        action_type = args.get('action_type')
+        target = args.get('target')
+        ability_name = args.get('ability_name')
+        
+        npc = await self.db.get_npc(npc_id)
+        if not npc:
+            return f"Error: NPC with ID {npc_id} not found."
+        
+        combat_stats = npc.get('combat_stats', {})
+        if isinstance(combat_stats, str):
+            combat_stats = json.loads(combat_stats) if combat_stats else {}
+        
+        result_lines = [f"⚔️ **{npc['name']}** takes action: {action_type}"]
+        
+        if action_type == "attack":
+            attack_bonus = combat_stats.get('attack_bonus', 3)
+            damage = combat_stats.get('damage', '1d6+1')
+            
+            # Roll attack
+            roll = random.randint(1, 20)
+            total = roll + attack_bonus
+            crit = roll == 20
+            
+            result_lines.append(f"  Attack Roll: {roll} + {attack_bonus} = **{total}**" + (" CRITICAL!" if crit else ""))
+            
+            if target:
+                result_lines.append(f"  Target: {target}")
+                result_lines.append(f"  Damage on hit: {damage}" + (" (DOUBLE)" if crit else ""))
+        
+        elif action_type == "defend":
+            result_lines.append(f"  {npc['name']} takes a defensive stance, gaining +2 AC until their next turn.")
+        
+        elif action_type == "heal":
+            heal_amount = random.randint(1, 8) + 2
+            result_lines.append(f"  {npc['name']} heals {target or 'an ally'} for **{heal_amount}** HP!")
+        
+        elif action_type == "support":
+            result_lines.append(f"  {npc['name']} provides support to {target or 'the party'}, granting advantage on their next roll.")
+        
+        elif action_type == "ability" and ability_name:
+            abilities = combat_stats.get('abilities', [])
+            if ability_name in abilities:
+                result_lines.append(f"  {npc['name']} uses **{ability_name}**!")
+            else:
+                result_lines.append(f"  {npc['name']} attempts to use {ability_name} but doesn't know that ability.")
+        
+        elif action_type == "flee":
+            result_lines.append(f"  {npc['name']} attempts to flee from combat!")
+            # Check loyalty - low loyalty NPCs might actually leave
+            loyalty = await self.db.get_npc_loyalty(npc_id)
+            if loyalty < 30:
+                result_lines.append(f"  ⚠️ Due to low loyalty, {npc['name']} might not return...")
+        
+        return "\n".join(result_lines)
+    
+    # =========================================================================
+    # GENERATIVE AI / WORLDBUILDING TOOL IMPLEMENTATIONS
+    # =========================================================================
+    
+    async def _generate_world(self, context: Dict, args: Dict) -> str:
+        """Generate world elements based on campaign theme"""
+        theme = args.get('theme', 'fantasy adventure')
+        scope = args.get('scope', 'region')
+        focus_elements = args.get('focus_elements', [])
+        tone = args.get('tone', 'mixed')
+        
+        session = await self._get_session_for_context(context)
+        
+        lines = [f"🌍 **World Generation Request**"]
+        lines.append(f"Theme: {theme}")
+        lines.append(f"Scope: {scope}")
+        lines.append(f"Tone: {tone}")
+        if focus_elements:
+            lines.append(f"Focus Elements: {', '.join(focus_elements)}")
+        
+        lines.append(f"\n**Suggested Elements to Create:**")
+        
+        if scope in ['region', 'full_world']:
+            lines.append("- Main settlement(s)")
+            lines.append("- Key factions or groups")
+            lines.append("- Major landmarks")
+            lines.append("- Regional threats/conflicts")
+        
+        if scope in ['city', 'full_world']:
+            lines.append("- Districts/neighborhoods")
+            lines.append("- Important buildings")
+            lines.append("- Local power structures")
+            lines.append("- Underground elements")
+        
+        if scope == 'dungeon':
+            lines.append("- Entrance/approach")
+            lines.append("- Room layouts")
+            lines.append("- Traps and hazards")
+            lines.append("- Boss encounter area")
+            lines.append("- Treasure locations")
+        
+        lines.append(f"\n*Use create_location and create_npc tools to build out these elements.*")
+        
+        return "\n".join(lines)
+    
+    async def _generate_key_npcs(self, context: Dict, args: Dict) -> str:
+        """Generate key NPCs for the campaign"""
+        campaign_theme = args.get('campaign_theme', 'adventure')
+        goals = args.get('goals', '')
+        npc_types = args.get('npc_types', ['ally', 'villain', 'quest_giver'])
+        count = args.get('count', 3)
+        make_party_members = args.get('make_party_members', False)
+        
+        session = await self._get_session_for_context(context)
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        
+        # Load NPC templates
+        try:
+            with open('data/game_data/npc_templates.json', 'r') as f:
+                templates = json.load(f)
+        except:
+            templates = {}
+        
+        created_npcs = []
+        
+        for i, npc_type in enumerate(npc_types[:count]):
+            template_key = {
+                'ally': 'adventurer',
+                'mentor': 'scholar',
+                'rival': 'adventurer',
+                'villain': 'villain',
+                'quest_giver': 'noble',
+                'love_interest': 'innkeeper',
+                'comic_relief': 'peasant',
+                'mysterious_stranger': 'mystic',
+                'key_figure': 'noble'
+            }.get(npc_type, 'adventurer')
+            
+            template = templates.get(template_key, {})
+            
+            names = template.get('names', ['Unknown'])
+            name = random.choice(names) if names else f"NPC_{i+1}"
+            
+            personalities = template.get('personalities', ['mysterious'])
+            personality = random.choice(personalities)
+            
+            disposition = {
+                'ally': 'friendly',
+                'mentor': 'friendly', 
+                'rival': 'neutral',
+                'villain': 'hostile',
+                'quest_giver': 'neutral',
+                'love_interest': 'friendly',
+                'comic_relief': 'friendly',
+                'mysterious_stranger': 'neutral',
+                'key_figure': 'neutral'
+            }.get(npc_type, 'neutral')
+            
+            description = f"A {npc_type} fitting the theme: {campaign_theme}"
+            if goals:
+                description += f". Related to: {goals}"
+            
+            npc_id = await self.db.create_npc(
+                guild_id=guild_id,
+                name=name,
+                description=description,
+                personality=personality,
+                created_by=user_id,
+                npc_type=disposition,
+                session_id=session['id'] if session else None
+            )
+            
+            created_npcs.append({
+                'id': npc_id,
+                'name': name,
+                'type': npc_type,
+                'disposition': disposition
+            })
+            
+            if make_party_members and npc_type in ['ally', 'mentor', 'comic_relief']:
+                role = 'support' if npc_type == 'mentor' else 'damage' if npc_type == 'ally' else 'utility'
+                await self.db.add_npc_to_party(npc_id, role, {
+                    'hp': 25, 'max_hp': 25, 'ac': 14,
+                    'attack_bonus': 4, 'damage': '1d8+2',
+                    'abilities': ['special_attack']
+                })
+        
+        lines = [f"👥 **Generated {len(created_npcs)} Key NPCs:**"]
+        for npc in created_npcs:
+            party_note = " (Can join party)" if make_party_members and npc['type'] in ['ally', 'mentor', 'comic_relief'] else ""
+            lines.append(f"  [{npc['id']}] **{npc['name']}** - {npc['type']} ({npc['disposition']}){party_note}")
+        
+        lines.append(f"\n*Use get_npc_info to see details, or add_npc_to_party to recruit allies.*")
+        
+        return "\n".join(lines)
+    
+    async def _generate_location(self, context: Dict, args: Dict) -> str:
+        """Generate a detailed location"""
+        location_type = args.get('location_type', 'generic')
+        theme = args.get('theme', '')
+        purpose = args.get('purpose', '')
+        danger_level = args.get('danger_level', 'medium')
+        generate_npcs = args.get('generate_npcs', False)
+        generate_loot = args.get('generate_loot', False)
+        
+        session = await self._get_session_for_context(context)
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        
+        name_prefixes = {
+            'town': ['Riverside', 'Hill', 'North', 'Iron', 'Golden'],
+            'city': ['New', 'Old', 'Great', 'Port', 'Royal'],
+            'dungeon': ['Dark', 'Ancient', 'Forgotten', 'Cursed', 'Hidden'],
+            'wilderness': ['Wild', 'Savage', 'Peaceful', 'Dark', 'Misty'],
+            'stronghold': ['Iron', 'Stone', 'Blood', 'Storm', 'Dragon'],
+            'ruins': ['Lost', 'Ancient', 'Sunken', 'Crumbling', 'Haunted'],
+            'tavern': ['The Rusty', 'The Golden', 'The Prancing', 'The Drunken', 'The Lucky'],
+            'shop': ['Ye Olde', 'Fine', 'Discount', 'Rare', 'Curious'],
+            'temple': ['Sacred', 'Holy', 'Dark', 'Ancient', 'Mystic'],
+            'secret_base': ['Hidden', 'Secret', 'Underground', 'Shadow', 'Covert']
+        }
+        
+        name_suffixes = {
+            'town': ['burg', 'ton', 'ville', 'ford', 'haven'],
+            'city': ['polis', 'heim', 'grad', 'dale', 'shire'],
+            'dungeon': ['Depths', 'Caverns', 'Crypt', 'Lair', 'Maze'],
+            'wilderness': ['Woods', 'Plains', 'Swamp', 'Mountains', 'Desert'],
+            'stronghold': ['Keep', 'Fortress', 'Citadel', 'Hold', 'Tower'],
+            'ruins': ['Ruins', 'Remnants', 'Remains', 'Tomb', 'Temple'],
+            'tavern': ['Dragon', 'Pony', 'Mug', 'Sword', 'Pilgrim'],
+            'shop': ['Goods', 'Wares', 'Emporium', 'Bazaar', 'Market'],
+            'temple': ['Shrine', 'Sanctuary', 'Chapel', 'Cathedral', 'Altar'],
+            'secret_base': ['Haven', 'Hideout', 'Sanctum', 'Lair', 'Den']
+        }
+        
+        prefix = random.choice(name_prefixes.get(location_type, ['The']))
+        suffix = random.choice(name_suffixes.get(location_type, ['Place']))
+        
+        if location_type == 'tavern':
+            name = f"{prefix} {suffix}"
+        else:
+            name = f"{prefix}{suffix}"
+        
+        if theme:
+            name = f"{name} ({theme})"
+        
+        description = f"A {danger_level}-danger {location_type}"
+        if theme:
+            description += f" with a {theme} theme"
+        if purpose:
+            description += f". Purpose: {purpose}"
+        
+        poi_options = {
+            'town': ['market square', 'town hall', 'blacksmith', 'inn', 'temple', 'well'],
+            'city': ['grand plaza', 'palace', 'warehouse district', 'slums', 'merchant quarter', 'arena'],
+            'dungeon': ['entrance hall', 'trap corridor', 'treasure room', 'boss chamber', 'secret passage', 'puzzle room'],
+            'wilderness': ['ancient tree', 'river crossing', 'cave entrance', 'abandoned camp', 'strange monument', 'hunting ground'],
+            'stronghold': ['great hall', 'armory', 'dungeon', 'tower', 'courtyard', 'throne room'],
+            'ruins': ['collapsed hall', 'intact chamber', 'sealed door', 'overgrown garden', 'crumbling tower', 'hidden vault'],
+            'tavern': ['common room', 'private booths', 'cellar', 'upstairs rooms', 'kitchen', 'back alley'],
+            'shop': ['display floor', 'back room', 'storage', 'counter', 'window display', 'secret stock'],
+            'temple': ['altar', 'meditation chamber', 'library', 'crypt', 'bell tower', 'garden'],
+            'secret_base': ['hidden entrance', 'meeting room', 'armory', 'escape tunnel', 'leader quarters', 'holding cells']
+        }
+        
+        pois = random.sample(poi_options.get(location_type, ['notable feature']), min(3, len(poi_options.get(location_type, ['notable feature']))))
+        
+        location_id = await self.db.create_location(
+            guild_id=guild_id,
+            session_id=session['id'] if session else None,
+            name=name,
+            description=description,
+            location_type=location_type,
+            points_of_interest=pois,
+            created_by=user_id
+        )
+        
+        lines = [f"📍 **Generated Location:** {name}"]
+        lines.append(f"Type: {location_type} | Danger: {danger_level}")
+        lines.append(f"ID: {location_id}")
+        lines.append(f"\n**Points of Interest:**")
+        for poi in pois:
+            lines.append(f"  - {poi}")
+        
+        if generate_npcs:
+            lines.append(f"\n*Use generate_key_npcs to populate this location.*")
+        
+        if generate_loot:
+            lines.append(f"*Use generate_loot to add treasure here.*")
+        
+        return "\n".join(lines)
+    
+    async def _generate_quest(self, context: Dict, args: Dict) -> str:
+        """Generate a quest with objectives"""
+        quest_type = args.get('quest_type', 'side')
+        difficulty = args.get('difficulty', 'medium')
+        theme = args.get('theme', '')
+        related_npc_id = args.get('related_npc_id')
+        location_id = args.get('location_id')
+        auto_create = args.get('auto_create', False)
+        
+        session = await self._get_session_for_context(context)
+        guild_id = context.get('guild_id')
+        
+        quest_titles = {
+            'main': ['The Final Confrontation', 'Destiny Awaits', 'The Great Mission', 'The Ultimate Challenge'],
+            'side': ['A Small Favor', 'Local Troubles', 'The Side Job', 'Unfinished Business'],
+            'fetch': ['Retrieve the {item}', 'Find the Lost {item}', 'Gather {count} {item}s', 'The Missing {item}'],
+            'kill': ['Hunt the {enemy}', 'Eliminate the Threat', 'Bounty: {enemy}', 'The {enemy} Problem'],
+            'escort': ['Protect the {target}', 'Safe Passage', 'The Journey to {place}', 'Guard Duty'],
+            'mystery': ['The Strange Occurrence', 'Investigate the {event}', 'Uncover the Truth', 'The Hidden Secret'],
+            'rescue': ['Save the {target}', 'Rescue Mission', 'The Captive', 'Break Them Out'],
+            'exploration': ['Chart the Unknown', 'Explore the {place}', 'The Lost {place}', 'Terra Incognita'],
+            'boss': ['Face the {boss}', 'The Final Battle', 'Showdown with {boss}', 'The Ultimate Enemy']
+        }
+        
+        title_templates = quest_titles.get(quest_type, ['A Quest'])
+        title = random.choice(title_templates)
+        
+        items = ['artifact', 'crystal', 'scroll', 'weapon', 'key', 'relic']
+        enemies = ['beast', 'bandit leader', 'monster', 'cultist', 'demon', 'dragon']
+        targets = ['merchant', 'noble', 'child', 'prisoner', 'sage', 'heir']
+        places = ['ruins', 'mountain', 'forest', 'castle', 'temple', 'cave']
+        bosses = ['Dark Lord', 'Ancient Evil', 'Corrupt King', 'Demon Prince', 'Dragon']
+        
+        title = title.replace('{item}', random.choice(items))
+        title = title.replace('{count}', str(random.randint(3, 10)))
+        title = title.replace('{enemy}', random.choice(enemies))
+        title = title.replace('{target}', random.choice(targets))
+        title = title.replace('{place}', random.choice(places))
+        title = title.replace('{boss}', random.choice(bosses))
+        title = title.replace('{event}', 'mysterious disappearances')
+        
+        if theme:
+            title = f"{title} ({theme})"
+        
+        objective_templates = {
+            'main': [
+                {'desc': 'Gather allies for the final battle', 'optional': False},
+                {'desc': 'Acquire the necessary equipment', 'optional': False},
+                {'desc': 'Defeat the main antagonist', 'optional': False}
+            ],
+            'side': [
+                {'desc': 'Speak with the quest giver', 'optional': False},
+                {'desc': 'Complete the task', 'optional': False},
+                {'desc': 'Return for reward', 'optional': False}
+            ],
+            'fetch': [
+                {'desc': 'Learn where the item is located', 'optional': False},
+                {'desc': 'Travel to the location', 'optional': False},
+                {'desc': 'Retrieve the item', 'optional': False},
+                {'desc': 'Return the item', 'optional': False}
+            ],
+            'kill': [
+                {'desc': 'Track down the target', 'optional': False},
+                {'desc': 'Defeat the target', 'optional': False},
+                {'desc': 'Collect proof of the deed', 'optional': True}
+            ],
+            'escort': [
+                {'desc': 'Meet with the person to escort', 'optional': False},
+                {'desc': 'Protect them during the journey', 'optional': False},
+                {'desc': 'Arrive at the destination safely', 'optional': False}
+            ],
+            'mystery': [
+                {'desc': 'Investigate the scene', 'optional': False},
+                {'desc': 'Interview witnesses', 'optional': False},
+                {'desc': 'Follow the clues', 'optional': False},
+                {'desc': 'Confront the culprit', 'optional': False}
+            ],
+            'rescue': [
+                {'desc': 'Learn where they are held', 'optional': False},
+                {'desc': 'Infiltrate the location', 'optional': False},
+                {'desc': 'Free the captive', 'optional': False},
+                {'desc': 'Escape to safety', 'optional': False}
+            ],
+            'exploration': [
+                {'desc': 'Find the entrance', 'optional': False},
+                {'desc': 'Explore the area', 'optional': False},
+                {'desc': 'Map key locations', 'optional': True},
+                {'desc': 'Discover the secret', 'optional': False}
+            ],
+            'boss': [
+                {'desc': 'Prepare for the confrontation', 'optional': False},
+                {'desc': 'Reach the boss', 'optional': False},
+                {'desc': 'Defeat the boss', 'optional': False}
+            ]
+        }
+        
+        objectives = objective_templates.get(quest_type, [{'desc': 'Complete the quest', 'optional': False}])
+        
+        reward_multiplier = {'easy': 1, 'medium': 2, 'hard': 3, 'epic': 5}.get(difficulty, 2)
+        xp_reward = 100 * reward_multiplier
+        gold_reward = 50 * reward_multiplier
+        
+        lines = [f"📜 **Generated Quest: {title}**"]
+        lines.append(f"Type: {quest_type} | Difficulty: {difficulty}")
+        lines.append(f"\n**Objectives:**")
+        for i, obj in enumerate(objectives, 1):
+            opt = " (optional)" if obj.get('optional') else ""
+            lines.append(f"  {i}. {obj['desc']}{opt}")
+        
+        lines.append(f"\n**Suggested Rewards:**")
+        lines.append(f"  - {xp_reward} XP per character")
+        lines.append(f"  - {gold_reward} gold per character")
+        
+        if auto_create and session:
+            quest_id = await self.db.create_quest(
+                guild_id=guild_id,
+                session_id=session['id'],
+                title=title,
+                description=f"A {difficulty} {quest_type} quest" + (f" with theme: {theme}" if theme else ""),
+                quest_type=quest_type,
+                giver_npc_id=related_npc_id,
+                objectives=objectives,
+                rewards={'xp': xp_reward, 'gold': gold_reward}
+            )
+            lines.append(f"\n✅ Quest created with ID: {quest_id}")
+        else:
+            lines.append(f"\n*Use create_quest tool to add this quest to the game.*")
+        
+        return "\n".join(lines)
+    
+    async def _generate_encounter(self, context: Dict, args: Dict) -> str:
+        """Generate an encounter"""
+        encounter_type = args.get('encounter_type', 'combat')
+        difficulty = args.get('difficulty', 'medium')
+        theme = args.get('theme', '')
+        party_level = args.get('party_level')
+        party_size = args.get('party_size')
+        auto_start_combat = args.get('auto_start_combat', False)
+        
+        session = await self._get_session_for_context(context)
+        
+        if session and (not party_level or not party_size):
+            participants = await self.db.get_session_participants(session['id'])
+            if participants:
+                levels = [p.get('level', 1) for p in participants if p.get('character_id')]
+                party_level = party_level or (sum(levels) // len(levels) if levels else 1)
+                party_size = party_size or len([p for p in participants if p.get('character_id')])
+        
+        party_level = party_level or 1
+        party_size = party_size or 4
+        
+        try:
+            with open('data/game_data/enemies.json', 'r') as f:
+                enemies_data = json.load(f)
+        except:
+            enemies_data = {}
+        
+        lines = [f"⚔️ **Generated Encounter**"]
+        lines.append(f"Type: {encounter_type} | Difficulty: {difficulty}")
+        lines.append(f"Party Level: {party_level} | Party Size: {party_size}")
+        
+        if theme:
+            lines.append(f"Theme: {theme}")
+        
+        if encounter_type == 'combat' or encounter_type == 'ambush' or encounter_type == 'boss':
+            enemy_count = {
+                'easy': max(1, party_size - 1),
+                'medium': party_size,
+                'hard': party_size + 1,
+                'deadly': party_size + 2
+            }.get(difficulty, party_size)
+            
+            if encounter_type == 'boss':
+                enemy_count = 1
+            
+            available_enemies = list(enemies_data.keys()) if enemies_data else ['goblin', 'orc', 'skeleton']
+            
+            lines.append(f"\n**Suggested Enemies ({enemy_count}):**")
+            for i in range(enemy_count):
+                enemy_type = random.choice(available_enemies)
+                enemy_data = enemies_data.get(enemy_type, {'hp': 10, 'ac': 12, 'damage': '1d6'})
+                
+                hp = enemy_data.get('hp', 10) + (party_level * 2)
+                ac = enemy_data.get('ac', 12)
+                damage = enemy_data.get('damage', '1d6')
+                
+                if encounter_type == 'boss':
+                    hp *= 3
+                    lines.append(f"  🔥 **BOSS: {enemy_type.title()}** - HP: {hp}, AC: {ac+2}, Damage: {damage}+{party_level}")
+                else:
+                    lines.append(f"  - {enemy_type.title()} - HP: {hp}, AC: {ac}, Damage: {damage}")
+            
+            base_xp = {'easy': 25, 'medium': 50, 'hard': 100, 'deadly': 200}.get(difficulty, 50)
+            total_xp = base_xp * enemy_count * party_level
+            lines.append(f"\n**XP Reward:** {total_xp} XP (to split)")
+        
+        elif encounter_type == 'social':
+            lines.append(f"\n**Social Encounter:**")
+            lines.append("- NPC with important information or obstacle")
+            lines.append("- Skill checks: Persuasion, Deception, Intimidation")
+            lines.append("- Potential outcomes: Alliance, Information, Passage")
+        
+        elif encounter_type == 'puzzle':
+            lines.append(f"\n**Puzzle Encounter:**")
+            puzzles = ['riddle door', 'pressure plates', 'elemental locks', 'symbol matching', 'lever sequence']
+            lines.append(f"- Type: {random.choice(puzzles)}")
+            lines.append("- Skill checks: Investigation, Intelligence, Arcana")
+            lines.append(f"- DC: {10 + party_level + (3 if difficulty == 'hard' else 0)}")
+        
+        elif encounter_type == 'trap':
+            lines.append(f"\n**Trap Encounter:**")
+            traps = ['pit trap', 'arrow trap', 'poison gas', 'falling rocks', 'magical ward']
+            trap_type = random.choice(traps)
+            dc = 10 + party_level + {'easy': 0, 'medium': 2, 'hard': 5, 'deadly': 8}.get(difficulty, 2)
+            damage = f"{party_level}d6"
+            lines.append(f"- Type: {trap_type}")
+            lines.append(f"- Detection DC: {dc}")
+            lines.append(f"- Disarm DC: {dc + 2}")
+            lines.append(f"- Damage: {damage}")
+        
+        if auto_start_combat and encounter_type in ['combat', 'ambush', 'boss']:
+            lines.append(f"\n*Use start_combat and add_enemy tools to begin this encounter.*")
+        
+        return "\n".join(lines)
+    
+    async def _generate_backstory(self, context: Dict, args: Dict) -> str:
+        """Generate or expand a character's backstory"""
+        character_id = args.get('character_id')
+        hooks = args.get('hooks', [])
+        connection_to_plot = args.get('connection_to_plot', '')
+        depth = args.get('depth', 'moderate')
+        
+        char = await self.db.get_character(character_id)
+        if not char:
+            return f"Error: Character with ID {character_id} not found."
+        
+        lines = [f"📖 **Backstory Generation for {char['name']}**"]
+        lines.append(f"Race: {char['race']} | Class: {char['char_class']} | Level: {char['level']}")
+        
+        current = char.get('backstory') or 'No existing backstory.'
+        lines.append(f"\n**Current Backstory:** {current[:200]}...")
+        
+        lines.append(f"\n**Generated Backstory Elements ({depth}):**")
+        
+        origins = {
+            'human': ['small farming village', 'bustling city', 'coastal town', 'mountain settlement'],
+            'elf': ['ancient forest', 'hidden enclave', 'crystal spire', 'woodland realm'],
+            'dwarf': ['mountain stronghold', 'underground city', 'mining colony', 'forge town'],
+            'halfling': ['peaceful shire', 'river community', 'traveling caravan', 'hidden village']
+        }
+        race_origins = origins.get(char['race'].lower(), ['unknown lands'])
+        origin = random.choice(race_origins)
+        lines.append(f"- **Origin:** Born in a {origin}")
+        
+        class_backgrounds = {
+            'warrior': ['trained by a legendary knight', 'survived a brutal war', 'rose from gladiator pits'],
+            'mage': ['discovered magic accidentally', 'apprenticed to a wizard', 'touched by wild magic'],
+            'rogue': ['grew up on the streets', 'former guild member', 'wrongfully accused noble'],
+            'cleric': ['received divine vision', 'raised in a temple', 'converted after tragedy'],
+            'ranger': ['grew up in the wilderness', 'sole survivor of attack', 'former military scout'],
+            'bard': ['trained in a college', 'traveling performer family', 'self-taught prodigy']
+        }
+        class_bg = class_backgrounds.get(char['char_class'].lower(), ['mysterious past'])
+        lines.append(f"- **Training:** {random.choice(class_bg).title()}")
+        
+        if hooks:
+            lines.append(f"- **Personal Hooks:** {', '.join(hooks)}")
+        else:
+            default_hooks = ['seeking lost family', 'pursuing ancient knowledge', 'running from dark past', 'proving themselves worthy']
+            lines.append(f"- **Suggested Hook:** {random.choice(default_hooks).title()}")
+        
+        if connection_to_plot:
+            lines.append(f"- **Plot Connection:** {connection_to_plot}")
+        
+        lines.append(f"- **Key Relationship:** A {random.choice(['mentor', 'rival', 'lost love', 'sibling', 'old friend'])} who shaped their path")
+        
+        secrets = ['knows forbidden knowledge', 'carries a cursed item', 'has a hidden bloodline', 'witnessed something they shouldn\'t have']
+        lines.append(f"- **Potential Secret:** {random.choice(secrets).title()}")
+        
+        if depth == 'detailed':
+            lines.append(f"\n**Detailed History:**")
+            lines.append(f"- Early life shaped by {origin}")
+            lines.append(f"- Pivotal moment that set them on their path")
+            lines.append(f"- Previous adventures or accomplishments")
+            lines.append(f"- Current goals and motivations")
+            lines.append(f"- Fears and weaknesses")
+        
+        lines.append(f"\n*Update the character's backstory using update_character_stats or direct database update.*")
+        
+        return "\n".join(lines)
+    
+    async def _generate_loot(self, context: Dict, args: Dict) -> str:
+        """Generate appropriate loot"""
+        loot_context = args.get('context', 'treasure chest')
+        value_tier = args.get('value_tier', 'common')
+        item_types = args.get('item_types', ['gold', 'consumable'])
+        party_level = args.get('party_level')
+        auto_distribute = args.get('auto_distribute', False)
+        
+        session = await self._get_session_for_context(context)
+        
+        if session and not party_level:
+            participants = await self.db.get_session_participants(session['id'])
+            if participants:
+                levels = [p.get('level', 1) for p in participants if p.get('character_id')]
+                party_level = sum(levels) // len(levels) if levels else 1
+        
+        party_level = party_level or 1
+        
+        try:
+            with open('data/game_data/items.json', 'r') as f:
+                items_data = json.load(f)
+        except:
+            items_data = {}
+        
+        gold_ranges = {
+            'poor': (5, 20),
+            'common': (20, 100),
+            'uncommon': (100, 500),
+            'rare': (500, 2000),
+            'epic': (2000, 10000),
+            'legendary': (10000, 50000)
+        }
+        
+        gold_min, gold_max = gold_ranges.get(value_tier, (20, 100))
+        gold_amount = random.randint(gold_min, gold_max) * party_level // 2
+        
+        lines = [f"💰 **Generated Loot**"]
+        lines.append(f"Context: {loot_context}")
+        lines.append(f"Tier: {value_tier} | Party Level: {party_level}")
+        lines.append(f"\n**Found:**")
+        
+        generated_items = []
+        
+        if 'gold' in item_types:
+            lines.append(f"  💰 {gold_amount} gold pieces")
+            generated_items.append({'type': 'gold', 'amount': gold_amount})
+        
+        if 'weapon' in item_types:
+            weapons = items_data.get('weapons', [{'name': 'Sword', 'damage': '1d8'}])
+            weapon = random.choice(weapons) if weapons else {'name': 'Sword', 'damage': '1d8'}
+            quality = {'poor': '', 'common': '', 'uncommon': 'Fine ', 'rare': 'Masterwork ', 'epic': 'Enchanted ', 'legendary': 'Legendary '}.get(value_tier, '')
+            lines.append(f"  ⚔️ {quality}{weapon.get('name', 'Weapon')} ({weapon.get('damage', '1d6')} damage)")
+            generated_items.append({'type': 'weapon', 'name': f"{quality}{weapon.get('name', 'Weapon')}"})
+        
+        if 'armor' in item_types:
+            armors = items_data.get('armor', [{'name': 'Chainmail', 'ac_bonus': 5}])
+            armor = random.choice(armors) if armors else {'name': 'Chainmail', 'ac_bonus': 5}
+            quality = {'poor': 'Damaged ', 'common': '', 'uncommon': 'Fine ', 'rare': 'Masterwork ', 'epic': 'Enchanted ', 'legendary': 'Legendary '}.get(value_tier, '')
+            lines.append(f"  🛡️ {quality}{armor.get('name', 'Armor')} (+{armor.get('ac_bonus', 2)} AC)")
+            generated_items.append({'type': 'armor', 'name': f"{quality}{armor.get('name', 'Armor')}"})
+        
+        if 'consumable' in item_types:
+            consumables = ['Health Potion', 'Mana Potion', 'Antidote', 'Scroll of Protection', 'Bomb']
+            count = {'poor': 1, 'common': 2, 'uncommon': 3, 'rare': 4, 'epic': 5, 'legendary': 6}.get(value_tier, 2)
+            for _ in range(count):
+                item = random.choice(consumables)
+                lines.append(f"  🧪 {item}")
+                generated_items.append({'type': 'consumable', 'name': item})
+        
+        if 'treasure' in item_types:
+            treasures = ['gemstone', 'golden chalice', 'silver necklace', 'ancient coin', 'jeweled ring']
+            treasure = random.choice(treasures)
+            value = random.randint(gold_min // 2, gold_max // 2)
+            lines.append(f"  💎 {treasure.title()} (worth ~{value} gold)")
+            generated_items.append({'type': 'treasure', 'name': treasure, 'value': value})
+        
+        if 'key_item' in item_types:
+            lines.append(f"  🔑 **Key Item:** Something important to the story")
+            lines.append(f"     *Use create_story_item to define this.*")
+        
+        if 'junk' in item_types:
+            junk = ['broken weapon', 'torn cloth', 'rusty chain', 'empty vial', 'faded letter']
+            lines.append(f"  🗑️ {random.choice(junk).title()} (vendor trash)")
+        
+        if auto_distribute and session:
+            lines.append(f"\n*Use give_item and give_gold tools to distribute this loot.*")
+        else:
+            lines.append(f"\n*Loot ready for distribution. Use inventory tools to give items.*")
+        
+        return "\n".join(lines)
+    
+    async def _initialize_campaign(self, context: Dict, args: Dict) -> str:
+        """Initialize a complete campaign with world, NPCs, and hooks"""
+        campaign_name = args.get('campaign_name', 'New Campaign')
+        theme = args.get('theme', 'fantasy adventure')
+        tone = args.get('tone', 'mixed')
+        starting_scenario = args.get('starting_scenario', '')
+        key_npcs_count = args.get('key_npcs_to_generate', 3)
+        include_ally = args.get('include_potential_ally', True)
+        
+        session = await self._get_session_for_context(context)
+        guild_id = context.get('guild_id')
+        user_id = context.get('user_id')
+        
+        lines = [f"🎭 **Campaign Initialization: {campaign_name}**"]
+        lines.append(f"Theme: {theme}")
+        lines.append(f"Tone: {tone}")
+        
+        if starting_scenario:
+            lines.append(f"\n**Starting Scenario:** {starting_scenario}")
+        
+        lines.append(f"\n📍 **Creating Starting Location...**")
+        start_location_result = await self._generate_location(context, {
+            'location_type': 'town',
+            'theme': theme,
+            'purpose': 'Starting area for the campaign',
+            'danger_level': 'safe'
+        })
+        lines.append(start_location_result)
+        
+        lines.append(f"\n👥 **Creating Key NPCs...**")
+        npc_types = ['quest_giver', 'villain', 'mysterious_stranger']
+        if include_ally:
+            npc_types.insert(0, 'ally')
+        
+        npc_result = await self._generate_key_npcs(context, {
+            'campaign_theme': theme,
+            'goals': starting_scenario,
+            'npc_types': npc_types[:key_npcs_count],
+            'count': key_npcs_count,
+            'make_party_members': include_ally
+        })
+        lines.append(npc_result)
+        
+        lines.append(f"\n📜 **Creating Initial Quest Hook...**")
+        quest_result = await self._generate_quest(context, {
+            'quest_type': 'main',
+            'difficulty': 'medium',
+            'theme': theme,
+            'auto_create': True
+        })
+        lines.append(quest_result)
+        
+        lines.append(f"\n" + "="*50)
+        lines.append(f"✅ **Campaign Ready!**")
+        lines.append(f"- Starting location created")
+        lines.append(f"- {key_npcs_count} key NPCs generated")
+        lines.append(f"- Initial quest hook created")
+        if include_ally:
+            lines.append(f"- Potential party ally available")
+        
+        lines.append(f"\n*The stage is set. Let the adventure begin!*")
+        
+        return "\n".join(lines)

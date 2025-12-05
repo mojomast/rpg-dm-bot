@@ -779,6 +779,217 @@ class Spells(commands.Cog):
         embed.set_footer(text="Spell slots recover after a long rest. Use /rest to recover.")
         
         await interaction.response.send_message(embed=embed)
+    
+    @spell_group.command(name="prepare", description="Prepare spells for the day")
+    async def prepare_spells(self, interaction: discord.Interaction):
+        """Manage spell preparation"""
+        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+        
+        if not char:
+            await interaction.response.send_message(
+                "❌ You need a character first!",
+                ephemeral=True
+            )
+            return
+        
+        spells = await self.db.get_character_spells(char['id'])
+        
+        # Filter to non-cantrip spells (cantrips are always prepared)
+        preparable = [s for s in spells if not s['is_cantrip']]
+        
+        if not preparable:
+            await interaction.response.send_message(
+                "❌ No spells available to prepare! Learn some spells first with `/spell learn`.",
+                ephemeral=True
+            )
+            return
+        
+        view = PrepareSpellsView(self, char, preparable)
+        
+        # Calculate prep limit (usually wisdom/int mod + level)
+        char_class = char['char_class'].lower()
+        if char_class in ['cleric', 'druid', 'paladin']:
+            mod = (char.get('wisdom', 10) - 10) // 2
+        else:
+            mod = (char.get('intelligence', 10) - 10) // 2
+        prep_limit = max(1, char['level'] + mod)
+        
+        prepared_count = len([s for s in preparable if s['is_prepared']])
+        
+        embed = discord.Embed(
+            title=f"📋 Prepare Spells - {char['name']}",
+            description=f"Prepared: **{prepared_count}/{prep_limit}**\n\n"
+                       "Select spells to prepare or unprepare:",
+            color=discord.Color.blue()
+        )
+        
+        # Show prepared spells
+        prepared = [s for s in preparable if s['is_prepared']]
+        unprepared = [s for s in preparable if not s['is_prepared']]
+        
+        if prepared:
+            prepared_text = "\n".join([f"✅ {s['spell_name']} (Lv{s['spell_level']})" for s in prepared[:10]])
+            embed.add_field(name="Prepared", value=prepared_text, inline=True)
+        
+        if unprepared:
+            unprepared_text = "\n".join([f"⬜ {s['spell_name']} (Lv{s['spell_level']})" for s in unprepared[:10]])
+            embed.add_field(name="Not Prepared", value=unprepared_text, inline=True)
+        
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    
+    @spell_group.command(name="quickcast", description="Quick cast a spell by name")
+    @app_commands.describe(
+        spell_name="Name of the spell",
+        slot_level="Spell slot level to use (auto-selects minimum if not provided)",
+        target="Target of the spell"
+    )
+    async def quickcast(
+        self,
+        interaction: discord.Interaction,
+        spell_name: str,
+        slot_level: Optional[int] = None,
+        target: Optional[str] = None
+    ):
+        """Quick cast a spell without menus"""
+        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+        
+        if not char:
+            await interaction.response.send_message(
+                "❌ You need a character first!",
+                ephemeral=True
+            )
+            return
+        
+        spells = await self.db.get_character_spells(char['id'], prepared_only=True)
+        
+        # Find matching spell
+        spell_lower = spell_name.lower()
+        spell_db = None
+        for s in spells:
+            if spell_lower in s['spell_name'].lower():
+                spell_db = s
+                break
+        
+        if not spell_db:
+            await interaction.response.send_message(
+                f"❌ You don't have a prepared spell matching '{spell_name}'!",
+                ephemeral=True
+            )
+            return
+        
+        spell_data = SPELLS_DATA.get('spells', {}).get(spell_db['spell_id'], {})
+        
+        # Cantrips don't use slots
+        if spell_db['is_cantrip']:
+            await self.execute_spell(interaction, char, spell_db['spell_id'], spell_data, target)
+            return
+        
+        # Use provided slot level or minimum
+        use_level = slot_level if slot_level else spell_db['spell_level']
+        
+        if use_level < spell_db['spell_level']:
+            await interaction.response.send_message(
+                f"❌ {spell_data.get('name', spell_db['spell_name'])} requires at least level {spell_db['spell_level']} slot!",
+                ephemeral=True
+            )
+            return
+        
+        # Check slot availability
+        slots = await self.db.get_spell_slots(char['id'])
+        if use_level not in slots or slots[use_level]['remaining'] <= 0:
+            await interaction.response.send_message(
+                f"❌ No level {use_level} spell slots remaining!",
+                ephemeral=True
+            )
+            return
+        
+        # Use the slot
+        await self.db.use_spell_slot(char['id'], use_level)
+        
+        # Calculate upcast bonus
+        upcast_levels = use_level - spell_db['spell_level']
+        
+        # Execute
+        await self.execute_spell(interaction, char, spell_db['spell_id'], spell_data, target, upcast_levels)
+    
+    @quickcast.autocomplete('spell_name')
+    async def quickcast_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        """Autocomplete for spell names"""
+        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+        if not char:
+            return []
+        
+        spells = await self.db.get_character_spells(char['id'], prepared_only=True)
+        choices = []
+        
+        for spell in spells:
+            if current.lower() in spell['spell_name'].lower():
+                choices.append(app_commands.Choice(
+                    name=spell['spell_name'][:100],
+                    value=spell['spell_name'][:100]
+                ))
+        
+        return choices[:25]
+
+
+class PrepareSpellsView(discord.ui.View):
+    """View for preparing/unpreparing spells"""
+    
+    def __init__(self, cog, character: Dict, spells: List[Dict]):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.character = character
+        self.spells = spells
+        
+        # Add dropdown for toggling preparation
+        self.add_item(PrepareSpellDropdown(cog, character, spells))
+
+
+class PrepareSpellDropdown(discord.ui.Select):
+    """Dropdown to toggle spell preparation"""
+    
+    def __init__(self, cog, character: Dict, spells: List[Dict]):
+        self.cog = cog
+        self.character = character
+        self.spell_map = {s['spell_id']: s for s in spells}
+        
+        options = []
+        for spell in spells[:25]:
+            status = "✅ " if spell['is_prepared'] else "⬜ "
+            options.append(discord.SelectOption(
+                label=f"{status}{spell['spell_name']}",
+                value=spell['spell_id'],
+                description=f"Level {spell['spell_level']} | {'Prepared' if spell['is_prepared'] else 'Not prepared'}",
+                emoji="🔮" if spell['is_prepared'] else "📖"
+            ))
+        
+        super().__init__(
+            placeholder="🔮 Toggle spell preparation...",
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        spell_id = self.values[0]
+        spell = self.spell_map.get(spell_id)
+        
+        if not spell:
+            await interaction.response.send_message("Spell not found!", ephemeral=True)
+            return
+        
+        # Toggle preparation
+        new_state = not spell['is_prepared']
+        await self.cog.db.set_spell_prepared(self.character['id'], spell_id, new_state)
+        
+        # Update local state
+        spell['is_prepared'] = new_state
+        
+        action = "prepared" if new_state else "unprepared"
+        await interaction.response.send_message(
+            f"{'✅' if new_state else '⬜'} **{spell['spell_name']}** has been {action}!",
+            ephemeral=True
+        )
 
 
 async def setup(bot):

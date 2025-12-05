@@ -1,0 +1,13 @@
+{
+    "name": "rpg-dm-manager",
+    "version": "1.0.0",
+    "description": "Web management interface for RPG DM Bot",
+    "scripts": {
+        "dev": "tsc --watch",
+        "build": "tsc && npm run copy-html",
+        "copy-html": "xcopy /Y index.html dist\\ && xcopy /Y styles.css dist\\"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.3"
+    }
+}

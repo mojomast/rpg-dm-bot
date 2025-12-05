@@ -1,6 +1,6 @@
 # 🎲 RPG Dungeon Master Bot
 
-An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games. Features persistent characters, combat mechanics, inventory management, interactive NPCs, multiplayer sessions, and AI-driven storytelling.
+An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games. Features persistent characters, combat mechanics, inventory management, interactive NPCs, multiplayer sessions, AI-driven storytelling, and a web dashboard for game management.
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot. The AI designed the architecture, implemented all features, wrote tests, and created documentation autonomously.
 
@@ -23,7 +23,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Equipment Slots**: Weapon, armor, accessory slots with stat bonuses
 - **Gold Economy**: Earn and spend gold at shops
 - **Crafting**: Combine items to create new ones
- - **Auto-Equip**: Starter kits and purchased equipment can be automatically equipped to appropriate slots (e.g., weapons to main hand, armor to body).
+- **Auto-Equip**: Starter kits and purchased equipment can be automatically equipped to appropriate slots (e.g., weapons to main hand, armor to body).
 
 ### 📜 Quest System
 - **Quest Planning**: DMs can create detailed quest plans with objectives
@@ -36,6 +36,19 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Relationships**: Track player-NPC relationships and reputation
 - **Merchants**: Buy and sell items with NPCs
 - **Quest Givers**: NPCs can offer and track quests
+- **NPC Party Members**: Recruit NPCs as companions who travel with you
+- **Loyalty System**: NPC companions have loyalty (0-100) that changes based on party actions
+- **Combat Assistance**: Party NPCs can attack, defend, heal, and use abilities in combat
+
+### 🌍 Generative AI Worldbuilding
+- **Campaign Initialization**: One command generates starting location, key NPCs, and quest hooks
+- **World Generation**: Create regions, cities, dungeons with thematic content
+- **Dynamic NPCs**: Generate key NPCs (allies, villains, mentors) that fit your campaign theme
+- **Quest Generation**: Auto-generate quests with objectives and scaled rewards
+- **Encounter Generation**: Create combat, social, puzzle, or trap encounters scaled to party
+- **Backstory Generation**: Expand character backstories with plot connections
+- **Loot Generation**: Context-appropriate loot scaled to party level
+- **Theme Support**: All generation respects campaign theme (Duke Nukem style, fantasy, grimdark, etc.)
 
 ### 🎲 Dice Rolling
 - **Standard Dice**: Roll any dice (d4, d6, d8, d10, d12, d20, d100)
@@ -48,7 +61,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Session Tracking**: Track active sessions and participants
 - **Party System**: Form adventuring parties
 - **Shared Progress**: All players see the same story progression
-- **Session Isolation**: Multiple games can run simultaneously without context bleed
+- **Session Isolation**: Multiple games can run simultaneously without context bleed - the AI DM correctly tracks which characters belong to which session
 - **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
 
 ### 🤖 AI Dungeon Master
@@ -58,12 +71,20 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Combat Descriptions**: Dramatic combat narration
 - **Retry Logic**: Automatic retry with exponential backoff for API reliability
 - **API Tools & Spells Support**: The AI DM can cast spells, call spell/ability tool actions, and manage character resources programmatically.
+
 ### 🪄 Spells & Abilities
 - **Spellcasting**: Classes that cast spells (Mage, Cleric, Bard, Warlock, Paladin, Ranger, etc.) have cantrips and leveled spells, spell slots, and upcasting support.
 - **Spellbook**: Characters can learn and prepare spells. Use `/spell learn` to add spells appropriate for your class and level.
 - **Spell Slots**: Spell slots are tracked and used when casting. Recover slots via long rest or through DM control. Use `/spell slots` to view available spell slots.
 - **Casting**: `/spell cast` supports cantrips (no slots), leveled spells with slot selection and upcasting, damage/healing/result summarization, and short description UI.
 - **Class Abilities**: Abilities like Second Wind, Action Surge, Sneak Attack, and Divine Smite are available and tracked with use counts.
+
+### 🌐 Web Dashboard
+- **Game Management**: View and edit sessions, characters, quests, NPCs from a web browser
+- **Data Editors**: Edit character classes, races, items, and spells
+- **Real-time Sync**: Changes made in the web interface are immediately available in Discord
+- **REST API**: Full API access for custom integrations (~76 endpoints)
+- **Coming Soon**: Browser-based chat interface to play without Discord
 
 
 ## 🚀 Quick Start
@@ -97,6 +118,44 @@ cp .env.example .env
 python run.py
 ```
 
+5. Run the web dashboard (optional, separate terminal):
+```bash
+cd web && uvicorn api:app --reload --port 8000
+# Open http://localhost:8000 in your browser
+```
+
+## 🌐 Web Dashboard
+
+The web dashboard provides a browser-based interface for game management:
+
+### Accessing the Dashboard
+1. Start the API server: `cd web && uvicorn api:app --port 8000`
+2. Open http://localhost:8000 in your browser
+
+### Available Pages
+- **Dashboard**: Overview of active sessions, characters, and recent activity
+- **Sessions**: Create, view, and manage game sessions
+- **Characters**: View and edit character details, stats, inventory
+- **Quests**: Manage quest definitions and track progress
+- **NPCs**: Create and edit NPCs, view relationships
+- **Locations**: Build your world map with connected locations
+- **Classes/Races**: Edit character class and race definitions with full CRUD operations
+- **Skill Trees**: Browse and edit class skill trees and branches
+- **Items/Spells**: Browse and search the item and spell databases with filtering
+
+### REST API
+The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api.py` for the complete API reference. Key endpoints:
+- `GET/POST /api/sessions` - Session management
+- `GET/POST /api/characters` - Character CRUD
+- `GET/POST /api/quests` - Quest management
+- `GET/POST /api/npcs` - NPC management
+- `GET/POST /api/locations` - World building
+- `GET/PUT /api/gamedata/classes` - Class editor (full CRUD)
+- `GET/PUT /api/gamedata/races` - Race editor (full CRUD)
+- `GET/PUT /api/gamedata/skills/trees/{class}` - Skill tree editor
+- `GET /api/gamedata/items` - Item database with filtering
+- `GET /api/gamedata/spells` - Spell database with filtering
+
 ## 📚 Commands
 
 ### Character Commands (`/character`)
@@ -119,6 +178,7 @@ python run.py
 | `/combat item` | Use an item |
 | `/combat flee` | Attempt to flee |
 | `/combat status` | View combat status |
+
 ### Spells (`/spell`)
 | Command | Description |
 |---------|-------------|

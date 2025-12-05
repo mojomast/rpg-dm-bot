@@ -45,9 +45,11 @@ class Database:
                     charisma INTEGER DEFAULT 10,
                     gold INTEGER DEFAULT 0,
                     backstory TEXT,
+                    current_location_id INTEGER,
                     is_active INTEGER DEFAULT 1,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (current_location_id) REFERENCES locations(id)
                 )
             """)
             
@@ -123,6 +125,7 @@ class Database:
                     description TEXT,
                     personality TEXT,
                     location TEXT,
+                    location_id INTEGER,
                     npc_type TEXT DEFAULT 'neutral',
                     is_merchant INTEGER DEFAULT 0,
                     merchant_inventory TEXT DEFAULT '[]',
@@ -130,7 +133,9 @@ class Database:
                     stats TEXT DEFAULT '{}',
                     is_alive INTEGER DEFAULT 1,
                     created_by INTEGER NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (location_id) REFERENCES locations(id)
                 )
             """)
             
@@ -236,6 +241,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     guild_id INTEGER NOT NULL,
+                    session_id INTEGER,
                     character_id INTEGER,
                     roll_type TEXT NOT NULL,
                     dice_expression TEXT NOT NULL,
@@ -243,7 +249,9 @@ class Database:
                     modifier INTEGER DEFAULT 0,
                     total INTEGER NOT NULL,
                     purpose TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (character_id) REFERENCES characters(id)
                 )
             """)
             
@@ -384,7 +392,246 @@ class Database:
                 )
             """)
             
+            # ================================================================
+            # CHARACTER SKILLS TABLE (learned skills from skill trees)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS character_skills (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    skill_id TEXT NOT NULL,
+                    skill_name TEXT NOT NULL,
+                    skill_branch TEXT NOT NULL,
+                    skill_tier INTEGER NOT NULL,
+                    is_passive INTEGER DEFAULT 0,
+                    cooldown_remaining INTEGER DEFAULT 0,
+                    uses_remaining INTEGER,
+                    max_uses INTEGER,
+                    recharge TEXT DEFAULT 'long_rest',
+                    unlocked_at TEXT NOT NULL,
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    UNIQUE(character_id, skill_id)
+                )
+            """)
+            
+            # ================================================================
+            # CHARACTER STATUS EFFECTS TABLE (buffs/debuffs)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS character_status_effects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    effect_id TEXT NOT NULL,
+                    effect_name TEXT NOT NULL,
+                    effect_type TEXT NOT NULL,
+                    source TEXT,
+                    duration_remaining INTEGER,
+                    is_permanent INTEGER DEFAULT 0,
+                    stacks INTEGER DEFAULT 1,
+                    properties TEXT DEFAULT '{}',
+                    applied_at TEXT NOT NULL,
+                    FOREIGN KEY (character_id) REFERENCES characters(id)
+                )
+            """)
+            
+            # ================================================================
+            # SKILL POINTS TABLE (track available skill points per character)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS character_skill_points (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    total_points INTEGER DEFAULT 0,
+                    spent_points INTEGER DEFAULT 0,
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    UNIQUE(character_id)
+                )
+            """)
+            
+            # ================================================================
+            # LOCATIONS TABLE
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS locations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER,
+                    guild_id INTEGER,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    location_type TEXT DEFAULT 'area',
+                    parent_location_id INTEGER,
+                    danger_level INTEGER DEFAULT 0,
+                    current_weather TEXT,
+                    hidden_secrets TEXT,
+                    connected_locations TEXT DEFAULT '[]',
+                    npcs_present TEXT DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (parent_location_id) REFERENCES locations(id)
+                )
+            """)
+            
+            # ================================================================
+            # LOCATION CONNECTIONS TABLE (travel between locations)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS location_connections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_location_id INTEGER NOT NULL,
+                    to_location_id INTEGER NOT NULL,
+                    direction TEXT,
+                    travel_time INTEGER DEFAULT 1,
+                    requirements TEXT,
+                    hidden INTEGER DEFAULT 0,
+                    bidirectional INTEGER DEFAULT 1,
+                    FOREIGN KEY (from_location_id) REFERENCES locations(id),
+                    FOREIGN KEY (to_location_id) REFERENCES locations(id),
+                    UNIQUE(from_location_id, to_location_id, direction)
+                )
+            """)
+            
+            # ================================================================
+            # STORY ITEMS TABLE (key items, artifacts, plot items)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS story_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER,
+                    guild_id INTEGER,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    item_type TEXT DEFAULT 'key_item',
+                    lore TEXT,
+                    discovery_conditions TEXT,
+                    is_discovered INTEGER DEFAULT 0,
+                    discovered_by INTEGER,
+                    discovered_at TEXT,
+                    current_holder_id INTEGER,
+                    location_id INTEGER,
+                    dm_notes TEXT,
+                    properties TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (discovered_by) REFERENCES characters(id),
+                    FOREIGN KEY (current_holder_id) REFERENCES characters(id),
+                    FOREIGN KEY (location_id) REFERENCES locations(id)
+                )
+            """)
+            
+            # ================================================================
+            # STORY EVENTS TABLE (plot events, triggers, encounters)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS story_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER,
+                    guild_id INTEGER,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    event_type TEXT DEFAULT 'story',
+                    trigger_conditions TEXT,
+                    status TEXT DEFAULT 'pending',
+                    priority INTEGER DEFAULT 0,
+                    location_id INTEGER,
+                    involved_npcs TEXT DEFAULT '[]',
+                    involved_items TEXT DEFAULT '[]',
+                    involved_characters TEXT DEFAULT '[]',
+                    outcomes TEXT DEFAULT '{}',
+                    dm_notes TEXT,
+                    triggered_at TEXT,
+                    resolved_at TEXT,
+                    resolution_outcome TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (location_id) REFERENCES locations(id)
+                )
+            """)
+            
+            # ================================================================
+            # SESSION SNAPSHOTS TABLE (save/load game state)
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS session_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    snapshot_data TEXT NOT NULL,
+                    created_by INTEGER,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+            """)
+            
             await db.commit()
+            
+            # Run migrations for existing databases
+            await self._run_migrations(db)
+    
+    async def _run_migrations(self, db):
+        """Run database migrations for schema changes"""
+        # Migration 1: Add priority column to story_events if it doesn't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(story_events)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            
+            if 'priority' not in columns:
+                await db.execute("ALTER TABLE story_events ADD COLUMN priority INTEGER DEFAULT 0")
+                await db.commit()
+            
+            # Migration 1b: Add triggered_at column to story_events if it doesn't exist
+            if 'triggered_at' not in columns:
+                await db.execute("ALTER TABLE story_events ADD COLUMN triggered_at TEXT")
+                await db.commit()
+            
+            # Migration 1c: Add resolved_at column to story_events if it doesn't exist
+            if 'resolved_at' not in columns:
+                await db.execute("ALTER TABLE story_events ADD COLUMN resolved_at TEXT")
+                await db.commit()
+            
+            # Migration 1d: Add resolution_outcome column to story_events if it doesn't exist
+            if 'resolution_outcome' not in columns:
+                await db.execute("ALTER TABLE story_events ADD COLUMN resolution_outcome TEXT")
+                await db.commit()
+        except Exception:
+            pass  # Table might not exist yet, that's fine
+        
+        # Migration 2: Add points_of_interest to locations if it doesn't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(locations)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            
+            if 'points_of_interest' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN points_of_interest TEXT DEFAULT '[]'")
+                await db.commit()
+        except Exception:
+            pass
+        
+        # Migration 3: Add NPC party member columns to npcs table if they don't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(npcs)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            
+            if 'is_party_member' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN is_party_member INTEGER DEFAULT 0")
+                await db.commit()
+            
+            if 'party_role' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN party_role TEXT")
+                await db.commit()
+            
+            if 'loyalty' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN loyalty INTEGER DEFAULT 50")
+                await db.commit()
+            
+            if 'combat_stats' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN combat_stats TEXT DEFAULT '{}'")
+                await db.commit()
+        except Exception:
+            pass
     
     # ========================================================================
     # CHARACTER METHODS
@@ -749,6 +996,11 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
     
+    async def set_spell_prepared(self, character_id: int, spell_id: str,
+                                  prepared: bool = True) -> bool:
+        """Alias for prepare_spell - set spell preparation status"""
+        return await self.prepare_spell(character_id, spell_id, prepared)
+    
     async def get_spell_slots(self, character_id: int) -> Dict[int, Dict[str, int]]:
         """Get spell slots for a character"""
         async with aiosqlite.connect(self.db_path) as db:
@@ -898,6 +1150,327 @@ class Database:
                     WHERE character_id = ? AND recharge = 'short_rest' AND max_uses IS NOT NULL
                 """, (character_id,))
             await db.commit()
+    
+    # ========================================================================
+    # SKILL METHODS
+    # ========================================================================
+    
+    async def learn_skill(self, character_id: int, skill_id: str, skill_name: str,
+                         skill_branch: str, skill_tier: int, is_passive: bool = False,
+                         max_uses: int = None, recharge: str = 'long_rest') -> int:
+        """Learn a new skill from the skill tree"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                cursor = await db.execute("""
+                    INSERT INTO character_skills (character_id, skill_id, skill_name,
+                        skill_branch, skill_tier, is_passive, uses_remaining, max_uses,
+                        recharge, unlocked_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (character_id, skill_id, skill_name, skill_branch, skill_tier,
+                      1 if is_passive else 0, max_uses, max_uses, recharge, now))
+                await db.commit()
+                return cursor.lastrowid
+            except Exception:
+                return -1
+    
+    async def get_character_skills(self, character_id: int) -> List[Dict[str, Any]]:
+        """Get all learned skills for a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM character_skills WHERE character_id = ?
+                ORDER BY skill_branch, skill_tier, skill_name
+            """, (character_id,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_character_skills_by_branch(self, character_id: int, 
+                                              branch: str) -> List[Dict[str, Any]]:
+        """Get all skills for a character in a specific branch"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM character_skills 
+                WHERE character_id = ? AND skill_branch = ?
+                ORDER BY skill_tier, skill_name
+            """, (character_id, branch))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def has_skill(self, character_id: int, skill_id: str) -> bool:
+        """Check if character has learned a specific skill"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT 1 FROM character_skills WHERE character_id = ? AND skill_id = ?
+            """, (character_id, skill_id))
+            return await cursor.fetchone() is not None
+    
+    async def use_skill(self, character_id: int, skill_id: str) -> bool:
+        """Use a skill. Returns False if no uses remaining or on cooldown."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT uses_remaining, max_uses, cooldown_remaining, is_passive 
+                FROM character_skills 
+                WHERE character_id = ? AND skill_id = ?
+            """, (character_id, skill_id))
+            row = await cursor.fetchone()
+            
+            if not row:
+                return False
+            
+            uses_remaining, max_uses, cooldown_remaining, is_passive = row
+            
+            # Passive skills can't be "used"
+            if is_passive:
+                return False
+            
+            # Check cooldown
+            if cooldown_remaining and cooldown_remaining > 0:
+                return False
+            
+            # Unlimited use skill
+            if max_uses is None:
+                return True
+            
+            # Check remaining uses
+            if uses_remaining is not None and uses_remaining <= 0:
+                return False
+            
+            await db.execute("""
+                UPDATE character_skills SET uses_remaining = uses_remaining - 1
+                WHERE character_id = ? AND skill_id = ?
+            """, (character_id, skill_id))
+            await db.commit()
+            return True
+    
+    async def set_skill_cooldown(self, character_id: int, skill_id: str, 
+                                  cooldown: int) -> None:
+        """Set cooldown for a skill (in rounds/turns)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE character_skills SET cooldown_remaining = ?
+                WHERE character_id = ? AND skill_id = ?
+            """, (cooldown, character_id, skill_id))
+            await db.commit()
+    
+    async def reduce_cooldowns(self, character_id: int, amount: int = 1) -> None:
+        """Reduce all cooldowns by amount (usually called each turn)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE character_skills 
+                SET cooldown_remaining = MAX(0, cooldown_remaining - ?)
+                WHERE character_id = ? AND cooldown_remaining > 0
+            """, (amount, character_id))
+            await db.commit()
+    
+    async def restore_skills(self, character_id: int, 
+                            recharge_type: str = 'long_rest') -> None:
+        """Restore skill uses based on recharge type"""
+        async with aiosqlite.connect(self.db_path) as db:
+            if recharge_type == 'long_rest':
+                # Restore all skills and reset cooldowns
+                await db.execute("""
+                    UPDATE character_skills SET uses_remaining = max_uses, cooldown_remaining = 0
+                    WHERE character_id = ? AND max_uses IS NOT NULL
+                """, (character_id,))
+            else:
+                # Short rest - only restore short_rest skills
+                await db.execute("""
+                    UPDATE character_skills SET uses_remaining = max_uses, cooldown_remaining = 0
+                    WHERE character_id = ? AND recharge = 'short_rest' AND max_uses IS NOT NULL
+                """, (character_id,))
+            await db.commit()
+    
+    async def unlearn_skill(self, character_id: int, skill_id: str) -> bool:
+        """Remove a skill from a character (e.g., for respec)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                DELETE FROM character_skills WHERE character_id = ? AND skill_id = ?
+            """, (character_id, skill_id))
+            await db.commit()
+            return cursor.rowcount > 0
+    
+    # ========================================================================
+    # SKILL POINTS METHODS
+    # ========================================================================
+    
+    async def get_skill_points(self, character_id: int) -> Dict[str, int]:
+        """Get skill points for a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT total_points, spent_points FROM character_skill_points
+                WHERE character_id = ?
+            """, (character_id,))
+            row = await cursor.fetchone()
+            
+            if row:
+                return {"total": row[0], "spent": row[1], "available": row[0] - row[1]}
+            return {"total": 0, "spent": 0, "available": 0}
+    
+    async def add_skill_points(self, character_id: int, points: int) -> None:
+        """Add skill points to a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO character_skill_points (character_id, total_points, spent_points)
+                VALUES (?, ?, 0)
+                ON CONFLICT(character_id) DO UPDATE SET total_points = total_points + ?
+            """, (character_id, points, points))
+            await db.commit()
+    
+    async def spend_skill_points(self, character_id: int, points: int) -> bool:
+        """Spend skill points. Returns False if not enough points."""
+        skill_points = await self.get_skill_points(character_id)
+        
+        if skill_points["available"] < points:
+            return False
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE character_skill_points SET spent_points = spent_points + ?
+                WHERE character_id = ?
+            """, (points, character_id))
+            await db.commit()
+        return True
+    
+    async def refund_skill_points(self, character_id: int, points: int) -> None:
+        """Refund skill points (for respec)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE character_skill_points 
+                SET spent_points = MAX(0, spent_points - ?)
+                WHERE character_id = ?
+            """, (points, character_id))
+            await db.commit()
+    
+    # ========================================================================
+    # STATUS EFFECTS METHODS
+    # ========================================================================
+    
+    async def apply_status_effect(self, character_id: int, effect_id: str, effect_name: str,
+                                   effect_type: str, duration: int = None, 
+                                   source: str = None, stacks: int = 1,
+                                   is_permanent: bool = False, 
+                                   properties: Dict = None) -> int:
+        """Apply a status effect (buff/debuff) to a character"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            # Check if effect already exists and can stack
+            cursor = await db.execute("""
+                SELECT id, stacks FROM character_status_effects
+                WHERE character_id = ? AND effect_id = ?
+            """, (character_id, effect_id))
+            existing = await cursor.fetchone()
+            
+            if existing:
+                # Update stacks and refresh duration
+                await db.execute("""
+                    UPDATE character_status_effects 
+                    SET stacks = stacks + ?, duration_remaining = ?
+                    WHERE id = ?
+                """, (stacks, duration, existing[0]))
+                await db.commit()
+                return existing[0]
+            else:
+                cursor = await db.execute("""
+                    INSERT INTO character_status_effects (character_id, effect_id, effect_name,
+                        effect_type, source, duration_remaining, is_permanent, stacks, 
+                        properties, applied_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (character_id, effect_id, effect_name, effect_type, source, duration,
+                      1 if is_permanent else 0, stacks, json.dumps(properties or {}), now))
+                await db.commit()
+                return cursor.lastrowid
+    
+    async def get_status_effects(self, character_id: int, 
+                                  effect_type: str = None) -> List[Dict[str, Any]]:
+        """Get all status effects on a character, optionally filtered by type"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            if effect_type:
+                cursor = await db.execute("""
+                    SELECT * FROM character_status_effects 
+                    WHERE character_id = ? AND effect_type = ?
+                    ORDER BY applied_at
+                """, (character_id, effect_type))
+            else:
+                cursor = await db.execute("""
+                    SELECT * FROM character_status_effects WHERE character_id = ?
+                    ORDER BY effect_type, applied_at
+                """, (character_id,))
+            
+            rows = await cursor.fetchall()
+            effects = []
+            for row in rows:
+                effect = dict(row)
+                effect['properties'] = json.loads(effect['properties'])
+                effects.append(effect)
+            return effects
+    
+    async def has_status_effect(self, character_id: int, effect_id: str) -> bool:
+        """Check if character has a specific status effect"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT 1 FROM character_status_effects 
+                WHERE character_id = ? AND effect_id = ?
+            """, (character_id, effect_id))
+            return await cursor.fetchone() is not None
+    
+    async def remove_status_effect(self, character_id: int, effect_id: str) -> bool:
+        """Remove a specific status effect"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                DELETE FROM character_status_effects 
+                WHERE character_id = ? AND effect_id = ?
+            """, (character_id, effect_id))
+            await db.commit()
+            return cursor.rowcount > 0
+    
+    async def tick_status_effects(self, character_id: int) -> List[str]:
+        """Reduce duration of all effects by 1 and remove expired ones.
+        Returns list of removed effect IDs."""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Get effects that will expire
+            cursor = await db.execute("""
+                SELECT effect_id FROM character_status_effects
+                WHERE character_id = ? AND duration_remaining = 1 AND is_permanent = 0
+            """, (character_id,))
+            expired = [row[0] for row in await cursor.fetchall()]
+            
+            # Remove expired effects
+            await db.execute("""
+                DELETE FROM character_status_effects
+                WHERE character_id = ? AND duration_remaining <= 1 AND is_permanent = 0
+            """, (character_id,))
+            
+            # Reduce duration of remaining effects
+            await db.execute("""
+                UPDATE character_status_effects
+                SET duration_remaining = duration_remaining - 1
+                WHERE character_id = ? AND duration_remaining > 1 AND is_permanent = 0
+            """, (character_id,))
+            
+            await db.commit()
+            return expired
+    
+    async def clear_status_effects(self, character_id: int, 
+                                    effect_type: str = None) -> int:
+        """Clear all status effects (or just a specific type) from a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            if effect_type:
+                cursor = await db.execute("""
+                    DELETE FROM character_status_effects 
+                    WHERE character_id = ? AND effect_type = ?
+                """, (character_id, effect_type))
+            else:
+                cursor = await db.execute("""
+                    DELETE FROM character_status_effects WHERE character_id = ?
+                """, (character_id,))
+            await db.commit()
+            return cursor.rowcount
     
     # ========================================================================
     # QUEST METHODS
@@ -1190,13 +1763,15 @@ class Database:
                 await db.commit()
                 return new_rep
             else:
+                # Cap initial reputation between -100 and 100
+                initial_rep = max(-100, min(100, reputation_change))
                 await db.execute("""
                     INSERT INTO npc_relationships (npc_id, character_id, reputation, 
                         relationship_notes, last_interaction)
                     VALUES (?, ?, ?, ?, ?)
-                """, (npc_id, character_id, reputation_change, notes, now))
+                """, (npc_id, character_id, initial_rep, notes, now))
                 await db.commit()
-                return reputation_change
+                return initial_rep
     
     async def get_npc_relationship(self, npc_id: int, character_id: int) -> Dict[str, Any]:
         """Get relationship between NPC and character"""
@@ -1208,6 +1783,100 @@ class Database:
             """, (npc_id, character_id))
             row = await cursor.fetchone()
             return dict(row) if row else {"reputation": 0, "relationship_notes": None}
+    
+    # ========================================================================
+    # NPC PARTY MEMBER METHODS
+    # ========================================================================
+    
+    async def add_npc_to_party(self, npc_id: int, party_role: str = None, 
+                               combat_stats: Dict = None) -> bool:
+        """Add an NPC as a party member/companion"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                # Parse combat_stats if it's a string
+                if isinstance(combat_stats, str):
+                    combat_stats = json.loads(combat_stats)
+                
+                await db.execute("""
+                    UPDATE npcs SET 
+                        is_party_member = 1,
+                        party_role = ?,
+                        loyalty = COALESCE(loyalty, 50),
+                        combat_stats = ?
+                    WHERE id = ?
+                """, (party_role, json.dumps(combat_stats or {}), npc_id))
+                await db.commit()
+                return True
+            except Exception:
+                return False
+    
+    async def remove_npc_from_party(self, npc_id: int) -> bool:
+        """Remove an NPC from the party"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("""
+                    UPDATE npcs SET 
+                        is_party_member = 0,
+                        party_role = NULL
+                    WHERE id = ?
+                """, (npc_id,))
+                await db.commit()
+                return True
+            except Exception:
+                return False
+    
+    async def get_party_npcs(self, session_id: int) -> List[Dict[str, Any]]:
+        """Get all NPC party members for a session"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            try:
+                cursor = await db.execute("""
+                    SELECT * FROM npcs 
+                    WHERE session_id = ? AND is_party_member = 1 AND is_alive = 1
+                    ORDER BY name
+                """, (session_id,))
+                rows = await cursor.fetchall()
+                npcs = []
+                for row in rows:
+                    npc = dict(row)
+                    npc['merchant_inventory'] = json.loads(npc.get('merchant_inventory', '[]') or '[]')
+                    npc['stats'] = json.loads(npc.get('stats', '{}') or '{}')
+                    npc['combat_stats'] = json.loads(npc.get('combat_stats', '{}') or '{}')
+                    npcs.append(npc)
+                return npcs
+            except Exception:
+                # Handle case where new columns don't exist yet
+                cursor = await db.execute("""
+                    SELECT * FROM npcs 
+                    WHERE session_id = ? AND is_alive = 1
+                    ORDER BY name
+                """, (session_id,))
+                rows = await cursor.fetchall()
+                # Return empty for party NPCs if columns don't exist
+                return []
+    
+    async def update_npc_loyalty(self, npc_id: int, loyalty_change: int) -> int:
+        """Update an NPC party member's loyalty (0-100 scale)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT loyalty FROM npcs WHERE id = ?", (npc_id,))
+            row = await cursor.fetchone()
+            if row:
+                current = row[0] or 50
+                new_loyalty = max(0, min(100, current + loyalty_change))
+                await db.execute("UPDATE npcs SET loyalty = ? WHERE id = ?", (new_loyalty, npc_id))
+                await db.commit()
+                return new_loyalty
+            return 50
+    
+    async def get_npc_loyalty(self, npc_id: int) -> int:
+        """Get an NPC's current loyalty level"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                cursor = await db.execute("SELECT loyalty FROM npcs WHERE id = ?", (npc_id,))
+                row = await cursor.fetchone()
+                return row[0] if row and row[0] is not None else 50
+            except Exception:
+                return 50
     
     # ========================================================================
     # COMBAT METHODS
@@ -1308,6 +1977,15 @@ class Database:
                 "max_hp": combatant['max_hp'],
                 "is_dead": new_hp <= 0
             }
+    
+    async def update_combatant_initiative(self, participant_id: int, initiative: int) -> bool:
+        """Update a combatant's initiative value"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE combat_participants SET initiative = ? WHERE id = ?",
+                (initiative, participant_id))
+            await db.commit()
+            return True
     
     async def add_status_effect(self, participant_id: int, effect: str, 
                                duration: int = -1) -> bool:
@@ -1426,6 +2104,58 @@ class Database:
                 session['world_state'] = json.loads(session['world_state'])
                 return session
             return None
+    
+    async def get_full_session_state(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Get full session state including participants, characters, locations, etc."""
+        session = await self.get_session(session_id)
+        if not session:
+            return None
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Get participants with character info
+            cursor = await db.execute("""
+                SELECT sp.*, c.name as character_name, c.class as character_class, 
+                       c.race as character_race, c.level as character_level
+                FROM session_participants sp
+                LEFT JOIN characters c ON sp.character_id = c.id
+                WHERE sp.session_id = ?
+            """, (session_id,))
+            participants = [dict(row) for row in await cursor.fetchall()]
+            
+            # Get session locations
+            cursor = await db.execute("""
+                SELECT * FROM locations WHERE session_id = ?
+            """, (session_id,))
+            locations = [dict(row) for row in await cursor.fetchall()]
+            
+            # Get session NPCs
+            cursor = await db.execute("""
+                SELECT * FROM npcs WHERE session_id = ?
+            """, (session_id,))
+            npcs = [dict(row) for row in await cursor.fetchall()]
+            
+            # Get session quests
+            cursor = await db.execute("""
+                SELECT * FROM quests WHERE session_id = ?
+            """, (session_id,))
+            quests = []
+            for row in await cursor.fetchall():
+                quest = dict(row)
+                if quest.get('objectives'):
+                    quest['objectives'] = json.loads(quest['objectives'])
+                if quest.get('rewards'):
+                    quest['rewards'] = json.loads(quest['rewards'])
+                quests.append(quest)
+        
+        return {
+            **session,
+            "participants": participants,
+            "locations": locations,
+            "npcs": npcs,
+            "quests": quests
+        }
     
     async def get_guild_sessions(self, guild_id: int) -> List[Dict[str, Any]]:
         """Get all sessions for a guild"""
@@ -1750,15 +2480,20 @@ class Database:
         return await self.get_session_participants(session_id)
     
     async def get_user_active_session(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
-        """Get the active session that a user is participating in for a guild"""
+        """Get the active session that a user is participating in for a guild.
+        
+        Returns the most recently CREATED session, not the most recently played one,
+        to ensure new games take precedence over old ones.
+        """
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             # Find active sessions where this user is a participant
+            # Order by session ID descending (newest created first) to prioritize new games
             cursor = await db.execute("""
                 SELECT s.* FROM sessions s
                 INNER JOIN session_participants sp ON s.id = sp.session_id
                 WHERE s.guild_id = ? AND sp.user_id = ? AND s.status = 'active'
-                ORDER BY s.last_played DESC NULLS LAST
+                ORDER BY s.id DESC
                 LIMIT 1
             """, (guild_id, user_id))
             row = await cursor.fetchone()
@@ -1875,16 +2610,6 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("DELETE FROM quest_progress WHERE quest_id = ?", (quest_id,))
             await db.execute("DELETE FROM quests WHERE id = ?", (quest_id,))
-            await db.commit()
-            return True
-    
-    async def update_gold(self, character_id: int, amount: int) -> bool:
-        """Add or subtract gold from a character"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE characters SET gold = gold + ?, updated_at = ?
-                WHERE id = ?
-            """, (amount, datetime.utcnow().isoformat(), character_id))
             await db.commit()
             return True
     
@@ -2128,3 +2853,1179 @@ class Database:
             """, (datetime.utcnow().isoformat(), user_id, guild_id))
             await db.commit()
             return True
+
+    # ==================== LOCATION METHODS ====================
+    
+    async def get_locations(self, session_id: int = None, guild_id: int = None) -> List[Dict]:
+        """Get all locations, optionally filtered by session or guild"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            if session_id:
+                cursor = await db.execute("""
+                    SELECT * FROM locations WHERE session_id = ? ORDER BY name
+                """, (session_id,))
+            elif guild_id:
+                cursor = await db.execute("""
+                    SELECT * FROM locations WHERE guild_id = ? ORDER BY name
+                """, (guild_id,))
+            else:
+                cursor = await db.execute("""
+                    SELECT * FROM locations ORDER BY name
+                """)
+            
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_location(self, location_id: int) -> Optional[Dict]:
+        """Get a specific location by ID"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM locations WHERE id = ?
+            """, (location_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    
+    async def create_location(
+        self,
+        guild_id: int,
+        name: str,
+        created_by: int,
+        session_id: int = None,
+        description: str = "",
+        location_type: str = "generic",
+        points_of_interest: List = None,
+        current_weather: str = None,
+        danger_level: int = 0,
+        hidden_secrets: str = None
+    ) -> int:
+        """Create a new location"""
+        now = datetime.utcnow().isoformat()
+        
+        # Serialize points_of_interest to JSON
+        poi_json = json.dumps(points_of_interest) if points_of_interest else "[]"
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO locations 
+                (session_id, guild_id, name, description, type, coordinates, 
+                 danger_level, weather, secrets, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, guild_id, name, description, location_type,
+                  poi_json, danger_level, current_weather, hidden_secrets, now))
+            await db.commit()
+            return cursor.lastrowid
+            await db.commit()
+            return cursor.lastrowid
+    
+    async def update_location(self, location_id: int, **kwargs) -> bool:
+        """Update a location"""
+        if not kwargs:
+            return False
+        
+        # Map API field names to DB column names
+        if 'location_type' in kwargs:
+            kwargs['type'] = kwargs.pop('location_type')
+        if 'current_weather' in kwargs:
+            kwargs['weather'] = kwargs.pop('current_weather')
+        if 'hidden_secrets' in kwargs:
+            kwargs['secrets'] = kwargs.pop('hidden_secrets')
+        
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [location_id]
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(f"""
+                UPDATE locations SET {fields} WHERE id = ?
+            """, values)
+            await db.commit()
+            return True
+    
+    async def delete_location(self, location_id: int) -> bool:
+        """Delete a location"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM location_connections WHERE from_location_id = ? OR to_location_id = ?", 
+                           (location_id, location_id))
+            await db.execute("DELETE FROM locations WHERE id = ?", (location_id,))
+            await db.commit()
+            return True
+    
+    async def connect_locations(
+        self,
+        from_location_id: int,
+        to_location_id: int,
+        direction: str,
+        travel_time: int = 1,
+        requirements: str = None,
+        hidden: bool = False
+    ) -> int:
+        """Create a connection between two locations"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO location_connections 
+                (from_location_id, to_location_id, direction, travel_time, requirements, hidden)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (from_location_id, to_location_id, direction, travel_time, requirements, int(hidden)))
+            await db.commit()
+            return cursor.lastrowid
+    
+    async def get_location_connections(self, location_id: int) -> List[Dict]:
+        """Get all connections from a location"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT lc.*, l.name as destination_name 
+                FROM location_connections lc
+                JOIN locations l ON lc.to_location_id = l.id
+                WHERE lc.from_location_id = ?
+            """, (location_id,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    # ==================== STORY ITEMS METHODS ====================
+    
+    async def get_story_items(self, session_id: int = None, guild_id: int = None) -> List[Dict]:
+        """Get all story items, optionally filtered"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            if session_id:
+                cursor = await db.execute("""
+                    SELECT * FROM story_items WHERE session_id = ? ORDER BY name
+                """, (session_id,))
+            elif guild_id:
+                cursor = await db.execute("""
+                    SELECT si.* FROM story_items si
+                    JOIN sessions s ON si.session_id = s.id
+                    WHERE s.guild_id = ? ORDER BY si.name
+                """, (guild_id,))
+            else:
+                cursor = await db.execute("""
+                    SELECT * FROM story_items ORDER BY name
+                """)
+            
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_story_item(self, item_id: int) -> Optional[Dict]:
+        """Get a specific story item by ID"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM story_items WHERE id = ?
+            """, (item_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    
+    async def create_story_item(
+        self,
+        guild_id: int,
+        name: str,
+        created_by: int,
+        session_id: int = None,
+        description: str = "",
+        item_type: str = "misc",
+        lore: str = None,
+        discovery_conditions: str = None,
+        dm_notes: str = None
+    ) -> int:
+        """Create a new story item"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO story_items 
+                (session_id, name, description, type, lore, rarity, discovered, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, name, description, item_type, lore, discovery_conditions or "common", 0, now))
+            await db.commit()
+            return cursor.lastrowid
+    
+    async def update_story_item(self, item_id: int, **kwargs) -> bool:
+        """Update a story item"""
+        if not kwargs:
+            return False
+        
+        # Map API field names to DB column names
+        if 'is_discovered' in kwargs:
+            kwargs['discovered'] = int(kwargs.pop('is_discovered'))
+        elif 'discovered' in kwargs:
+            kwargs['discovered'] = int(kwargs['discovered'])
+        
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [item_id]
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(f"""
+                UPDATE story_items SET {fields} WHERE id = ?
+            """, values)
+            await db.commit()
+            return True
+    
+    async def delete_story_item(self, item_id: int) -> bool:
+        """Delete a story item"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM story_items WHERE id = ?", (item_id,))
+            await db.commit()
+            return True
+    
+    async def reveal_story_item(self, item_id: int) -> bool:
+        """Mark a story item as discovered"""
+        return await self.update_story_item(item_id, discovered=True)
+
+    async def get_story_items_at_location(self, location_id: int) -> List[Dict]:
+        """Get all story items at a specific location"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM story_items 
+                WHERE location_id = ? AND current_holder_id IS NULL
+                ORDER BY name
+            """, (location_id,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    # ==================== STORY EVENTS METHODS ====================
+    
+    async def get_story_events(self, session_id: int = None, guild_id: int = None, status: str = None) -> List[Dict]:
+        """Get all story events, optionally filtered"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            conditions = []
+            params = []
+            
+            if session_id:
+                conditions.append("se.session_id = ?")
+                params.append(session_id)
+            if guild_id:
+                conditions.append("s.guild_id = ?")
+                params.append(guild_id)
+            if status:
+                conditions.append("se.status = ?")
+                params.append(status)
+            
+            if guild_id and not session_id:
+                # Need to join with sessions
+                query = "SELECT se.* FROM story_events se JOIN sessions s ON se.session_id = s.id"
+            else:
+                query = "SELECT * FROM story_events se"
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY se.created_at DESC"
+            
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_story_event(self, event_id: int) -> Optional[Dict]:
+        """Get a specific story event by ID"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM story_events WHERE id = ?
+            """, (event_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    
+    async def create_story_event(
+        self,
+        guild_id: int,
+        name: str,
+        created_by: int,
+        session_id: int = None,
+        description: str = "",
+        event_type: str = "side_event",
+        trigger_conditions: str = None,
+        dm_notes: str = None
+    ) -> int:
+        """Create a new story event"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO story_events 
+                (session_id, name, description, type, triggers, status, outcomes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, name, description, event_type, trigger_conditions, "pending", dm_notes, now))
+            await db.commit()
+            return cursor.lastrowid
+    
+    async def update_story_event(self, event_id: int, **kwargs) -> bool:
+        """Update a story event"""
+        if not kwargs:
+            return False
+        
+        # Map API field names to DB column names
+        if 'trigger_conditions' in kwargs:
+            kwargs['triggers'] = kwargs.pop('trigger_conditions')
+        
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [event_id]
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(f"""
+                UPDATE story_events SET {fields} WHERE id = ?
+            """, values)
+            await db.commit()
+            return True
+    
+    async def delete_story_event(self, event_id: int) -> bool:
+        """Delete a story event"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM story_events WHERE id = ?", (event_id,))
+            await db.commit()
+            return True
+    
+    async def trigger_event(self, event_id: int) -> bool:
+        """Mark a story event as triggered"""
+        now = datetime.utcnow().isoformat()
+        return await self.update_story_event(event_id, status="triggered", triggered_at=now)
+    
+    async def resolve_event(self, event_id: int, outcome: str = None) -> bool:
+        """Mark a story event as resolved"""
+        now = datetime.utcnow().isoformat()
+        kwargs = {"status": "resolved", "resolved_at": now}
+        if outcome:
+            kwargs["outcomes"] = outcome
+        return await self.update_story_event(event_id, **kwargs)
+
+    # ========================================================================
+    # CROSS-SYSTEM WIRING METHODS
+    # ========================================================================
+
+    # ==================== CHARACTER LOCATION TRACKING ====================
+    
+    async def move_character_to_location(self, character_id: int, location_id: int) -> Dict[str, Any]:
+        """Move a character to a new location and update related systems"""
+        now = datetime.utcnow().isoformat()
+        
+        # Get current location for story logging
+        character = await self.get_character(character_id)
+        if not character:
+            return {"success": False, "error": "Character not found"}
+        
+        old_location_id = character.get('current_location_id')
+        
+        # Get new location details
+        new_location = await self.get_location(location_id)
+        if not new_location:
+            return {"success": False, "error": "Location not found"}
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            # Update character location
+            await db.execute("""
+                UPDATE characters SET current_location_id = ?, updated_at = ?
+                WHERE id = ?
+            """, (location_id, now, character_id))
+            await db.commit()
+        
+        # Log the movement if character has a session
+        if character.get('session_id'):
+            await self.add_story_entry(
+                character['session_id'],
+                'movement',
+                f"{character['name']} traveled to {new_location['name']}",
+                participants=[character_id]
+            )
+        
+        return {
+            "success": True,
+            "character_id": character_id,
+            "old_location_id": old_location_id,
+            "new_location_id": location_id,
+            "location_name": new_location['name']
+        }
+    
+    async def get_characters_at_location(self, location_id: int) -> List[Dict[str, Any]]:
+        """Get all characters currently at a location"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM characters 
+                WHERE current_location_id = ? AND is_active = 1
+            """, (location_id,))
+            rows = await cursor.fetchall()
+            return [self._normalize_character(dict(row)) for row in rows]
+
+    # ==================== NPC LOCATION WIRING ====================
+    
+    async def move_npc_to_location(self, npc_id: int, location_id: int) -> bool:
+        """Move an NPC to a location (updates both location_id and location text)"""
+        location = await self.get_location(location_id)
+        if not location:
+            return False
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE npcs SET location_id = ?, location = ?
+                WHERE id = ?
+            """, (location_id, location['name'], npc_id))
+            await db.commit()
+            return True
+    
+    async def get_npcs_at_location(self, location_id: int) -> List[Dict[str, Any]]:
+        """Get all NPCs at a specific location"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM npcs 
+                WHERE location_id = ? AND is_alive = 1
+            """, (location_id,))
+            rows = await cursor.fetchall()
+            npcs = []
+            for row in rows:
+                npc = dict(row)
+                if npc.get('stats'):
+                    npc['stats'] = json.loads(npc['stats'])
+                if npc.get('merchant_inventory'):
+                    npc['merchant_inventory'] = json.loads(npc['merchant_inventory'])
+                npcs.append(npc)
+            return npcs
+
+    # ==================== COMBAT-CHARACTER SYNC ====================
+    
+    async def sync_combat_damage_to_character(self, participant_id: int) -> Dict[str, Any]:
+        """Sync combat participant HP back to the character table"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Get combat participant
+            cursor = await db.execute("""
+                SELECT * FROM combat_participants WHERE id = ?
+            """, (participant_id,))
+            participant = await cursor.fetchone()
+            
+            if not participant or not participant['is_player']:
+                return {"success": False, "error": "Participant not found or not a player"}
+            
+            participant = dict(participant)
+            
+            # Update the character's HP
+            await db.execute("""
+                UPDATE characters SET hp = ?, updated_at = ?
+                WHERE id = ?
+            """, (participant['current_hp'], datetime.utcnow().isoformat(), participant['participant_id']))
+            await db.commit()
+            
+            return {
+                "success": True,
+                "character_id": participant['participant_id'],
+                "new_hp": participant['current_hp'],
+                "max_hp": participant['max_hp']
+            }
+    
+    async def sync_all_combat_to_characters(self, encounter_id: int) -> List[Dict[str, Any]]:
+        """Sync all player participant HP back to character tables after combat"""
+        combatants = await self.get_combatants(encounter_id)
+        results = []
+        
+        for combatant in combatants:
+            if combatant['is_player']:
+                result = await self.sync_combat_damage_to_character(combatant['id'])
+                results.append(result)
+        
+        return results
+    
+    async def award_combat_experience(self, encounter_id: int, xp_per_character: int) -> List[Dict[str, Any]]:
+        """Award XP to all surviving player characters after combat"""
+        combatants = await self.get_combatants(encounter_id)
+        results = []
+        
+        for combatant in combatants:
+            if combatant['is_player'] and combatant['current_hp'] > 0:
+                result = await self.add_experience(combatant['participant_id'], xp_per_character)
+                results.append({
+                    "character_id": combatant['participant_id'],
+                    "name": combatant['name'],
+                    "xp_gained": xp_per_character,
+                    **result
+                })
+        
+        return results
+    
+    async def end_combat_with_rewards(self, encounter_id: int, xp_per_character: int = 0, 
+                                       gold_per_character: int = 0, loot_items: List[Dict] = None) -> Dict[str, Any]:
+        """End combat, sync HP, and distribute rewards"""
+        # Sync all HP
+        hp_results = await self.sync_all_combat_to_characters(encounter_id)
+        
+        # Award XP
+        xp_results = []
+        if xp_per_character > 0:
+            xp_results = await self.award_combat_experience(encounter_id, xp_per_character)
+        
+        # Award gold
+        gold_results = []
+        if gold_per_character > 0:
+            combatants = await self.get_combatants(encounter_id)
+            for combatant in combatants:
+                if combatant['is_player'] and combatant['current_hp'] > 0:
+                    new_gold = await self.update_gold(combatant['participant_id'], gold_per_character)
+                    gold_results.append({
+                        "character_id": combatant['participant_id'],
+                        "name": combatant['name'],
+                        "gold_gained": gold_per_character,
+                        "new_total": new_gold
+                    })
+        
+        # Distribute loot (to first surviving player for simplicity)
+        loot_results = []
+        if loot_items:
+            combatants = await self.get_combatants(encounter_id)
+            survivors = [c for c in combatants if c['is_player'] and c['current_hp'] > 0]
+            if survivors:
+                for item in loot_items:
+                    item_id = await self.add_item(
+                        survivors[0]['participant_id'],
+                        item.get('item_id', ''),
+                        item.get('name', 'Unknown Item'),
+                        item.get('type', 'misc'),
+                        quantity=item.get('quantity', 1),
+                        properties=item.get('properties', {})
+                    )
+                    loot_results.append({
+                        "item_name": item.get('name'),
+                        "given_to": survivors[0]['name'],
+                        "inventory_id": item_id
+                    })
+        
+        # End the combat
+        await self.end_combat(encounter_id)
+        
+        # Get combat info for story logging
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT session_id FROM combat_encounters WHERE id = ?", (encounter_id,))
+            combat = await cursor.fetchone()
+            
+            if combat and combat['session_id']:
+                await self.add_story_entry(
+                    combat['session_id'],
+                    'combat_end',
+                    f"Combat ended. XP: {xp_per_character}, Gold: {gold_per_character}",
+                    participants=[c['participant_id'] for c in combatants if c['is_player']]
+                )
+        
+        return {
+            "success": True,
+            "hp_synced": hp_results,
+            "xp_awarded": xp_results,
+            "gold_awarded": gold_results,
+            "loot_distributed": loot_results
+        }
+
+    # ==================== QUEST REWARD WIRING ====================
+    
+    async def complete_quest_with_rewards(self, quest_id: int, character_id: int) -> Dict[str, Any]:
+        """Complete a quest and automatically grant rewards to the character"""
+        quest = await self.get_quest(quest_id)
+        if not quest:
+            return {"success": False, "error": "Quest not found"}
+        
+        character = await self.get_character(character_id)
+        if not character:
+            return {"success": False, "error": "Character not found"}
+        
+        # Parse rewards
+        rewards = quest.get('rewards', {})
+        if isinstance(rewards, str):
+            rewards = json.loads(rewards)
+        
+        results = {
+            "quest_title": quest['title'],
+            "character_name": character['name'],
+            "xp_gained": 0,
+            "gold_gained": 0,
+            "items_gained": [],
+            "leveled_up": False,
+            "new_level": character['level']
+        }
+        
+        # Award XP
+        if rewards.get('experience') or rewards.get('xp'):
+            xp = rewards.get('experience') or rewards.get('xp')
+            xp_result = await self.add_experience(character_id, xp)
+            results['xp_gained'] = xp
+            results['leveled_up'] = xp_result.get('leveled_up', False)
+            results['new_level'] = xp_result.get('new_level', character['level'])
+        
+        # Award gold
+        if rewards.get('gold'):
+            new_gold = await self.update_gold(character_id, rewards['gold'])
+            results['gold_gained'] = rewards['gold']
+            results['new_gold_total'] = new_gold
+        
+        # Award items
+        if rewards.get('items'):
+            for item in rewards['items']:
+                item_id = await self.add_item(
+                    character_id,
+                    item.get('item_id', ''),
+                    item.get('name', item.get('item_name', 'Unknown')),
+                    item.get('type', item.get('item_type', 'misc')),
+                    quantity=item.get('quantity', 1),
+                    properties=item.get('properties', {})
+                )
+                results['items_gained'].append({
+                    "name": item.get('name', item.get('item_name')),
+                    "inventory_id": item_id
+                })
+        
+        # Mark quest as completed
+        await self.complete_quest(quest_id, character_id)
+        
+        # Log to story
+        if character.get('session_id'):
+            await self.add_story_entry(
+                character['session_id'],
+                'quest_complete',
+                f"{character['name']} completed quest: {quest['title']}. Rewards: {results['xp_gained']} XP, {results['gold_gained']} gold",
+                participants=[character_id]
+            )
+        
+        results['success'] = True
+        return results
+
+    # ==================== STORY ITEM TO INVENTORY WIRING ====================
+    
+    async def pickup_story_item(self, story_item_id: int, character_id: int) -> Dict[str, Any]:
+        """Have a character pick up a story item (marks discovered, sets holder, adds to inventory)"""
+        now = datetime.utcnow().isoformat()
+        
+        story_item = await self.get_story_item(story_item_id)
+        if not story_item:
+            return {"success": False, "error": "Story item not found"}
+        
+        character = await self.get_character(character_id)
+        if not character:
+            return {"success": False, "error": "Character not found"}
+        
+        # Update story item
+        await self.update_story_item(story_item_id, 
+                                      is_discovered=1,
+                                      discovered_by=character_id,
+                                      discovered_at=now,
+                                      current_holder_id=character_id,
+                                      location_id=None)  # No longer at a location
+        
+        # Add to character inventory
+        properties = story_item.get('properties', {})
+        if isinstance(properties, str):
+            properties = json.loads(properties)
+        properties['is_story_item'] = True
+        properties['story_item_id'] = story_item_id
+        properties['lore'] = story_item.get('lore', '')
+        
+        inventory_id = await self.add_item(
+            character_id,
+            f"story_item_{story_item_id}",
+            story_item['name'],
+            story_item.get('item_type', 'key_item'),
+            quantity=1,
+            properties=properties
+        )
+        
+        # Log to story
+        if character.get('session_id'):
+            await self.add_story_entry(
+                character['session_id'],
+                'item_discovery',
+                f"{character['name']} discovered: {story_item['name']}",
+                participants=[character_id]
+            )
+        
+        return {
+            "success": True,
+            "story_item": story_item['name'],
+            "character": character['name'],
+            "inventory_id": inventory_id
+        }
+    
+    async def drop_story_item(self, story_item_id: int, location_id: int = None) -> Dict[str, Any]:
+        """Drop a story item (removes from holder, optionally places at location)"""
+        story_item = await self.get_story_item(story_item_id)
+        if not story_item:
+            return {"success": False, "error": "Story item not found"}
+        
+        holder_id = story_item.get('current_holder_id')
+        
+        # Remove from inventory if currently held
+        if holder_id:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    DELETE FROM inventory 
+                    WHERE character_id = ? AND item_id = ?
+                """, (holder_id, f"story_item_{story_item_id}"))
+                await db.commit()
+        
+        # Update story item
+        await self.update_story_item(story_item_id,
+                                      current_holder_id=None,
+                                      location_id=location_id)
+        
+        return {
+            "success": True,
+            "story_item": story_item['name'],
+            "new_location_id": location_id
+        }
+
+    # ==================== SESSION INITIALIZATION ====================
+    
+    async def initialize_session(self, session_id: int) -> Dict[str, Any]:
+        """Ensure a session has all required related records (game_state, etc.)"""
+        session = await self.get_session(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+        
+        results = {"session_id": session_id, "initialized": []}
+        
+        # Ensure game_state exists
+        game_state = await self.get_game_state(session_id)
+        if not game_state:
+            await self.create_game_state(session_id, 
+                                         current_scene="Session beginning",
+                                         current_location="Unknown")
+            results['initialized'].append('game_state')
+        
+        results['success'] = True
+        return results
+    
+    async def start_session_with_init(self, session_id: int) -> Dict[str, Any]:
+        """Start a session and ensure it's fully initialized"""
+        # Initialize
+        init_result = await self.initialize_session(session_id)
+        if not init_result.get('success'):
+            return init_result
+        
+        # Start the session
+        await self.start_session(session_id)
+        
+        # Log story entry
+        await self.add_story_entry(session_id, 'session_start', 'The adventure begins!')
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "initialized": init_result.get('initialized', [])
+        }
+
+    # ==================== STORY EVENT CHARACTER WIRING ====================
+    
+    async def add_character_to_event(self, event_id: int, character_id: int) -> bool:
+        """Add a character to a story event's involved_characters"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT involved_characters FROM story_events WHERE id = ?
+            """, (event_id,))
+            row = await cursor.fetchone()
+            
+            if not row:
+                return False
+            
+            involved = json.loads(row['involved_characters']) if row['involved_characters'] else []
+            if character_id not in involved:
+                involved.append(character_id)
+                await db.execute("""
+                    UPDATE story_events SET involved_characters = ?
+                    WHERE id = ?
+                """, (json.dumps(involved), event_id))
+                await db.commit()
+            
+            return True
+    
+    async def get_events_for_character(self, character_id: int) -> List[Dict]:
+        """Get all story events involving a character"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM story_events 
+                WHERE involved_characters LIKE ?
+            """, (f'%{character_id}%',))
+            rows = await cursor.fetchall()
+            
+            # Filter to ensure exact match (not partial ID matches)
+            events = []
+            for row in rows:
+                event = dict(row)
+                involved = json.loads(event['involved_characters']) if event.get('involved_characters') else []
+                if character_id in involved:
+                    events.append(event)
+            
+            return events
+
+    # ==================== DICE ROLL SESSION WIRING ====================
+    
+    async def log_dice_roll_with_session(self, user_id: int, guild_id: int, roll_type: str,
+                                          dice_expression: str, individual_rolls: List[int],
+                                          modifier: int, total: int, purpose: str = None,
+                                          character_id: int = None, session_id: int = None) -> int:
+        """Log a dice roll with session tracking"""
+        now = datetime.utcnow().isoformat()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO dice_rolls (user_id, guild_id, session_id, character_id, roll_type,
+                    dice_expression, individual_rolls, modifier, total, purpose, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, guild_id, session_id, character_id, roll_type,
+                  dice_expression, json.dumps(individual_rolls), modifier, total, purpose, now))
+            await db.commit()
+            return cursor.lastrowid
+    
+    async def get_session_roll_history(self, session_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get dice roll history for a specific session"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT dr.*, c.name as character_name
+                FROM dice_rolls dr
+                LEFT JOIN characters c ON dr.character_id = c.id
+                WHERE dr.session_id = ?
+                ORDER BY dr.created_at DESC
+                LIMIT ?
+            """, (session_id, limit))
+            rows = await cursor.fetchall()
+            
+            rolls = []
+            for row in rows:
+                roll = dict(row)
+                roll['individual_rolls'] = json.loads(roll['individual_rolls'])
+                rolls.append(roll)
+            return rolls
+
+    # ==================== LOCATION EXPLORATION HELPERS ====================
+    
+    async def explore_location(self, character_id: int, location_id: int) -> Dict[str, Any]:
+        """Have a character explore a location - reveals NPCs, items, connections"""
+        character = await self.get_character(character_id)
+        if not character:
+            return {"success": False, "error": "Character not found"}
+        
+        location = await self.get_location(location_id)
+        if not location:
+            return {"success": False, "error": "Location not found"}
+        
+        # Move character to location
+        await self.move_character_to_location(character_id, location_id)
+        
+        # Get NPCs at location
+        npcs = await self.get_npcs_at_location(location_id)
+        
+        # Get other characters at location
+        other_characters = await self.get_characters_at_location(location_id)
+        other_characters = [c for c in other_characters if c['id'] != character_id]
+        
+        # Get connected locations
+        connections = await self.get_location_connections(location_id)
+        
+        # Get story items at location
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM story_items 
+                WHERE location_id = ? AND is_discovered = 0
+            """, (location_id,))
+            hidden_items = [dict(row) for row in await cursor.fetchall()]
+            
+            cursor = await db.execute("""
+                SELECT * FROM story_items 
+                WHERE location_id = ? AND is_discovered = 1
+            """, (location_id,))
+            visible_items = [dict(row) for row in await cursor.fetchall()]
+        
+        # Log exploration
+        if character.get('session_id'):
+            await self.add_story_entry(
+                character['session_id'],
+                'exploration',
+                f"{character['name']} explored {location['name']}",
+                participants=[character_id]
+            )
+        
+        return {
+            "success": True,
+            "location": location,
+            "npcs": npcs,
+            "other_characters": other_characters,
+            "connections": connections,
+            "visible_items": visible_items,
+            "hidden_items_count": len(hidden_items),
+            "danger_level": location.get('danger_level', 0),
+            "weather": location.get('current_weather'),
+            "secrets": location.get('hidden_secrets')
+        }
+
+    # ==================== REST/RECOVERY WIRING ====================
+    
+    async def long_rest(self, character_id: int) -> Dict[str, Any]:
+        """Perform a long rest - restore HP, spell slots, abilities, skills"""
+        character = await self.get_character(character_id)
+        if not character:
+            return {"success": False, "error": "Character not found"}
+        
+        results = {"character_name": character['name'], "restored": []}
+        
+        # Restore HP to max
+        if character['hp'] < character['max_hp']:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    UPDATE characters SET hp = max_hp, updated_at = ?
+                    WHERE id = ?
+                """, (datetime.utcnow().isoformat(), character_id))
+                await db.commit()
+            results['restored'].append(f"HP restored to {character['max_hp']}")
+        
+        # Restore spell slots
+        await self.restore_spell_slots(character_id, full=True)
+        results['restored'].append("All spell slots restored")
+        
+        # Restore abilities
+        await self.restore_abilities(character_id, recharge_type='long_rest')
+        results['restored'].append("Long rest abilities restored")
+        
+        # Restore skills
+        await self.restore_skills(character_id, recharge_type='long_rest')
+        results['restored'].append("Long rest skills restored")
+        
+        # Clear temporary status effects
+        cleared = await self.clear_status_effects(character_id, effect_type='debuff')
+        if cleared:
+            results['restored'].append("Temporary debuffs cleared")
+        
+        # Log to story
+        if character.get('session_id'):
+            await self.add_story_entry(
+                character['session_id'],
+                'rest',
+                f"{character['name']} completed a long rest",
+                participants=[character_id]
+            )
+        
+        results['success'] = True
+        return results
+    
+    async def short_rest(self, character_id: int) -> Dict[str, Any]:
+        """Perform a short rest - partial recovery"""
+        character = await self.get_character(character_id)
+        if not character:
+            return {"success": False, "error": "Character not found"}
+        
+        results = {"character_name": character['name'], "restored": []}
+        
+        # Restore some HP (e.g., 25% of max)
+        hp_restore = character['max_hp'] // 4
+        if character['hp'] < character['max_hp']:
+            new_hp = min(character['hp'] + hp_restore, character['max_hp'])
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    UPDATE characters SET hp = ?, updated_at = ?
+                    WHERE id = ?
+                """, (new_hp, datetime.utcnow().isoformat(), character_id))
+                await db.commit()
+            results['restored'].append(f"HP restored by {hp_restore} (now {new_hp})")
+        
+        # Restore short rest abilities
+        await self.restore_abilities(character_id, recharge_type='short_rest')
+        results['restored'].append("Short rest abilities restored")
+        
+        # Restore short rest skills
+        await self.restore_skills(character_id, recharge_type='short_rest')
+        results['restored'].append("Short rest skills restored")
+        
+        # Reduce all cooldowns by 1
+        await self.reduce_cooldowns(character_id, amount=1)
+        results['restored'].append("Cooldowns reduced")
+        
+        results['success'] = True
+        return results
+
+    # ==================== FULL SESSION STATE ====================
+    
+    async def get_comprehensive_session_state(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Get absolutely everything about a session for save/load or AI context"""
+        session = await self.get_full_session_state(session_id)
+        if not session:
+            return None
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Get game state
+            game_state = await self.get_game_state(session_id)
+            
+            # Get all story events
+            cursor = await db.execute("""
+                SELECT * FROM story_events WHERE session_id = ?
+            """, (session_id,))
+            story_events = [dict(row) for row in await cursor.fetchall()]
+            
+            # Get all story items
+            cursor = await db.execute("""
+                SELECT * FROM story_items WHERE session_id = ?
+            """, (session_id,))
+            story_items = [dict(row) for row in await cursor.fetchall()]
+            
+            # Get story log
+            story_log = await self.get_story_log(session_id)
+            
+            # Get active combat if any
+            cursor = await db.execute("""
+                SELECT * FROM combat_encounters 
+                WHERE session_id = ? AND status = 'active'
+            """, (session_id,))
+            active_combat = await cursor.fetchone()
+            if active_combat:
+                active_combat = dict(active_combat)
+                active_combat['combatants'] = await self.get_combatants(active_combat['id'])
+            
+            # Get character details including inventory, spells, skills
+            characters_full = []
+            for participant in session.get('participants', []):
+                if participant.get('character_id'):
+                    char = await self.get_character(participant['character_id'])
+                    if char:
+                        char['inventory'] = await self.get_inventory(char['id'])
+                        char['spells'] = await self.get_character_spells(char['id'])
+                        char['abilities'] = await self.get_character_abilities(char['id'])
+                        char['skills'] = await self.get_character_skills(char['id'])
+                        char['status_effects'] = await self.get_status_effects(char['id'])
+                        char['spell_slots'] = await self.get_spell_slots(char['id'])
+                        characters_full.append(char)
+        
+        return {
+            **session,
+            'game_state': game_state,
+            'story_events': story_events,
+            'story_items': story_items,
+            'story_log': story_log,
+            'active_combat': active_combat,
+            'characters_full': characters_full
+        }
+
+    # ==================== MISSING WIRING METHODS ====================
+    
+    async def get_nearby_locations(self, location_id: int) -> List[Dict]:
+        """Get all connected locations (bidirectional) from a location"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            # Get both outgoing and incoming connections
+            cursor = await db.execute("""
+                SELECT lc.*, l.name as to_name, l.location_type, l.danger_level, l.description
+                FROM location_connections lc
+                JOIN locations l ON lc.to_location_id = l.id
+                WHERE lc.from_location_id = ? AND lc.hidden = 0
+                UNION
+                SELECT lc.id, lc.to_location_id as from_location_id, lc.from_location_id as to_location_id,
+                       CASE lc.direction 
+                           WHEN 'north' THEN 'south'
+                           WHEN 'south' THEN 'north'
+                           WHEN 'east' THEN 'west'
+                           WHEN 'west' THEN 'east'
+                           WHEN 'up' THEN 'down'
+                           WHEN 'down' THEN 'up'
+                           ELSE lc.direction
+                       END as direction,
+                       lc.travel_time, lc.requirements, lc.hidden,
+                       l.name as to_name, l.location_type, l.danger_level, l.description
+                FROM location_connections lc
+                JOIN locations l ON lc.from_location_id = l.id
+                WHERE lc.to_location_id = ? AND lc.bidirectional = 1 AND lc.hidden = 0
+            """, (location_id, location_id))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_active_events(self, session_id: int) -> List[Dict]:
+        """Get all active (triggered but not resolved) story events for a session"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            try:
+                cursor = await db.execute("""
+                    SELECT * FROM story_events 
+                    WHERE session_id = ? AND status = 'active'
+                    ORDER BY COALESCE(priority, 0) DESC, COALESCE(triggered_at, created_at) DESC
+                """, (session_id,))
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+            except Exception:
+                # Fallback without priority/triggered_at ordering if columns don't exist
+                try:
+                    cursor = await db.execute("""
+                        SELECT * FROM story_events 
+                        WHERE session_id = ? AND status = 'active'
+                        ORDER BY created_at DESC
+                    """, (session_id,))
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+                except Exception:
+                    return []  # Table might not exist
+    
+    async def get_pending_events(self, session_id: int) -> List[Dict]:
+        """Get all pending (not yet triggered) story events for a session"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            try:
+                cursor = await db.execute("""
+                    SELECT * FROM story_events 
+                    WHERE session_id = ? AND status = 'pending'
+                    ORDER BY COALESCE(priority, 0) DESC, created_at DESC
+                """, (session_id,))
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+            except Exception:
+                # Fallback without priority ordering
+                try:
+                    cursor = await db.execute("""
+                        SELECT * FROM story_events 
+                        WHERE session_id = ? AND status = 'pending'
+                        ORDER BY created_at DESC
+                    """, (session_id,))
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+                except Exception:
+                    return []  # Table might not exist
+    
+    async def get_combat_for_channel(self, session_id: int, channel_id: int) -> Optional[Dict]:
+        """Get active combat for a specific channel in a session"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM combat_encounters 
+                WHERE session_id = ? AND channel_id = ? AND status = 'active'
+                ORDER BY created_at DESC LIMIT 1
+            """, (session_id, channel_id))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    
+    async def transfer_story_item(self, item_id: int, new_holder_id: int = None, holder_type: str = 'none') -> bool:
+        """Transfer a story item to a new holder (character, npc, location, or none)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            if holder_type == 'none' or new_holder_id is None:
+                await db.execute("""
+                    UPDATE story_items 
+                    SET current_holder_id = NULL, location_id = NULL
+                    WHERE id = ?
+                """, (item_id,))
+            elif holder_type == 'character':
+                await db.execute("""
+                    UPDATE story_items 
+                    SET current_holder_id = ?, location_id = NULL
+                    WHERE id = ?
+                """, (new_holder_id, item_id))
+            elif holder_type == 'location':
+                await db.execute("""
+                    UPDATE story_items 
+                    SET current_holder_id = NULL, location_id = ?
+                    WHERE id = ?
+                """, (new_holder_id, item_id))
+            await db.commit()
+            return True
+    
+    async def add_story_log_entry(self, session_id: int, entry_type: str, content: str, 
+                                   participants: List[int] = None) -> int:
+        """Add an entry to the story log (alias for add_story_entry for consistency)"""
+        return await self.add_story_entry(session_id, entry_type, content, participants)

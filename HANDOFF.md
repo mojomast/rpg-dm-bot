@@ -1,538 +1,709 @@
 # RPG Dungeon Master Bot - Handoff Document
 
-**Date:** December 4, 2025  
-**Project:** RPG Dungeon Master Discord Bot (adapted from ussybot)  
-**Status:** Core implementation complete, tests passing (127 tests, some pre-existing failures)
+**Date:** December 6, 2025  
+**Project:** RPG Dungeon Master Discord Bot  
+**Status:** Phase 6 Complete - Enhanced UI (Mechanics Display, Discord Buttons, Web Campaign Creator)
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
 ---
 
-## Latest Changes (December 4, 2025 - Session 3)
+## Latest Changes (December 6, 2025 - Session 11)
 
-### Bug Fixes:
+### Session Context Isolation Fix (Critical Bug Fix)
 
-1. **KeyError: 'character_id' Fix**
-   - Players could join sessions without a character properly assigned, causing `KeyError: 'character_id'` when iterating through session participants
-   - Added defensive checks (`if not p.get('character_id'): continue`) throughout the codebase to skip participants without assigned characters
-   - **Files modified:**
-     - `src/cogs/dm_chat.py` - `get_game_context()` party members loop and combat participants loop
-     - `src/cogs/sessions.py` - `view_players()` and session status display
-     - `src/cogs/game_master.py` - Multiple places: session management, join checks, party info building
-     - `src/cogs/game_persistence.py` - Story summary, resume, and save commands
+**Problem:** When starting a new game, the LLM model retained context from previous games. For example, "bingo" references from an old game would appear in a completely different church escape adventure.
 
-2. **Session Context Isolation (Game Mixing Bug)**
-   - **Problem:** When multiple games were running in a guild, the bot was mixing up game contexts (e.g., "Big Bingo" context bleeding into "bobs bob" game)
-   - **Root Cause:** `get_active_session_id()` returned the first active session for the guild, not the one the player was actually in
-   - **Solution:** 
-     - Added `get_user_active_session()` method to `database.py` that joins `sessions` with `session_participants` to find the user's specific session
-     - Updated `get_active_session_id()` in `dm_chat.py` to take optional `user_id` parameter
-     - Updated `get_game_context()` to use user's session instead of first active session
-   - **Files modified:**
-     - `src/database.py` - Added `get_user_active_session(guild_id, user_id)` method
-     - `src/cogs/dm_chat.py` - Updated `get_active_session_id()`, `process_batched_messages()`, `process_dm_message()`, and `get_game_context()`
+**Root Cause:** The `get_user_active_session()` function was ordering by `last_played DESC` instead of `s.id DESC`, causing older but recently-played sessions to take precedence over newly created sessions in the same channel.
 
-3. **LLM API Retry Logic**
-   - **Problem:** 503 errors from LLM provider caused immediate failures
-   - **Solution:** Added retry logic with exponential backoff (1s, 2s, 4s) for transient errors (503, 502, 429) and timeouts
-   - **Files modified:**
-     - `src/llm.py` - Updated `_api_call()` with `max_retries` parameter and retry loop
+#### Changes Made
 
-### Files Modified This Session:
-- `src/database.py` - Added `get_user_active_session()` method
-- `src/llm.py` - Added retry logic with exponential backoff
-- `src/cogs/dm_chat.py` - Session isolation fixes, defensive character_id checks
-- `src/cogs/sessions.py` - Defensive character_id checks  
-- `src/cogs/game_master.py` - Defensive character_id checks
-- `src/cogs/game_persistence.py` - Defensive character_id checks
+**`src/database.py`:**
+- Changed `get_user_active_session()` to order by `s.id DESC` instead of `s.last_played DESC NULLS LAST`
+- This ensures the most recently CREATED session takes priority, not most recently played
 
----
+**`src/cogs/dm_chat.py`:**
+- Added `get_channel_session_id(channel_id)` helper function to retrieve stored session ID for a channel
+- Modified `get_active_session_id()` to prioritize the channel's stored `session_id` before falling back to database lookup
+- Updated `get_game_context()` to accept optional `session_id` parameter for explicit session targeting
+- Added debug logging for session resolution
 
-## Previous Changes (December 3, 2025 - Session 2)
+### LLM Model Configuration Fix
 
-### Issues Fixed:
+**Problem:** "Provider blocked by policy" error when using the LLM.
 
-1. **Verbose Logging for API Requests**
-   - Updated `src/llm.py` to log full API request/response details at INFO level
-   - Logs now show: message contents (truncated at 500 chars), tool calls, responses
-   - Updated `src/bot.py` to show DEBUG level logs in console for rpg.llm logger
+**Solution:** Changed `LLM_MODEL` from `openai/gpt-5-nano` (blocked) to `openai/gpt-4o-mini` in `.env` and `web/api.py` defaults.
 
-2. **Game Start - Dungeon Master Silent Issue**
-   - The DM wasn't doing anything when a game started because the `begin_game` method wasn't properly passing game context
-   - Fixed `begin_game` in `src/cogs/game_master.py` to:
-     - Use `build_game_start_prompt()` which includes game name, description, and full party info with backstories
-     - Pass character backstories to the DM for quest crafting
-     - Save game state to database for persistence
-     - Log detailed info about game start
+### Campaign Finalization Database Schema Fixes
 
-3. **Character Info in DM Prompts**
-   - Updated `get_game_context()` in `src/cogs/dm_chat.py` to include:
-     - Game name and description
-     - All party members with HP and backstories
-     - Current game state (scene, location, DM notes)
-     - Session quest information
+**Problem:** Web-created campaigns failed to save with database errors due to schema mismatches between code and actual database structure.
 
-4. **Created Game Persistence Cog** (`src/cogs/game_persistence.py`)
-   - New cog for managing game persistence between sessions
-   - **Story Commands** (`/story`):
-     - `/story log` - Add events to story log with type (combat, dialogue, discovery, quest, location, note)
-     - `/story recap` - View recent story events
-     - `/story summary` - AI-generated summary of adventure so far
-   - **Game State Commands**:
-     - `/resume` - Resume a paused/inactive game with full context restoration and AI recap
-     - `/save` - Manually save current game state with optional notes
-   - **Quest Commands** (`/quest`):
-     - `/quest current` - View current active quest with objectives
-     - `/quest list` - List all quests for the session
-   - **Auto-logging**: Automatically logs combat events, discoveries, and location changes from DM responses
+#### Issues Fixed in `web/api.py`:
 
-5. **Database Updates**
-   - Added `save_game_state()` method for create-or-update game state
-   - Updated `get_quests()` to accept optional `session_id` parameter
+| Issue | Fix |
+|-------|-----|
+| Missing `created_by` in locations INSERT | Added `created_by` column with value `'ai'` |
+| Missing `updated_at` in locations INSERT | Added `updated_at` column |
+| Wrong column `location_id` in npcs INSERT | Changed to `location` (TEXT type) |
+| Missing `is_party_member` in npcs INSERT | Re-added column with value `0` |
+| Missing `created_at` in quests INSERT | Added `created_at` column |
+| Sessions created as 'setup' status | Changed to 'active' status so game starts immediately |
 
-### Files Modified:
-- `src/llm.py` - Verbose API logging
-- `src/bot.py` - Console log level, added game_persistence cog
-- `src/cogs/game_master.py` - Fixed begin_game to pass full context
-- `src/cogs/dm_chat.py` - Enhanced get_game_context with party/session info
-- `src/cogs/game_persistence.py` - **NEW** - Game/quest persistence cog
-- `src/database.py` - Added save_game_state(), updated get_quests()
+#### Database Schema Notes
+The actual database schema differs from `src/database.py` in several ways:
+- `locations` table has NOT NULL `created_by` column
+- `npcs` table uses `location` (TEXT) instead of `location_id` (INTEGER FK)
+- `npcs` table has `is_party_member` column
 
 ---
 
-## Previous Bug Fixes (December 3, 2025 - Session 1)
+## Previous Changes (December 5, 2025 - Session 10)
 
-### Fixed Issues:
-1. **KeyError: 'char_class'** - The database stores character class in a column named `class`, but code inconsistently used `char['char_class']`. Fixed by adding a `_normalize_character()` helper method.
+### Mechanics Visibility System (New Feature)
 
-2. **TypeError: 'Command' object is not callable** - In `bot.py`, the `/menu` command tried to call `game_master.game_menu(interaction)` but `game_menu` is a discord command object. Fixed by calling callback properly.
+Game mechanics (dice rolls, skill checks, etc.) are now displayed with styled formatting in Discord responses.
 
-3. **'str' object has no attribute 'get'** - In `game_master.py`, the `llm.chat()` method returns a string directly, but the code tried to call `.get('content', '')` on it. Fixed to handle the string return type.
+#### New File: `src/mechanics_tracker.py`
+A thread-local tracker system that captures game mechanics during tool execution:
 
-4. **AttributeError: 'NoneType' object has no attribute 'get_member'** - Commands crashed in DMs. Fixed by adding `guild_only=True` to all command groups.
+```python
+# MechanicType enum includes:
+# DICE_ROLL, SKILL_CHECK, SAVING_THROW, ATTACK_ROLL, DAMAGE_ROLL,
+# ITEM_GAINED, ITEM_LOST, GOLD_CHANGE, XP_GAINED, LEVEL_UP,
+# HP_CHANGE, STATUS_EFFECT, QUEST_UPDATE, LOCATION_CHANGE, NPC_INTERACTION
 
----
+# Usage pattern:
+tracker = new_tracker()  # Start fresh tracker
+# ... execute tools ...
+result = get_tracker()
+mechanics_text = result.format_all()  # Styled output
+```
 
-## Project Overview
+#### Tracking Methods
+| Method | What It Tracks |
+|--------|----------------|
+| `track_dice_roll()` | Dice rolls with results, modifiers, crits |
+| `track_skill_check()` | Skill checks with DC, success/fail |
+| `track_saving_throw()` | Save rolls with DC, success/fail |
+| `track_attack()` | Attack rolls with hit/miss, damage |
+| `track_damage()` | Damage dealt with type |
+| `track_item_gained()` | Items acquired (name, quantity, rarity) |
+| `track_item_lost()` | Items lost or used |
+| `track_gold_change()` | Gold gained/spent |
+| `track_xp_gained()` | Experience points earned |
+| `track_level_up()` | Level advancement |
+| `track_hp_change()` | HP damage/healing |
+| `track_status_effect()` | Buffs/debuffs applied/removed |
+| `track_quest_update()` | Quest progress |
+| `track_location_change()` | Location transitions |
+| `track_npc_interaction()` | NPC conversations |
 
-A Discord bot that enables multiplayer RPG gaming with an AI Dungeon Master powered by Requesty.ai (OpenAI-compatible LLM). The bot manages characters, combat, inventory, quests, NPCs, sessions, and AI-driven storytelling through Discord slash commands and mentions.
+#### Tools Updated
+- `_roll_dice()` - Now tracks dice rolls
+- `_roll_skill_check()` - Now tracks skill checks
+- `_roll_save()` - Now tracks saving throws
 
-**Repository Path:** `c:\Users\kyle\projects\rpg-dm-bot\`
+### Discord Interactive Buttons (New Feature)
 
----
+Bot responses now include clickable buttons for quick actions and information display.
 
-## Architecture Summary
+#### New UI Components in `src/cogs/dm_chat.py`
+| Component | Purpose |
+|-----------|---------|
+| `PlayerActionButton` | Execute quick player actions (option choices, look around, continue) |
+| `InfoButton` | View game info (character sheet, quest, location, inventory, party) |
+| `GameActionsView` | Combined view with action + info buttons |
+| `QuickActionsView` | Simplified view for exploration |
 
-### Tech Stack
-- **Discord Framework:** discord.py >= 2.3.0 (slash commands, cogs, intents)
-- **Database:** aiosqlite (async SQLite3)
-- **LLM:** Requesty.ai (OpenAI-compatible API at https://router.requesty.ai/v1)
-- **HTTP Client:** aiohttp
-- **Config:** python-dotenv for environment variables
+#### Info Button Actions
+- **📜 Character** - Shows character sheet embed (stats, HP, gold, XP)
+- **📋 Quest** - Shows active quest details and progress
+- **🗺️ Location** - Shows current location description and danger level
+- **🎒 Inventory** - Shows inventory items and equipped gear
+- **👥 Party** - Shows party composition including NPC companions
 
-### Key Design Patterns
-- **Cog Architecture:** 10 modular cogs for different gameplay systems
-- **Database Abstraction:** Single `Database` class with async methods for all persistence
-- **LLM Integration:** Tool-based function calling (OpenAI format) with multi-round execution loops
-- **Tool Executor:** `ToolExecutor` class processes LLM function calls and executes game mechanics
+#### Integration
+- `process_dm_message()` now returns tuple: `(response_text, mechanics_text)`
+- `_delayed_process_queue()` creates styled embed with mechanics and attaches button views
+- Buttons work with ephemeral responses for info (only requestor sees it)
 
----
+### Web Campaign Creator (New Feature)
 
-## Completed Implementation
+Full web-based campaign creation workflow with AI worldbuilding integration.
 
-### 1. Core Files
-- **`run.py`** - Entry point, initializes bot with intents and runs event loop
-- **`requirements.txt`** - Dependencies (discord.py, aiosqlite, python-dotenv, aiohttp)
-- **`.env.example`** - Template for DISCORD_TOKEN, REQUESTY_API_KEY, REQUESTY_BASE_URL
-- **`README.md`** - User-facing documentation with setup instructions
+#### New API Endpoints (`web/api.py`)
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/campaign/generate-preview` | POST | Generate campaign preview without committing |
+| `/api/campaign/finalize` | POST | Commit generated campaign to database |
+| `/api/campaign/templates` | GET | Get predefined campaign templates |
 
-### 2. Core Modules
+#### CampaignSettings Model
+```python
+class CampaignSettings(BaseModel):
+    guild_id: int
+    dm_user_id: int
+    name: str
+    world_theme: str = "fantasy"  # fantasy, sci-fi, horror, modern, steampunk
+    world_scale: str = "regional"  # local, regional, continental, world
+    magic_level: str = "high"  # none, low, medium, high
+    technology_level: str = "medieval"  # primitive to futuristic
+    tone: str = "heroic"  # gritty, heroic, comedic, horror, mystery
+    num_locations: int = 5
+    num_npcs: int = 8
+    num_factions: int = 3
+    num_quest_hooks: int = 3
+    world_description: Optional[str] = None
+    key_events: Optional[str] = None
+```
 
-#### `src/database.py` (~1600 lines)
-**Purpose:** All RPG data persistence via async SQLite  
-**Tables:** 12+ tables covering all game systems
-- `characters` - User characters with stats, HP, XP, level
-- `inventory` - Items owned by characters
-- `quests` - Quest definitions managed by DM
-- `quest_progress` - Player progress on quests with objectives
-- `npcs` - NPC definitions with personality/relationships
-- `npc_relationships` - Track relationship points between players and NPCs
-- `combat_encounters` - Active combat sessions
-- `combat_participants` - Characters/enemies in combat with HP/initiative
-- `sessions` - Game sessions with max_players support
-- `session_participants` - Track which users are in which sessions
-- `dice_rolls` - Historical record of all dice rolls
-- `user_memories` - Context for DM conversation memory
-- `conversation_history` - Chat history for DM continuity
-- `story_log` - Adventure narrative timeline
+#### Frontend Campaign Creator (`web/frontend/`)
+4-step wizard workflow:
 
-**Key Methods:**
-- Character: `create_character()`, `get_active_character()`, `update_character_hp()`, `add_experience()`, `level_up_character()`
-- Inventory: `add_item()`, `remove_item()`, `get_inventory()`, `equip_item()`, `unequip_item()`
-- Combat: `start_combat()`, `get_active_combat()` (accepts guild_id or channel_id), `add_participant()`, `deal_damage()`, `get_turn_order()`
-- Quests: `create_quest()`, `get_active_quest()`, `add_quest_objective()`, `update_quest_progress()`
-- NPCs: `create_npc()`, `get_npc()`, `add_relationship_change()`
-- Sessions: `create_session()` (with max_players), `add_session_participant()`, `get_active_sessions()`
-- Memory: `add_memory()`, `get_recent_memories()`, `add_conversation()`, `get_conversation_history()`
+1. **Settings** - Campaign name, Discord IDs, template selection, world settings
+2. **Generate** - Loading animation with progress while generating
+3. **Review** - Preview all generated content, edit/remove items
+4. **Success** - Confirmation with stats and navigation
 
-#### `src/llm.py` (~450 lines)
-**Purpose:** LLM client for AI DM integration  
-**Key Methods:**
-- `dm_chat(messages, system_prompt)` - Get DM narration/response
-- `dm_chat_with_tool_results(messages, tool_results, system_prompt)` - Continue chat after tool execution
-- `chat_with_tools(messages, tools)` - Get response with function calls (returns dict with 'content' and 'tool_calls')
-- `describe_scene(prompt)` - Generate descriptive narrative text
+#### Template Presets
+- Classic Fantasy (sword & sorcery)
+- Dark Fantasy (gritty survival)
+- Steampunk Adventure (Victorian intrigue)
+- Cosmic Horror (forbidden knowledge)
+- Space Opera (galactic adventures)
+- Custom (build your own)
 
-#### `src/prompts.py` (~500 lines)
-**Purpose:** AI DM personality, behavior, and system prompts  
-**Exports:** `Prompts` class with:
-- `get_dm_system_prompt()` - Main DM personality prompt
-- `DM_PERSONALITY` - Describes DM as creative, engaging, fair
-- `DM_CAPABILITIES` - Lists available mechanics and tools
-- `DM_NARRATION_STYLE` - Guides descriptive storytelling
+### CSS Styles Added (`web/frontend/styles.css`)
+- Campaign wizard steps with active/completed states
+- Template card selection grid
+- Generation loading animation (orb + ring)
+- Progress bar with gradient
+- Preview cards with edit/remove actions
+- Success screen with stats display
+- Form row layouts
+- Range slider styling
 
-#### `src/tool_schemas.py` (~1050 lines)
-**Purpose:** OpenAI function calling schema definitions  
-**Exports:** `ToolSchemas` class with:
-- `get_all_tools()` - Returns full tool definitions
-- `get_tool_names()` - Returns list of tool names
-
-**Tool Categories:**
-1. **Character Tools** (7 tools)
-   - `get_character_info` - Retrieve full character sheet
-   - `update_character_hp` - Modify HP (healing/damage)
-   - `update_character_stat` - Adjust ability scores
-   - `add_experience` - Grant XP
-   - `level_up_character` - Advance level
-   - `revive_character` - Bring character back from 0 HP
-   - `get_all_characters` - List all characters in session
-
-2. **Inventory Tools** (4 tools)
-   - `give_item` - Add item to inventory
-   - `remove_item` - Remove/consume item
-   - `get_inventory` - List items owned
-   - `equip_item` - Set as equipped
-
-3. **Combat Tools** (6 tools)
-   - `start_combat` - Initialize encounter
-   - `add_combat_participant` - Add character/enemy to combat
-   - `roll_initiative` - Determine turn order
-   - `deal_damage` - Apply damage to participant
-   - `get_active_combat` - Retrieve current combat state
-   - `end_combat` - Conclude encounter
-
-4. **Dice Tools** (3 tools)
-   - `roll_dice` - Roll arbitrary dice (e.g., "2d6+3")
-   - `roll_attack` - Roll with advantage/disadvantage
-   - `roll_saving_throw` - Roll ability check with DC
-
-5. **Quest Tools** (4 tools)
-   - `create_quest` - Define new quest
-   - `add_quest_objective` - Add milestone to quest
-   - `update_quest_progress` - Mark objective complete
-   - `get_active_quests` - List current quests
-
-6. **NPC Tools** (3 tools)
-   - `talk_to_npc` - Get NPC dialogue response
-   - `give_to_npc` - Gift item to NPC
-   - `get_npc_info` - Retrieve NPC details
-
-7. **Session Tools** (3 tools)
-   - `create_session` - Start new game session
-   - `add_participant` - Invite player to session
-   - `get_session_info` - Retrieve session details
-
-8. **Memory Tools** (2 tools)
-   - `remember` - Store contextual fact
-   - `recall_memories` - Retrieve relevant context
-
-#### `src/tools.py` (~400 lines)
-**Purpose:** Execute LLM tool calls and implement game mechanics  
-**Key Components:**
-- `ToolExecutor` class with `execute_tool(tool_name, tool_args, context)` method
-- `DiceRoller` class supporting:
-  - Standard notation: "2d6", "4d20"
-  - Modifiers: "1d20+5", "2d8-2"
-  - Keep/drop mechanics: "4d6kh3" (keep highest 3)
-  - Advantage/disadvantage: automatic advantage/disadvantage handling
-- Tool implementations for all 32 tools calling appropriate database methods
-
-#### `src/bot.py` (~300 lines)
-**Purpose:** Main bot class and initialization  
-**Features:**
-- `RPGBot` class extending `commands.Bot`
-- Loads 8 cogs (characters, combat, inventory, quests, npcs, sessions, dice, dm_chat)
-- Initializes database, LLM client, tool executor, tool schemas
-- Sets up Discord intents (message_content, members, guilds)
-- Channel-level locks for concurrent safety
-- Event handlers: on_ready, on_message
-
-### 3. Cogs (8 slash command modules)
-
-#### `src/cogs/characters.py`
-**Commands:**
-- `/character create` - Create new character with name, class, race
-- `/character info` - Display character sheet (stats, HP, XP, level)
-- `/character stats` - List all ability scores
-- `/character inventory` - Show equipped items
-- `/character level_up` - Advance to next level
-
-#### `src/cogs/combat.py`
-**Commands:**
-- `/combat start` - Initialize combat encounter
-- `/combat add` - Add character or enemy to combat
-- `/combat initiative` - Roll and determine turn order
-- `/combat attack` - Perform attack action (uses roll_attack)
-- `/combat damage` - Apply damage to target
-- `/combat status` - Show current HP/status of all combatants
-- `/combat end` - Conclude combat, distribute XP/rewards
-
-#### `src/cogs/inventory.py`
-**Commands:**
-- `/inventory view` - Display character's items
-- `/inventory add` - Give item to character
-- `/inventory remove` - Remove item from inventory
-- `/inventory equip` - Set item as equipped
-- `/inventory shop` - Browse and purchase items from game data
-
-#### `src/cogs/quests.py`
-**Commands:**
-- `/quest available` - List all available quests
-- `/quest active` - Show active quests with objectives
-- `/quest info` - Detailed quest information
-- `/quest create` - DM command to create quest (modal-based input)
-- `/quest update` - Update quest objective completion status
-
-#### `src/cogs/npcs.py`
-**Commands:**
-- `/npc create` - Create new NPC with personality
-- `/npc talk` - Get NPC dialogue response
-- `/npc info` - Display NPC details
-- `/npc relationship` - Check relationship points with NPC
-
-#### `src/cogs/sessions.py`
-**Commands:**
-- `/session create` - Start new game session
-- `/session join` - Player joins session
-- `/session info` - Show session details and participants
-- `/session end` - End active session
-
-#### `src/cogs/dice.py`
-**Commands:**
-- `/roll` - Roll arbitrary dice (e.g., "2d6+3")
-- `/attack` - Roll attack with advantage/disadvantage
-- `/save` - Roll saving throw against DC
-
-#### `src/cogs/dm_chat.py`
-**Purpose:** AI DM conversation with multi-round tool execution  
-**Trigger:** User mentions bot or replies to bot message  
-**Features:**
-- Extracts conversation context from recent messages
-- Passes to LLM with all available tools
-- Executes tool calls returned by LLM
-- Re-sends tool results to LLM for follow-up
-- Continues until LLM returns only text (no more tool calls)
-- Posts final narrative response to Discord
-- `/action` command for quick action buttons (Explore, Talk to NPC, Search, Rest, Continue)
-
-#### `src/cogs/game_master.py` (NEW)
-**Purpose:** Game flow management and character interviews  
-**Commands:**
-- `/game start` - Start game session with character interview for incomplete characters
-- `/game stop` - End current game session
-- `/game status` - View current game state
-- `/game quick_start` - Create random character and start immediately
-**Features:**
-- Interactive character interview via Discord modals
-- DM private messaging for game initiator (meta information)
-- Proactive game flow management
-- Keeps the DM driving the narrative forward
-
-### 4. Game Data Files (JSON)
-
-#### `data/game_data/items.json`
-**Categories:** weapons, armor, potions, accessories  
-**Example Items:**
-- Weapons: rusty_sword, iron_sword, steel_sword, magic_sword, legendary_blade
-- Armor: leather_armor through plate_armor
-- Potions: health_potion, mana_potion, strength_potion
-- Accessories: ring_protection, amulet_wisdom, boots_speed
-**Fields per item:** id, name, type, subtype, damage/defense, price, rarity, properties
-
-#### `data/game_data/enemies.json`
-**10 Enemy Types:** goblin, goblin_boss, skeleton, zombie, wolf, dire_wolf, orc, orc_warchief, bandit, bandit_captain, giant_spider, troll, young_dragon
-**Fields per enemy:** hp, ac, stats (all 6 abilities), attacks, special_abilities, xp_reward, gold_reward, loot_table, challenge_rating
-**Special Abilities:** undead_fortitude, aggressive, spider_climb, regeneration, breath_weapon, etc.
-
-#### `data/game_data/classes.json`
-**7 Classes:** warrior, mage, rogue, cleric, ranger, paladin, bard  
-**Fields per class:** hit_die, primary_stat, saving_throws, starting_hp, hp_per_level, starting_equipment, abilities by level, spell_slots
-
-#### `data/game_data/races.json`
-**13+ Races:** human, elf (high/wood variants), dwarf (hill/mountain), halfling, dragonborn, tiefling, half_orc, gnome, half_elf  
-**Fields per race:** stat_bonuses, speed, size, traits, languages
-**Traits:** darkvision, keen_senses, fey_ancestry, trance, lucky, brave, etc.
+### TypeScript Updates (`web/frontend/src/main.ts`)
+- Added campaign API functions: `generateCampaignPreview`, `finalizeCampaign`, `getCampaignTemplates`
+- New page loader: `loadCampaignCreator()`
+- Template selection with auto-fill
+- Step navigation: `goToStep()`
+- Preview population: `populatePreview()`
+- Item editing/removal functions
+- Campaign finalization with API call
 
 ---
 
-## What Has NOT Been Implemented Yet
+## Previous Changes (December 4, 2025 - Session 9)
 
-### 1. Testing Suite
-- ✅ Unit tests written (104 passing)
-- ✅ pytest-asyncio configured
-- ✅ Test database fixtures with temp file
-- Some integration tests need mock LLM responses
+### Critical Bug Fixes - Bot Not Responding
 
-### 2. Error Handling & Validation
-- Limited input validation in cogs
-- No comprehensive error responses
-- No rollback mechanisms for failed database operations
-- No rate limiting for API calls
+#### Root Cause
+The bot was failing with "The application did not respond" error when players interacted after game start. Two main issues:
+1. **Missing database column** - `priority` column in `story_events` table didn't exist in databases created before schema update
+2. **Session isolation failure** - Tools were using `get_active_session(guild_id)` which returns ANY active session in the guild, not the specific session the user is in
 
-### 3. Logging & Monitoring
-- Basic logging not configured
-- No performance monitoring
-- No audit trail for game actions
-- No error tracking/alerting
+#### Database Migration Fix
+- **Added `_run_migrations()` method to `database.py`** - Automatically adds missing columns to existing databases
+- Migration adds `priority` column to `story_events` table if missing
+- Migration adds `points_of_interest` column to `locations` table if missing
+- Uses `PRAGMA table_info()` to check for existing columns before altering
 
-### 4. Advanced Features
-- No multi-round dialogue memory persistence
-- No complex quest branching logic
-- No dynamic NPC personality generation
-- No spell/ability system implementation
-- No complex movement/map system
-- No voice channel integration
+#### Session Isolation Fix  
+- **Fixed query error handling in `get_active_events()`** - Now uses `COALESCE(priority, 0)` and has fallback query
+- **Fixed query error handling in `get_pending_events()`** - Same fix as above
+- **Added `_get_session_for_context()` helper in `tools.py`** - Proper session lookup:
+  1. First checks `context['session_id']` if passed
+  2. Then checks `get_user_active_session(guild_id, user_id)` for user's session
+  3. Finally falls back to `get_active_session(guild_id)` as last resort
+- **Updated all tool functions** to use `_get_session_for_context()` instead of `get_active_session()`
+- **Added `session_id` to context** in `dm_chat.py` when executing tools
 
-### 5. Documentation
-- No API documentation for cogs
-- No database schema diagrams
-- No architecture decision records
-- No troubleshooting guide
+#### Tools Updated for Session Isolation
+| Tool | Change |
+|------|--------|
+| `_start_combat` | Now uses session from context, adds only party members from THAT session |
+| `_create_quest` | Uses session from context |
+| `_create_npc` | Uses session from context |
+| `_get_party_info` | Uses session from context |
+| `_add_story_entry` | Uses session from context |
+| `_get_story_log` | Uses session from context |
+| `_create_location` | Uses session from context |
+| `_move_party_to_location` | Uses session from context |
+| `_create_story_item` | Uses session from context |
+| `_get_story_items` | Uses session from context |
+| `_create_story_event` | Uses session from context |
+| `_get_active_events` | Uses session from context |
+| `_generate_npc` | Uses session from context |
+| `_long_rest` | Uses session from context |
+| `_end_combat_with_rewards` | Uses session from context |
 
-### 6. DevOps/Deployment
-- No Docker setup
-- No CI/CD pipeline
-- No deployment scripts
-- No configuration management
-
----
-
-## Development Notes
-
-### Known Limitations
-1. **Concurrent Requests:** Channel-level locks prevent simultaneous commands in same channel
-2. **LLM Context Window:** No sliding window implementation for long conversations
-3. **Game State:** All game state in single SQLite database (no horizontal scaling)
-4. **Tool Execution:** Linear execution only; no parallel tool calls
-
-### Database Schema Notes
-- All timestamps use ISO format strings
-- All IDs are lowercase with underscores (snake_case)
-- Combat initialized but participant status not fully tracked
-- Quest objectives use list-based progress, not stages
-
-### Important Code Locations
-- Tool definitions: `src/tool_schemas.py` (~1050 lines)
-- Tool execution: `src/tools.py` (~400 lines)
-- LLM interaction: `src/llm.py` (~450 lines)
-- Database methods: `src/database.py` (~1600 lines)
-- DM chat loop: `src/cogs/dm_chat.py` handle_mention() method
+#### DM Capabilities Prompt Update
+- **Added Spell & Ability Tools section** - Documents `get_character_spells`, `cast_spell`, `get_character_abilities`, `use_ability`
+- **Added Skill Check Tools section** - Documents `roll_skill_check`
+- **Added Leveling & Progression section** - Explains automatic level ups and XP thresholds
+- **Added 3 new critical rules** - Guidance on spell/ability usage and XP rewards
 
 ---
 
-## Next Steps for Fresh Context
+## Previous Changes (December 4, 2025 - Session 7)
 
-### Priority 1: Testing Implementation
-1. Set up pytest framework with fixtures for database, LLM, Discord mocks
-2. Create unit tests for:
-   - Database CRUD operations
-   - Tool executor logic
-   - Dice roller calculations
-   - DM chat message parsing
-3. Create integration tests for:
-   - Full combat flow (start → roll initiative → attack → damage → end)
-   - Character creation and leveling
-   - Quest creation and progress tracking
-   - Inventory management
-4. Create mock LLM responses for deterministic testing
-5. Set up test coverage reporting
+### Frontend & API Fixes
 
-### Priority 2: Error Handling
-1. Add try-catch blocks in all cogs
-2. Implement custom exception classes
-3. Add user-friendly error messages
-4. Add logging for debugging
+#### API Endpoint Fixes
+- **Fixed `/api/gamedata/items` response structure** - Now returns `{items: {weapons: [...], armor: [...], ...}}` instead of raw JSON, fixing item database display
+- **Added `PUT /api/gamedata/classes`** - Bulk update endpoint for saving class edits from frontend
+- **Added `PUT /api/gamedata/races`** - Bulk update endpoint for saving race edits from frontend  
+- **Added `PUT /api/gamedata/skills/trees/{class_id}`** - Update skill tree for a specific class
+- **Added `PUT /api/gamedata/skills`** - Bulk update all skills data
 
-### Priority 3: Validation
-1. Add input validation for all commands
-2. Validate game data files on startup
-3. Add schema validation for database queries
-4. Add permission checks (who can start combat, create quests, etc.)
+#### Frontend TypeScript Fixes
+- **Fixed classes display** - Now handles `primary_stat` field (was expecting `primary_ability`)
+- **Fixed abilities rendering** - Classes in data use abilities as object keyed by level, now properly flattens for display
+- **Fixed class editing** - Edit form now properly populates and saves class data
+- **Added skill tree editing** - New `editSkillBranch()` and `saveSkillBranch()` functions for modifying skill branches
+- **Item database now loads correctly** - Frontend properly reads `data.items` from API response
 
-### Questions for Next Context
-1. Should tests focus on unit tests or integration tests first?
-2. What's the desired test coverage percentage?
-3. Should we add a test database or use in-memory SQLite?
-4. Do we need performance benchmarks?
+#### Test Results
+✅ **127 tests pass** - All existing tests continue to pass
 
 ---
 
-## File Manifest
+## Previous Changes (December 4, 2025 - Session 6)
 
+### Phase 4 Completion - Integration Verification & Bug Fixes
+
+#### Database Bug Fixes
+- **Removed duplicate `update_gold()` method** - Second definition was returning `True` instead of the new gold amount, breaking gold transactions
+- **Added `update_combatant_initiative()` method** - Was being called by `_roll_initiative` tool but didn't exist
+- **Fixed NPC relationship capping** - Initial relationships weren't being capped at ±100, now uses `max(-100, min(100, value))`
+
+#### Tool Implementation Fixes
+- **Fixed all `get_active_combat()` calls** - 7 calls in `tools.py` were passing `channel_id` as positional argument but method expects `channel_id=` keyword argument (first param is `guild_id`)
+- **Fixed `_roll_initiative()`** - Had broken code `async with self.db.db_path as conn:` which tried to use a string as async context manager
+
+#### Test Fixes  
+- **Fixed `test_save_memory` assertion** - Was checking for "saved" but output says "Remembered"
+- **Fixed test `get_active_combat` calls** - Same positional/keyword arg bug
+
+#### Integration Test Results
+✅ **127 tests pass** - Full coverage across database, dice, tools, and integration scenarios
+
+---
+
+## Project Architecture
+
+### Directory Structure
 ```
 c:\Users\kyle\projects\rpg-dm-bot\
-├── run.py
-├── requirements.txt
-├── .env.example
-├── README.md
-├── HANDOFF.md (this file)
+├── run.py                 # Entry point
+├── requirements.txt       # Python dependencies
+├── pytest.ini             # Test configuration
+├── HANDOFF.md             # This file
+├── README.md              # User documentation
+├── docs/
+│   └── DATABASE_ARCHITECTURE.md  # Database diagrams & relationships
 ├── data/
-│   ├── rpg.db (created at runtime)
+│   ├── rpg.db             # SQLite database (runtime)
 │   └── game_data/
-│       ├── items.json
-│       ├── enemies.json
-│       ├── classes.json
-│       └── races.json
+│       ├── classes.json   # 7 character classes
+│       ├── races.json     # 13+ playable races
+│       ├── items.json     # ~100 items (weapons, armor, potions)
+│       ├── enemies.json   # Enemy templates
+│       ├── spells.json    # Spell definitions
+│       ├── skills.json    # Skill trees per class
+│       ├── npc_templates.json
+│       └── starter_kits.json
 ├── src/
 │   ├── __init__.py
-│   ├── bot.py
-│   ├── database.py
-│   ├── llm.py
-│   ├── prompts.py
-│   ├── tool_schemas.py
-│   ├── tools.py
+│   ├── bot.py             # Main Discord bot class
+│   ├── database.py        # All database operations (~3800 lines)
+│   ├── llm.py             # LLM client with retry logic
+│   ├── prompts.py         # AI DM system prompts
+│   ├── tool_schemas.py    # OpenAI function definitions (~60 tools)
+│   ├── tools.py           # Tool executor (~67 implementations)
 │   └── cogs/
-│       ├── __init__.py
-│       ├── characters.py
-│       ├── combat.py
-│       ├── inventory.py
-│       ├── quests.py
-│       ├── npcs.py
-│       ├── sessions.py
-│       ├── dice.py
-│       ├── dm_chat.py
-│       └── game_master.py
-├── tests/
+│       ├── characters.py  # Character commands
+│       ├── combat.py      # Combat system
+│       ├── inventory.py   # Inventory management
+│       ├── quests.py      # Quest system
+│       ├── npcs.py        # NPC interactions
+│       ├── sessions.py    # Session/campaign management
+│       ├── dice.py        # Dice rolling
+│       ├── dm_chat.py     # AI DM conversation
+│       ├── game_master.py # Game flow control
+│       ├── game_persistence.py  # Save/load/story
+│       ├── spells.py      # Spell system
+│       └── skills.py      # Skill tree system
+├── web/
 │   ├── __init__.py
-│   ├── conftest.py
-│   ├── test_database.py
-│   ├── test_dice.py
-│   ├── test_integration.py
-│   └── test_tools.py
-└── logs/ (created at runtime)
+│   ├── api.py             # FastAPI REST API (~1400 lines, ~76 endpoints)
+│   └── frontend/
+│       ├── index.html     # Main HTML (~1200 lines)
+│       ├── styles.css     # CSS (~1450 lines)
+│       ├── package.json   # TypeScript config
+│       ├── tsconfig.json
+│       └── src/
+│           └── main.ts    # TypeScript (~2200 lines)
+├── tests/
+│   ├── conftest.py        # Test fixtures
+│   ├── test_database.py   # 48 database tests
+│   ├── test_dice.py       # 27 dice tests
+│   ├── test_integration.py # 10 integration tests
+│   └── test_tools.py      # 42 tool tests
+└── logs/                  # Runtime logs
+```
+
+### Tech Stack
+| Component | Technology |
+|-----------|------------|
+| Discord | discord.py 2.3+ with slash commands |
+| Database | SQLite via aiosqlite (async) |
+| LLM | Requesty.ai (OpenAI-compatible) |
+| Web API | FastAPI on port 8000 |
+| Frontend | TypeScript compiled to JS |
+| Testing | pytest with pytest-asyncio |
+
+---
+
+## Database Schema Summary
+
+**27 Tables** organized into subsystems:
+
+### Core Subsystem
+- `sessions` - Game campaigns
+- `session_participants` - Players in sessions
+- `characters` - Player characters
+- `game_state` - Current game state per session
+
+### Character Subsystem
+- `inventory` - Items owned
+- `character_spells` - Known spells
+- `character_abilities` - Class features
+- `character_skills` - Skill tree unlocks
+- `spell_slots` - Spell slot tracking
+- `character_skill_points` - Available skill points
+- `character_status_effects` - Buffs/debuffs
+
+### Quest & NPC Subsystem
+- `quests` - Quest definitions
+- `quest_progress` - Per-character progress
+- `npcs` - NPC definitions
+- `npc_relationships` - Character-NPC reputation
+
+### Combat Subsystem
+- `combat_encounters` - Combat sessions
+- `combat_participants` - Characters/enemies in combat
+
+### World Subsystem
+- `locations` - World locations
+- `location_connections` - Bidirectional location links
+- `story_items` - Key items/artifacts
+- `story_events` - Plot events
+
+### Memory Subsystem
+- `user_memories` - AI context
+- `conversation_history` - Chat history
+- `story_log` - Narrative log
+- `dice_rolls` - Roll history
+- `session_snapshots` - Save states
+- `character_interviews` - Character creation wizard
+
+**See `docs/DATABASE_ARCHITECTURE.md` for full diagrams and relationships.**
+
+---
+
+## API Endpoints Overview (~80 endpoints)
+
+### Core Endpoints (`/api/`)
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET/POST | `/api/sessions` | Session CRUD |
+| GET/POST | `/api/characters` | Character CRUD |
+| GET/POST | `/api/quests` | Quest CRUD |
+| GET/POST | `/api/npcs` | NPC CRUD |
+| GET/POST | `/api/locations` | Location CRUD |
+| GET/POST | `/api/items` | Story items CRUD |
+| GET/POST | `/api/events` | Story events CRUD |
+| GET/POST | `/api/combat` | Combat management |
+
+### Character Detail Endpoints
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/characters/{id}/spells` | Character's spells |
+| GET | `/api/characters/{id}/abilities` | Character's abilities |
+| GET | `/api/characters/{id}/skills` | Character's skills |
+| GET | `/api/characters/{id}/status-effects` | Active status effects |
+| POST | `/api/characters/{id}/rest/{type}` | Short/long rest |
+
+### Relationship Endpoints
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET/POST | `/api/locations/{id}/connections` | Location travel paths |
+| GET | `/api/npcs/{id}/relationships` | NPC-character relationships |
+
+### Game Data Endpoints (`/api/gamedata/`)
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET/PUT | `/api/gamedata/classes` | Character classes (edit all) |
+| GET/PATCH/POST/DELETE | `/api/gamedata/classes/{id}` | Single class CRUD |
+| GET/PUT | `/api/gamedata/races` | Playable races (edit all) |
+| GET/PATCH/POST/DELETE | `/api/gamedata/races/{id}` | Single race CRUD |
+| GET/PUT | `/api/gamedata/skills` | All skill data |
+| GET/PUT | `/api/gamedata/skills/trees/{class}` | Skill tree per class |
+| GET/PATCH | `/api/gamedata/skills/{id}` | Single skill CRUD |
+| GET | `/api/gamedata/items` | Item database (with filtering) |
+| GET | `/api/gamedata/spells` | Spell definitions |
+| GET | `/api/gamedata/enemies` | Enemy templates |
+
+---
+
+## What's Working
+
+### ✅ Complete & Verified (127 tests pass)
+- Character creation with interview wizard
+- Session/campaign management with player isolation
+- Combat system with initiative and turn tracking
+- Inventory with equipment slots and starter kits
+- Quest system with objectives and auto-reward distribution
+- NPC system with relationships and location tracking
+- Dice rolling with advantage/disadvantage and session history
+- AI DM chat with tool calling and comprehensive context
+- Spell system with slots and casting
+- Skill trees with points and unlocks
+- Game persistence with save/load
+- Web API for all CRUD operations (~80 endpoints)
+- Frontend dashboard and management pages
+- Class/race editors with full edit/save functionality
+- Skill tree editor with branch editing
+- Item database browser with search and filtering
+- Spell browser with filtering by school/level/class
+- **Cross-system wiring** - All game systems properly integrated
+- **All 67 tools** matched with schemas and working
+
+### ⚠️ Frontend UI - Partial
+- API client methods exist for all endpoints
+- **Missing UI components**: Combat viewer, spell management panels, location connection map, status effects display
+
+---
+
+## Known Issues & Limitations
+
+1. **No authentication** on web API (local use only)
+2. **Single SQLite database** - no horizontal scaling
+3. **No WebSocket** - frontend requires manual refresh
+4. **No browser chat** - can only interact with DM via Discord
+5. **Limited validation** - inputs not fully sanitized
+6. **No rate limiting** - API can be overwhelmed
+
+---
+## Next Steps (Phase 5 - Browser Chat Feature)
+
+### Goal
+Enable users to interact with the AI Dungeon Master from within the browser instead of requiring Discord.
+
+### Implementation Plan
+
+#### 1. Backend: Add Chat API Endpoint
+Create `/api/chat` endpoint in `web/api.py`:
+
+```python
+@app.post("/api/chat")
+async def chat_with_dm(request: ChatRequest):
+    """
+    Send a message to the AI DM and get a response.
+    
+    Request body:
+    - session_id: int - Active game session
+    - user_id: int - User identifier (can be generated for web users)
+    - message: str - User's message to the DM
+    
+    Response:
+    - response: str - DM's narrative response
+    - tool_results: list - Any game state changes made
+    - updated_state: dict - Current game state after changes
+    """
+```
+
+This endpoint should:
+1. Load the session and character context (reuse `get_game_context()` from `dm_chat.py`)
+2. Build the system prompt (reuse `build_dm_system_prompt()` from `prompts.py`)  
+3. Call the LLM with tools enabled (reuse logic from `handle_mention()` in `dm_chat.py`)
+4. Execute any tool calls (reuse `ToolExecutor` from `tools.py`)
+5. Return the response and any state changes
+
+#### 2. Backend: Add WebSocket Support (Optional but Recommended)
+For real-time updates during tool execution:
+
+```python
+@app.websocket("/ws/chat/{session_id}")
+async def websocket_chat(websocket: WebSocket, session_id: int):
+    """
+    WebSocket endpoint for streaming DM responses and real-time updates.
+    """
+```
+
+#### 3. Frontend: Chat Interface Component
+Add to `web/frontend/src/main.ts`:
+
+```typescript
+class ChatInterface {
+    private sessionId: number;
+    private chatHistory: ChatMessage[];
+    private websocket?: WebSocket;
+    
+    async sendMessage(message: string): Promise<void>;
+    renderMessage(message: ChatMessage): void;
+    renderToolResult(result: ToolResult): void;
+    updateGameState(state: GameState): void;
+}
+```
+
+#### 4. Frontend: Chat UI
+Add to `web/frontend/index.html`:
+- Chat panel (collapsible sidebar or dedicated tab)
+- Message input with send button
+- Message history display with DM/player distinction
+- Typing indicator during LLM response
+- Tool execution feedback (dice rolls, damage, etc.)
+- Quick action buttons (Attack, Defend, Cast Spell, etc.)
+
+#### 5. User Identity for Web
+Options:
+- **Simple**: Generate UUID on first visit, store in localStorage
+- **Better**: Add simple username registration (no password)
+- **Full**: Discord OAuth integration (reuse Discord identity)
+
+### Files to Create/Modify
+
+| File | Changes |
+|------|---------|
+| `web/api.py` | Add `/api/chat` endpoint, optionally WebSocket `/ws/chat/{session_id}` |
+| `src/chat_handler.py` | NEW: Extract DM chat logic from `dm_chat.py` into reusable class |
+| `web/frontend/src/main.ts` | Add `ChatInterface` class and chat rendering |
+| `web/frontend/index.html` | Add chat panel HTML structure |
+| `web/frontend/styles.css` | Add chat panel styling |
+
+### Key Code to Reuse
+
+From `src/cogs/dm_chat.py`:
+- `get_game_context()` - Gathers all game state for AI context
+- `handle_mention()` - Main chat loop with tool execution
+
+From `src/prompts.py`:
+- `build_dm_system_prompt()` - Creates the AI DM personality and instructions
+- `DM_CAPABILITIES` - Tool usage guidance for the AI
+
+From `src/tools.py`:
+- `ToolExecutor.execute_tool()` - Executes game state changes
+
+From `src/llm.py`:
+- `LLMClient.chat_completion_with_tools()` - LLM API call with function calling
+
+### Architecture Decision: Stateless vs Stateful
+
+**Recommended: Stateless HTTP**
+- Each POST to `/api/chat` is independent
+- Session context loaded from database each request
+- Simpler to implement, works with existing database layer
+- Frontend stores chat history display locally
+
+**Alternative: WebSocket (Stateful)**
+- Persistent connection per session
+- Better for streaming responses
+- More complex server-side state management
+- Consider for Phase 6 if needed
+
+---
+
+## Environment Setup
+
+```bash
+# Clone and setup
+cd c:\Users\kyle\projects\rpg-dm-bot
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+# Edit .env with:
+# - DISCORD_TOKEN=your_bot_token
+# - REQUESTY_API_KEY=your_api_key
+# - REQUESTY_BASE_URL=https://router.requesty.ai/v1
+
+# Run tests
+pytest tests/ -v
+
+# Run bot
+python run.py
+
+# Run API (separate terminal)
+cd web && uvicorn api:app --reload --port 8000
 ```
 
 ---
 
-## Quick Start (For Reference)
+## Important Code Locations
 
-```bash
-cd c:\Users\kyle\projects\rpg-dm-bot
-cp .env.example .env
-# Edit .env with DISCORD_TOKEN and REQUESTY_API_KEY
-pip install -r requirements.txt
-python run.py
-```
+| Purpose | File | Key Functions |
+|---------|------|---------------|
+| Database schema | `src/database.py` | Lines 20-550 (CREATE TABLE statements) |
+| Database methods | `src/database.py` | Lines 550-3800 (~160 async methods) |
+| API endpoints | `web/api.py` | Entire file (~80 endpoints) |
+| Frontend TypeScript | `web/frontend/src/main.ts` | API object, page handlers |
+| Tool definitions | `src/tool_schemas.py` | `TOOLS_SCHEMA` list (~60 tools) |
+| Tool implementations | `src/tools.py` | `execute_tool()` and `_*` methods |
+| DM chat loop | `src/cogs/dm_chat.py` | `handle_mention()`, `get_game_context()` |
+| AI prompts | `src/prompts.py` | `build_dm_system_prompt()`, `DM_CAPABILITIES` |
+| LLM client | `src/llm.py` | `chat_completion_with_tools()` |
+
+---
+
+## File Changes This Session (Session 8)
+
+| File | Changes |
+|------|---------|
+| `src/database.py` | Added `_run_migrations()` method for schema updates, fixed `get_active_events()` and `get_pending_events()` with error handling |
+| `src/tools.py` | Added `_get_session_for_context()` helper, updated 15+ tool functions to use proper session isolation |
+| `src/cogs/dm_chat.py` | Added `session_id` to tool execution context in both `process_batched_messages()` and `process_dm_message()` |
+| `src/prompts.py` | Added Spell & Ability Tools, Skill Check Tools, and Leveling sections to DM_CAPABILITIES |
+| `HANDOFF.md` | Updated with Session 8 changes |
+| `docs/DATABASE_ARCHITECTURE.md` | Updated with session isolation notes |
+
+## File Changes Previous Session (Session 7)
+
+| File | Changes |
+|------|---------|
+| `web/api.py` | Fixed `/api/gamedata/items` response structure, added PUT endpoints for classes/races/skills |
+| `web/frontend/src/main.ts` | Fixed class display (primary_stat), fixed abilities rendering, added skill tree editing |
+| `README.md` | Updated web dashboard section with new endpoints |
+| `HANDOFF.md` | Updated with Session 7 changes |
+
+## File Changes Session 6
+
+| File | Changes |
+|------|---------|
+| `src/database.py` | Removed duplicate `update_gold()`, added `update_combatant_initiative()`, fixed NPC relationship capping |
+| `src/tools.py` | Fixed 7 `get_active_combat()` calls to use `channel_id=` keyword, fixed `_roll_initiative()` broken async code |
+| `tests/test_tools.py` | Fixed `test_save_memory` assertion, fixed `get_active_combat` test calls |
+
+---
+
+## Questions Resolved This Session
+
+1. ✅ Bot not responding after game start - **Fixed missing `priority` column with database migration**
+2. ✅ Characters from other sessions appearing - **Fixed session isolation with `_get_session_for_context()`**
+3. ✅ Tools not documented for spells/skills - **Added to DM_CAPABILITIES prompt**
+
+## Questions for Next Session
+
+1. Should the browser chat use HTTP POST or WebSocket?
+2. How should web users be identified (UUID, username, Discord OAuth)?
+3. Should chat history be persisted to database or just frontend?
+4. Do we need streaming responses for better UX?
 
 ---
 

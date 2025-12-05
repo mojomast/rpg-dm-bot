@@ -1,0 +1,243 @@
+{
+  "templates": {
+    "merchant": {
+      "npc_type": "neutral",
+      "base_personality": "Shrewd and business-minded",
+      "traits": ["haggler", "gossip", "cautious", "observant"],
+      "secrets": [
+        "Dealing in stolen goods on the side",
+        "Actually a retired adventurer",
+        "Has a gambling problem",
+        "Spying for the local thieves guild",
+        "Hiding from creditors in another city"
+      ],
+      "speaking_style": {
+        "mannerisms": ["mentions prices often", "weighs words carefully", "notices valuable items"],
+        "greetings": ["Ah, a customer!", "Looking to buy or sell?", "I have just what you need!"],
+        "catchphrases": ["Everything has a price", "A fair deal for both of us", "Quality costs coin, friend"]
+      },
+      "motivations": ["profit", "security", "reputation", "family"],
+      "is_merchant": true
+    },
+    "guard": {
+      "npc_type": "neutral",
+      "base_personality": "Dutiful and vigilant",
+      "traits": ["alert", "disciplined", "suspicious", "loyal"],
+      "secrets": [
+        "Takes bribes to look the other way",
+        "Has a forbidden love with someone above their station",
+        "Secretly illiterate",
+        "Traumatized by something they witnessed on duty",
+        "Planning to desert and become an adventurer"
+      ],
+      "speaking_style": {
+        "mannerisms": ["stands at attention", "scans surroundings", "hand on weapon"],
+        "greetings": ["Halt! State your business.", "Move along, citizen.", "Keep the peace, friend."],
+        "catchphrases": ["I'm just doing my job", "The law is the law", "Nothing gets past me"]
+      },
+      "motivations": ["duty", "honor", "family", "pension"],
+      "is_merchant": false
+    },
+    "scholar": {
+      "npc_type": "friendly",
+      "base_personality": "Curious and knowledgeable",
+      "traits": ["bookish", "absent-minded", "enthusiastic", "meticulous"],
+      "secrets": [
+        "Researching forbidden magic",
+        "Stole their best work from a rival",
+        "Actually from a noble family in hiding",
+        "Possesses a dangerous artifact",
+        "Has made a deal with an otherworldly patron"
+      ],
+      "speaking_style": {
+        "mannerisms": ["adjusts spectacles", "quotes obscure texts", "gets lost in tangents"],
+        "greetings": ["Fascinating! Do you know about...", "Ah, visitors! Perhaps you can help me...", "Have you read...?"],
+        "catchphrases": ["According to my research...", "This reminds me of an ancient text...", "How utterly fascinating!"]
+      },
+      "motivations": ["knowledge", "recognition", "discovery", "legacy"],
+      "is_merchant": false
+    },
+    "innkeeper": {
+      "npc_type": "friendly",
+      "base_personality": "Welcoming and hospitable",
+      "traits": ["friendly", "observant", "hardworking", "gossipy"],
+      "secrets": [
+        "The inn is a front for smuggling",
+        "Witnessed a murder and has been silent",
+        "Former adventurer with a dark past",
+        "In massive debt to dangerous people",
+        "Has been hiding a fugitive"
+      ],
+      "speaking_style": {
+        "mannerisms": ["wipes glasses", "leans on bar", "laughs heartily"],
+        "greetings": ["Welcome, weary travelers!", "What'll it be?", "You look like you need a drink!"],
+        "catchphrases": ["The best ale in town!", "Rooms are cheap, secrets are cheaper", "I hear things, you know..."]
+      },
+      "motivations": ["prosperity", "community", "stories", "peace"],
+      "is_merchant": true
+    },
+    "noble": {
+      "npc_type": "neutral",
+      "base_personality": "Proud and politically savvy",
+      "traits": ["haughty", "educated", "manipulative", "cultured"],
+      "secrets": [
+        "Deeply in debt despite appearances",
+        "Plotting against their own family",
+        "Has illegitimate children",
+        "Involved in criminal enterprises",
+        "Practicing forbidden magic"
+      ],
+      "speaking_style": {
+        "mannerisms": ["looks down at others", "uses flowery language", "name-drops constantly"],
+        "greetings": ["Do you know who I am?", "How may I be of service... if worthy.", "Ah, commoners. State your purpose."],
+        "catchphrases": ["Befitting someone of my station", "You wouldn't understand", "Duty to one's blood"]
+      },
+      "motivations": ["power", "legacy", "reputation", "revenge"],
+      "is_merchant": false
+    },
+    "criminal": {
+      "npc_type": "hostile",
+      "base_personality": "Cunning and dangerous",
+      "traits": ["suspicious", "calculating", "ruthless", "street-smart"],
+      "secrets": [
+        "Actually an undercover agent",
+        "Wants to go straight but can't escape",
+        "Killed someone important by accident",
+        "Has a code of honor they secretly follow",
+        "Being blackmailed by someone powerful"
+      ],
+      "speaking_style": {
+        "mannerisms": ["eyes the exits", "speaks in low tones", "uses slang"],
+        "greetings": ["You didn't see me.", "What do you want?", "This better be worth my time."],
+        "catchphrases": ["Nothing's free in this city", "I know people", "Keep your voice down"]
+      },
+      "motivations": ["survival", "wealth", "freedom", "revenge"],
+      "is_merchant": false
+    },
+    "mystic": {
+      "npc_type": "neutral",
+      "base_personality": "Enigmatic and otherworldly",
+      "traits": ["cryptic", "wise", "eccentric", "perceptive"],
+      "secrets": [
+        "Their powers are fading",
+        "Made a terrible prophecy they're trying to prevent",
+        "Was once someone entirely different",
+        "Communicates with dark entities",
+        "Knows the true name of something dangerous"
+      ],
+      "speaking_style": {
+        "mannerisms": ["stares into distance", "speaks in riddles", "makes cryptic gestures"],
+        "greetings": ["The stars foretold your coming...", "You seek answers. I have questions.", "The veil between worlds grows thin..."],
+        "catchphrases": ["Fate is not set in stone", "I see more than you know", "The cosmos whispers..."]
+      },
+      "motivations": ["truth", "balance", "prevention", "transcendence"],
+      "is_merchant": false
+    },
+    "peasant": {
+      "npc_type": "friendly",
+      "base_personality": "Humble and hardworking",
+      "traits": ["simple", "honest", "superstitious", "resilient"],
+      "secrets": [
+        "Witnessed something supernatural",
+        "Has a gift they keep hidden",
+        "Caused a terrible accident long ago",
+        "Secretly noble-born",
+        "Knows the location of buried treasure"
+      ],
+      "speaking_style": {
+        "mannerisms": ["fidgets nervously", "uses simple words", "defers to authority"],
+        "greetings": ["M'lord... m'lady...", "Begging your pardon...", "Can I help ye?"],
+        "catchphrases": ["Above my station, that is", "The harvest waits for no one", "Simple folk like us..."]
+      },
+      "motivations": ["family", "survival", "peace", "better life"],
+      "is_merchant": false
+    },
+    "adventurer": {
+      "npc_type": "friendly",
+      "base_personality": "Bold and experienced",
+      "traits": ["confident", "scarred", "nostalgic", "practical"],
+      "secrets": [
+        "Left their previous party to die",
+        "Cursed by an ancient artifact",
+        "Hunting something that destroyed their life",
+        "Actually seeking redemption",
+        "Has a bounty on their head"
+      ],
+      "speaking_style": {
+        "mannerisms": ["checks equipment", "tells war stories", "sizes up newcomers"],
+        "greetings": ["Fellow travelers! Well met!", "You look like you can handle yourselves.", "Fresh blood, eh?"],
+        "catchphrases": ["Back in my day...", "Trust your instincts", "Adventure finds those who seek it"]
+      },
+      "motivations": ["glory", "wealth", "atonement", "thrill"],
+      "is_merchant": false
+    },
+    "villain": {
+      "npc_type": "hostile",
+      "base_personality": "Calculating and menacing",
+      "traits": ["intelligent", "patient", "charismatic", "cruel"],
+      "secrets": [
+        "Was once a hero who fell",
+        "Acting for what they believe is the greater good",
+        "Seeks revenge for a genuine wrong",
+        "Being controlled or manipulated",
+        "Loves someone they shouldn't"
+      ],
+      "speaking_style": {
+        "mannerisms": ["speaks softly", "smiles coldly", "chooses words precisely"],
+        "greetings": ["Ah, the heroes arrive at last...", "How delightfully predictable.", "I've been expecting you."],
+        "catchphrases": ["You cannot stop what's coming", "We're not so different, you and I", "This is merely a setback"]
+      },
+      "motivations": ["power", "revenge", "order", "ascension"],
+      "is_merchant": false
+    }
+  },
+  "name_generators": {
+    "human": {
+      "male": ["Aldric", "Brennan", "Cedric", "Darian", "Edmund", "Finnian", "Gareth", "Henrik", "Ivan", "Jakob"],
+      "female": ["Alara", "Brynn", "Celia", "Delia", "Elena", "Freya", "Giselle", "Helena", "Iris", "Juliana"],
+      "surnames": ["Blackwood", "Stormwind", "Ironforge", "Silvermane", "Thornwood", "Ashford", "Brightwater", "Darkholm"]
+    },
+    "elf": {
+      "male": ["Aelindor", "Caelum", "Elowen", "Faelar", "Galadrim", "Ithildir", "Lorien", "Mirion", "Neldor", "Thranduil"],
+      "female": ["Aelara", "Celebrian", "Elanor", "Galadriel", "Idrial", "Luthien", "Miriel", "Nimrodel", "Silmarien", "Yavanna"],
+      "surnames": ["Moonshadow", "Starweaver", "Leafwhisper", "Dawnstrider", "Nightbreeze", "Sunfire", "Willowmere"]
+    },
+    "dwarf": {
+      "male": ["Balin", "Dain", "Durin", "Gimli", "Gloin", "Kili", "Nori", "Oin", "Thorin", "Thrain"],
+      "female": ["Dis", "Dwala", "Gimla", "Hilda", "Kira", "Nala", "Runa", "Sigrid", "Tora", "Vala"],
+      "surnames": ["Ironbeard", "Stonefist", "Goldvein", "Hammerfall", "Deepdelver", "Forgefire", "Steelhelm"]
+    }
+  },
+  "personality_modifiers": {
+    "quirks": [
+      "Collects unusual items",
+      "Speaks to inanimate objects",
+      "Has an unusual pet",
+      "Obsessed with cleanliness",
+      "Never sits with back to door",
+      "Always touches wood for luck",
+      "Counts everything",
+      "Laughs at inappropriate times"
+    ],
+    "fears": [
+      "Heights",
+      "Fire",
+      "Water",
+      "Magic",
+      "Crowds",
+      "The dark",
+      "Specific creature type",
+      "Being alone"
+    ],
+    "ideals": [
+      "Justice above all",
+      "Family first",
+      "Honor binds",
+      "Knowledge is power",
+      "Freedom for all",
+      "Order brings peace",
+      "Nature must be protected",
+      "The strong survive"
+    ]
+  }
+}

@@ -503,3 +503,173 @@ class LLMClient:
         
         pattern = r'```json\s*\{[^`]*"memories"[^`]*\}\s*```'
         return re.sub(pattern, '', content, flags=re.DOTALL).strip()
+
+    def _extract_json_from_response(self, content: str) -> Any:
+        """Extract JSON from LLM response, handling markdown code blocks."""
+        import re
+        
+        # Try to find JSON in code block first
+        json_block_pattern = r'```(?:json)?\s*([\[\{].*?[\]\}])\s*```'
+        match = re.search(json_block_pattern, content, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+        
+        # Try to find raw JSON (array or object)
+        # Look for array
+        array_pattern = r'\[\s*\{.*?\}\s*\]'
+        match = re.search(array_pattern, content, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+        
+        # Look for object
+        obj_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        match = re.search(obj_pattern, content, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+        
+        # Last resort: try parsing the whole thing
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            logger.warning(f"Could not extract JSON from response: {content[:200]}...")
+            return None
+
+    async def generate_campaign_world(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate a complete campaign world with locations, NPCs, factions, and quests.
+        
+        Args:
+            settings: Campaign settings including theme, scale, magic_level, etc.
+            
+        Returns:
+            Dict containing world_setting, locations, npcs, factions, quest_hooks, starting_scenario
+        """
+        from src.prompts import (
+            build_world_generation_prompt,
+            build_locations_generation_prompt,
+            build_npcs_generation_prompt,
+            build_factions_generation_prompt,
+            build_quests_generation_prompt,
+            build_starting_scenario_prompt
+        )
+        
+        results = {}
+        
+        # Step 1: Generate world setting
+        logger.info("Generating world setting...")
+        world_prompt = build_world_generation_prompt(settings)
+        world_response = await self.chat([
+            {"role": "system", "content": "You are a master worldbuilder. Always respond with valid JSON."},
+            {"role": "user", "content": world_prompt}
+        ])
+        world_setting = self._extract_json_from_response(world_response)
+        if not world_setting:
+            # Fallback
+            world_setting = {
+                "name": f"{settings.get('name', 'Unknown')} Realm",
+                "description": f"A {settings.get('tone', 'heroic')} {settings.get('world_theme', 'fantasy')} world.",
+                "history": "A world shaped by ancient powers.",
+                "current_state": "A time of change and adventure.",
+                "unique_aspects": "Magic and mystery abound."
+            }
+        results['world_setting'] = world_setting
+        
+        # Step 2: Generate locations
+        logger.info("Generating locations...")
+        num_locations = settings.get('num_locations', 5)
+        locations_prompt = build_locations_generation_prompt(world_setting, settings, num_locations)
+        locations_response = await self.chat([
+            {"role": "system", "content": "You are a master worldbuilder. Always respond with a valid JSON array."},
+            {"role": "user", "content": locations_prompt}
+        ])
+        locations = self._extract_json_from_response(locations_response)
+        if not locations or not isinstance(locations, list):
+            # Fallback
+            locations = [{"id": f"loc_{i}", "name": f"Location {i+1}", "type": "generic", 
+                         "description": "A place of adventure.", "danger_level": 1,
+                         "points_of_interest": []} for i in range(num_locations)]
+        # Add IDs to locations
+        for i, loc in enumerate(locations):
+            loc['id'] = f"loc_{i}"
+        results['locations'] = locations
+        
+        # Step 3: Generate NPCs
+        logger.info("Generating NPCs...")
+        num_npcs = settings.get('num_npcs', 8)
+        npcs_prompt = build_npcs_generation_prompt(world_setting, locations, settings, num_npcs)
+        npcs_response = await self.chat([
+            {"role": "system", "content": "You are a master character creator. Always respond with a valid JSON array."},
+            {"role": "user", "content": npcs_prompt}
+        ])
+        npcs = self._extract_json_from_response(npcs_response)
+        if not npcs or not isinstance(npcs, list):
+            # Fallback
+            npcs = [{"id": f"npc_{i}", "name": f"NPC {i+1}", "type": "neutral",
+                    "description": "A mysterious figure.", "personality": "Reserved",
+                    "is_merchant": False, "is_party_member_candidate": False} for i in range(num_npcs)]
+        # Add IDs to NPCs
+        for i, npc in enumerate(npcs):
+            npc['id'] = f"npc_{i}"
+        results['npcs'] = npcs
+        
+        # Step 4: Generate factions
+        logger.info("Generating factions...")
+        num_factions = settings.get('num_factions', 3)
+        factions_prompt = build_factions_generation_prompt(world_setting, settings, num_factions)
+        factions_response = await self.chat([
+            {"role": "system", "content": "You are a master worldbuilder. Always respond with a valid JSON array."},
+            {"role": "user", "content": factions_prompt}
+        ])
+        factions = self._extract_json_from_response(factions_response)
+        if not factions or not isinstance(factions, list):
+            # Fallback
+            factions = [{"id": f"faction_{i}", "name": f"Faction {i+1}", "type": "guild",
+                        "description": "A powerful group.", "alignment": "neutral",
+                        "goals": "Expand influence"} for i in range(num_factions)]
+        # Add IDs to factions
+        for i, faction in enumerate(factions):
+            faction['id'] = f"faction_{i}"
+        results['factions'] = factions
+        
+        # Step 5: Generate quest hooks
+        logger.info("Generating quests...")
+        num_quests = settings.get('num_quest_hooks', 3)
+        quests_prompt = build_quests_generation_prompt(world_setting, locations, npcs, factions, settings, num_quests)
+        quests_response = await self.chat([
+            {"role": "system", "content": "You are a master quest designer. Always respond with a valid JSON array."},
+            {"role": "user", "content": quests_prompt}
+        ])
+        quest_hooks = self._extract_json_from_response(quests_response)
+        if not quest_hooks or not isinstance(quest_hooks, list):
+            # Fallback
+            quest_hooks = [{"id": f"quest_{i}", "title": f"Quest {i+1}", "type": "side",
+                          "description": "An adventure awaits.", "difficulty": "medium",
+                          "objectives": ["Complete the quest"], "rewards": {"gold": 100, "xp": 50}} 
+                         for i in range(num_quests)]
+        # Add IDs and ensure structure
+        for i, quest in enumerate(quest_hooks):
+            quest['id'] = f"quest_{i}"
+            quest['name'] = quest.get('title', quest.get('name', f'Quest {i+1}'))
+        results['quest_hooks'] = quest_hooks
+        
+        # Step 6: Generate starting scenario
+        logger.info("Generating starting scenario...")
+        scenario_prompt = build_starting_scenario_prompt(world_setting, locations, npcs, quest_hooks, settings)
+        starting_scenario = await self.chat([
+            {"role": "system", "content": "You are a master storyteller narrating the opening of an epic adventure."},
+            {"role": "user", "content": scenario_prompt}
+        ])
+        results['starting_scenario'] = starting_scenario.strip()
+        
+        logger.info("Campaign world generation complete!")
+        return results
+

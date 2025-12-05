@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPG DM Bot Manager</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Cinzel:wght@400;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🎲</span>
+                    <span class="logo-text">DM Manager</span>
+                </div>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </li>
+                <li class="nav-item" data-page="campaign-creator">
+                    <span class="nav-icon">🌍</span>
+                    <span class="nav-text">Create Campaign</span>
+                </li>
+                <li class="nav-item" data-page="sessions">
+                    <span class="nav-icon">🎮</span>
+                    <span class="nav-text">Sessions</span>
+                </li>
+                <li class="nav-item" data-page="characters">
+                    <span class="nav-icon">⚔️</span>
+                    <span class="nav-text">Characters</span>
+                </li>
+                <li class="nav-item" data-page="locations">
+                    <span class="nav-icon">🗺️</span>
+                    <span class="nav-text">Locations</span>
+                </li>
+                <li class="nav-item" data-page="npcs">
+                    <span class="nav-icon">👥</span>
+                    <span class="nav-text">NPCs</span>
+                </li>
+                <li class="nav-item" data-page="items">
+                    <span class="nav-icon">📜</span>
+                    <span class="nav-text">Story Items</span>
+                </li>
+                <li class="nav-item" data-page="events">
+                    <span class="nav-icon">⚡</span>
+                    <span class="nav-text">Events</span>
+                </li>
+                <li class="nav-item" data-page="quests">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-text">Quests</span>
+                </li>
+                <li class="nav-item" data-page="saves">
+                    <span class="nav-icon">💾</span>
+                    <span class="nav-text">Save Points</span>
+                </li>
+                <li class="nav-separator"></li>
+                <li class="nav-item" data-page="classes">
+                    <span class="nav-icon">🎭</span>
+                    <span class="nav-text">Class Editor</span>
+                </li>
+                <li class="nav-item" data-page="races">
+                    <span class="nav-icon">🧬</span>
+                    <span class="nav-text">Race Editor</span>
+                </li>
+                <li class="nav-item" data-page="skilltrees">
+                    <span class="nav-icon">🌳</span>
+                    <span class="nav-text">Skill Trees</span>
+                </li>
+                <li class="nav-item" data-page="itemdb">
+                    <span class="nav-icon">⚗️</span>
+                    <span class="nav-text">Item Database</span>
+                </li>
+                <li class="nav-item" data-page="spellbook">
+                    <span class="nav-icon">📖</span>
+                    <span class="nav-text">Spellbook</span>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="status-indicator online"></div>
+                <span>API Connected</span>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Dashboard Page -->
+            <div id="dashboard-page" class="page active">
+                <header class="page-header">
+                    <h1>⚔️ Campaign Dashboard</h1>
+                    <p class="header-subtitle">Manage your world and adventures</p>
+                </header>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">🎮</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-sessions">0</span>
+                            <span class="stat-label">Active Sessions</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⚔️</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-characters">0</span>
+                            <span class="stat-label">Characters</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🗺️</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-locations">0</span>
+                            <span class="stat-label">Locations</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-npcs">0</span>
+                            <span class="stat-label">NPCs</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="dashboard-card">
+                        <h3>🎲 Quick Actions</h3>
+                        <div class="quick-actions">
+                            <button class="btn btn-primary" onclick="showPage('sessions')">
+                                <span>➕</span> New Session
+                            </button>
+                            <button class="btn btn-secondary" onclick="showPage('locations')">
+                                <span>🗺️</span> Add Location
+                            </button>
+                            <button class="btn btn-secondary" onclick="showPage('npcs')">
+                                <span>👤</span> Create NPC
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <h3>📜 Recent Activity</h3>
+                        <div class="activity-list" id="recent-activity">
+                            <div class="activity-item">
+                                <span class="activity-icon">🎮</span>
+                                <span class="activity-text">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Campaign Creator Page -->
+            <div id="campaign-creator-page" class="page">
+                <header class="page-header">
+                    <h1>🌍 AI Campaign Creator</h1>
+                    <p class="header-subtitle">Generate a complete campaign world with AI-powered worldbuilding</p>
+                </header>
+
+                <!-- Step Indicator -->
+                <div class="wizard-steps">
+                    <div class="wizard-step active" data-step="1">
+                        <span class="step-number">1</span>
+                        <span class="step-label">Settings</span>
+                    </div>
+                    <div class="wizard-step" data-step="2">
+                        <span class="step-number">2</span>
+                        <span class="step-label">Generate</span>
+                    </div>
+                    <div class="wizard-step" data-step="3">
+                        <span class="step-number">3</span>
+                        <span class="step-label">Review</span>
+                    </div>
+                    <div class="wizard-step" data-step="4">
+                        <span class="step-number">4</span>
+                        <span class="step-label">Finalize</span>
+                    </div>
+                </div>
+
+                <!-- Step 1: Campaign Settings -->
+                <div id="campaign-step-1" class="campaign-step active">
+                    <div class="form-section">
+                        <h3>📛 Basic Information</h3>
+                        <div class="form-group">
+                            <label for="campaign-name">Campaign Name *</label>
+                            <input type="text" id="campaign-name" placeholder="Enter campaign name..." required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="campaign-guild-id">Discord Guild ID *</label>
+                                <input type="number" id="campaign-guild-id" placeholder="Discord server ID" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="campaign-dm-id">DM User ID *</label>
+                                <input type="number" id="campaign-dm-id" placeholder="Your Discord user ID" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>🎨 Quick Templates</h3>
+                        <div class="template-grid" id="template-grid">
+                            <div class="template-card" data-template="classic_fantasy">
+                                <div class="template-icon">⚔️</div>
+                                <div class="template-name">Classic Fantasy</div>
+                                <div class="template-desc">Traditional sword & sorcery</div>
+                            </div>
+                            <div class="template-card" data-template="dark_fantasy">
+                                <div class="template-icon">🌑</div>
+                                <div class="template-name">Dark Fantasy</div>
+                                <div class="template-desc">Gritty survival</div>
+                            </div>
+                            <div class="template-card" data-template="steampunk_adventure">
+                                <div class="template-icon">⚙️</div>
+                                <div class="template-name">Steampunk</div>
+                                <div class="template-desc">Victorian intrigue</div>
+                            </div>
+                            <div class="template-card" data-template="cosmic_horror">
+                                <div class="template-icon">👁️</div>
+                                <div class="template-name">Cosmic Horror</div>
+                                <div class="template-desc">Forbidden knowledge</div>
+                            </div>
+                            <div class="template-card" data-template="space_opera">
+                                <div class="template-icon">🚀</div>
+                                <div class="template-name">Space Opera</div>
+                                <div class="template-desc">Galactic adventures</div>
+                            </div>
+                            <div class="template-card" data-template="custom">
+                                <div class="template-icon">✨</div>
+                                <div class="template-name">Custom</div>
+                                <div class="template-desc">Build your own</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>🌐 World Settings</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="world-theme">World Theme</label>
+                                <select id="world-theme">
+                                    <option value="fantasy">Fantasy</option>
+                                    <option value="sci-fi">Sci-Fi</option>
+                                    <option value="horror">Horror</option>
+                                    <option value="steampunk">Steampunk</option>
+                                    <option value="modern">Modern</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="world-scale">World Scale</label>
+                                <select id="world-scale">
+                                    <option value="local">Local (single city/area)</option>
+                                    <option value="regional" selected>Regional (kingdom/nation)</option>
+                                    <option value="continental">Continental</option>
+                                    <option value="world">World/Planet</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="magic-level">Magic Level</label>
+                                <select id="magic-level">
+                                    <option value="none">None</option>
+                                    <option value="low">Low (rare/mysterious)</option>
+                                    <option value="medium">Medium (present but limited)</option>
+                                    <option value="high" selected>High (common)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tech-level">Technology Level</label>
+                                <select id="tech-level">
+                                    <option value="primitive">Primitive</option>
+                                    <option value="medieval" selected>Medieval</option>
+                                    <option value="renaissance">Renaissance</option>
+                                    <option value="industrial">Industrial</option>
+                                    <option value="modern">Modern</option>
+                                    <option value="futuristic">Futuristic</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="campaign-tone">Campaign Tone</label>
+                            <select id="campaign-tone">
+                                <option value="heroic" selected>Heroic (classic adventure)</option>
+                                <option value="gritty">Gritty (survival focused)</option>
+                                <option value="comedic">Comedic (light-hearted)</option>
+                                <option value="horror">Horror (dark & scary)</option>
+                                <option value="mystery">Mystery (investigation)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>📊 Generation Options</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="num-locations">Number of Locations</label>
+                                <input type="range" id="num-locations" min="3" max="15" value="5" oninput="document.getElementById('loc-value').textContent = this.value">
+                                <span id="loc-value" class="range-value">5</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="num-npcs">Number of NPCs</label>
+                                <input type="range" id="num-npcs" min="3" max="20" value="8" oninput="document.getElementById('npc-value').textContent = this.value">
+                                <span id="npc-value" class="range-value">8</span>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="num-factions">Number of Factions</label>
+                                <input type="range" id="num-factions" min="1" max="8" value="3" oninput="document.getElementById('faction-value').textContent = this.value">
+                                <span id="faction-value" class="range-value">3</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="num-quests">Starting Quest Hooks</label>
+                                <input type="range" id="num-quests" min="1" max="10" value="3" oninput="document.getElementById('quest-value').textContent = this.value">
+                                <span id="quest-value" class="range-value">3</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>✍️ Custom Details (Optional)</h3>
+                        <div class="form-group">
+                            <label for="world-description">World Description</label>
+                            <textarea id="world-description" rows="3" placeholder="Describe any specific details about your world..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="key-events">Key Historical Events</label>
+                            <textarea id="key-events" rows="2" placeholder="Any important events that shaped this world..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="special-rules">Special Rules or House Rules</label>
+                            <textarea id="special-rules" rows="2" placeholder="Any custom rules for this campaign..."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary btn-large" onclick="generateCampaignPreview()">
+                            🎲 Generate Campaign Preview
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Generating (Loading State) -->
+                <div id="campaign-step-2" class="campaign-step">
+                    <div class="generation-loading">
+                        <div class="loading-animation">
+                            <div class="loading-orb"></div>
+                            <div class="loading-ring"></div>
+                        </div>
+                        <h2>🔮 Generating Your World...</h2>
+                        <p class="loading-status" id="generation-status">Creating world setting...</p>
+                        <div class="loading-progress">
+                            <div class="progress-bar" id="generation-progress"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Review & Edit -->
+                <div id="campaign-step-3" class="campaign-step">
+                    <div class="preview-container">
+                        <!-- World Setting -->
+                        <div class="preview-section">
+                            <div class="preview-header">
+                                <h3>🌍 World Setting</h3>
+                                <button class="btn btn-small" onclick="editSection('world')">✏️ Edit</button>
+                            </div>
+                            <div class="preview-content" id="preview-world">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Locations -->
+                        <div class="preview-section">
+                            <div class="preview-header">
+                                <h3>🗺️ Locations (<span id="location-count">0</span>)</h3>
+                                <button class="btn btn-small" onclick="addItem('location')">➕ Add</button>
+                            </div>
+                            <div class="preview-grid" id="preview-locations">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- NPCs -->
+                        <div class="preview-section">
+                            <div class="preview-header">
+                                <h3>👥 NPCs (<span id="npc-count">0</span>)</h3>
+                                <button class="btn btn-small" onclick="addItem('npc')">➕ Add</button>
+                            </div>
+                            <div class="preview-grid" id="preview-npcs">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Factions -->
+                        <div class="preview-section">
+                            <div class="preview-header">
+                                <h3>⚔️ Factions (<span id="faction-count">0</span>)</h3>
+                                <button class="btn btn-small" onclick="addItem('faction')">➕ Add</button>
+                            </div>
+                            <div class="preview-grid" id="preview-factions">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Quest Hooks -->
+                        <div class="preview-section">
+                            <div class="preview-header">
+                                <h3>📜 Quest Hooks (<span id="quest-count">0</span>)</h3>
+                                <button class="btn btn-small" onclick="addItem('quest')">➕ Add</button>
+                            </div>
+                            <div class="preview-grid" id="preview-quests">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Starting Scenario -->
+                        <div class="preview-section">
+                            <div class="preview-header">
+                                <h3>🎬 Starting Scenario</h3>
+                                <button class="btn btn-small" onclick="editSection('scenario')">✏️ Edit</button>
+                            </div>
+                            <div class="preview-content" id="preview-scenario">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn btn-secondary" onclick="goToStep(1)">
+                            ← Back to Settings
+                        </button>
+                        <button class="btn btn-primary" onclick="generateCampaignPreview()">
+                            🔄 Regenerate
+                        </button>
+                        <button class="btn btn-success btn-large" onclick="finalizeCampaign()">
+                            ✅ Create Campaign
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 4: Success -->
+                <div id="campaign-step-4" class="campaign-step">
+                    <div class="success-container">
+                        <div class="success-icon">🎉</div>
+                        <h2>Campaign Created Successfully!</h2>
+                        <p class="success-message" id="success-message">Your new world awaits...</p>
+                        <div class="success-stats" id="success-stats">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div class="success-actions">
+                            <button class="btn btn-primary" onclick="showPage('sessions')">
+                                🎮 View Sessions
+                            </button>
+                            <button class="btn btn-secondary" onclick="startNewCampaign()">
+                                ➕ Create Another
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sessions Page -->
+            <div id="sessions-page" class="page">
+                <header class="page-header">
+                    <h1>🎮 Game Sessions</h1>
+                    <button class="btn btn-primary" onclick="openModal('session-modal')">
+                        <span>➕</span> New Session
+                    </button>
+                </header>
+                <div class="content-grid" id="sessions-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Characters Page -->
+            <div id="characters-page" class="page">
+                <header class="page-header">
+                    <h1>⚔️ Player Characters</h1>
+                </header>
+                <div class="content-grid" id="characters-list">
+                    <div class="loading-spinner">Loading characters...</div>
+                </div>
+            </div>
+
+            <!-- Locations Page -->
+            <div id="locations-page" class="page">
+                <header class="page-header">
+                    <h1>🗺️ World Locations</h1>
+                    <button class="btn btn-primary" onclick="openModal('location-modal')">
+                        <span>➕</span> New Location
+                    </button>
+                </header>
+                <div class="content-grid" id="locations-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <!-- NPCs Page -->
+            <div id="npcs-page" class="page">
+                <header class="page-header">
+                    <h1>👥 Non-Player Characters</h1>
+                    <button class="btn btn-primary" onclick="openModal('npc-modal')">
+                        <span>➕</span> New NPC
+                    </button>
+                </header>
+                <div class="content-grid" id="npcs-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Items Page -->
+            <div id="items-page" class="page">
+                <header class="page-header">
+                    <h1>📜 Story Items</h1>
+                    <button class="btn btn-primary" onclick="openModal('item-modal')">
+                        <span>➕</span> New Item
+                    </button>
+                </header>
+                <div class="content-grid" id="items-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Events Page -->
+            <div id="events-page" class="page">
+                <header class="page-header">
+                    <h1>⚡ Story Events</h1>
+                    <button class="btn btn-primary" onclick="openModal('event-modal')">
+                        <span>➕</span> New Event
+                    </button>
+                </header>
+                <div class="content-grid" id="events-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Quests Page -->
+            <div id="quests-page" class="page">
+                <header class="page-header">
+                    <h1>📋 Quests</h1>
+                    <button class="btn btn-primary" onclick="openModal('quest-modal')">
+                        <span>➕</span> New Quest
+                    </button>
+                </header>
+                <div class="content-grid" id="quests-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Saves Page -->
+            <div id="saves-page" class="page">
+                <header class="page-header">
+                    <h1>💾 Save Points</h1>
+                    <p class="header-subtitle">Manage game state snapshots</p>
+                </header>
+                <div class="session-select-container">
+                    <label for="save-session-select">Select Session:</label>
+                    <select id="save-session-select" onchange="loadSnapshots()"></select>
+                </div>
+                <div class="content-grid" id="saves-list">
+                    <div class="empty-state">Select a session to view save points</div>
+                </div>
+            </div>
+
+            <!-- Classes Editor Page -->
+            <div id="classes-page" class="page">
+                <header class="page-header">
+                    <h1>🎭 Class Editor</h1>
+                    <button class="btn btn-primary" onclick="openModal('class-modal')">
+                        <span>➕</span> New Class
+                    </button>
+                </header>
+                <div class="content-grid" id="classes-list">
+                    <div class="loading-spinner">Loading classes...</div>
+                </div>
+            </div>
+
+            <!-- Races Editor Page -->
+            <div id="races-page" class="page">
+                <header class="page-header">
+                    <h1>🧬 Race Editor</h1>
+                    <button class="btn btn-primary" onclick="openModal('race-modal')">
+                        <span>➕</span> New Race
+                    </button>
+                </header>
+                <div class="content-grid" id="races-list">
+                    <div class="loading-spinner">Loading races...</div>
+                </div>
+            </div>
+
+            <!-- Skill Trees Page -->
+            <div id="skilltrees-page" class="page">
+                <header class="page-header">
+                    <h1>🌳 Skill Trees</h1>
+                    <p class="header-subtitle">View and manage class skill trees</p>
+                </header>
+                <div class="skill-tree-controls">
+                    <select id="skill-tree-class-select" onchange="loadSkillTree()">
+                        <option value="">Select a class...</option>
+                    </select>
+                </div>
+                <div id="skill-tree-container" class="skill-tree-container">
+                    <div class="empty-state">Select a class to view its skill tree</div>
+                </div>
+            </div>
+
+            <!-- Item Database Page -->
+            <div id="itemdb-page" class="page">
+                <header class="page-header">
+                    <h1>⚗️ Item Database</h1>
+                    <p class="header-subtitle">Browse and manage game items</p>
+                </header>
+                <div class="item-controls">
+                    <div class="search-box">
+                        <input type="text" id="item-search" placeholder="Search items..." oninput="filterItems()">
+                    </div>
+                    <select id="item-category-select" onchange="loadItemCategory()">
+                        <option value="all">All Categories</option>
+                        <option value="weapons">Weapons</option>
+                        <option value="armor">Armor</option>
+                        <option value="consumables">Consumables</option>
+                        <option value="accessories">Accessories</option>
+                        <option value="gear">Gear</option>
+                        <option value="ammunition">Ammunition</option>
+                        <option value="materials">Materials</option>
+                    </select>
+                    <select id="item-rarity-select" onchange="filterItems()">
+                        <option value="all">All Rarities</option>
+                        <option value="common">Common</option>
+                        <option value="uncommon">Uncommon</option>
+                        <option value="rare">Rare</option>
+                        <option value="very_rare">Very Rare</option>
+                        <option value="legendary">Legendary</option>
+                    </select>
+                </div>
+                <div class="items-grid" id="itemdb-list">
+                    <div class="loading-spinner">Loading items...</div>
+                </div>
+            </div>
+
+            <!-- Spellbook Page -->
+            <div id="spellbook-page" class="page">
+                <header class="page-header">
+                    <h1>📖 Spellbook</h1>
+                    <p class="header-subtitle">Browse and manage spells</p>
+                </header>
+                <div class="spell-controls">
+                    <div class="search-box">
+                        <input type="text" id="spell-search" placeholder="Search spells..." oninput="filterSpells()">
+                    </div>
+                    <select id="spell-level-select" onchange="filterSpells()">
+                        <option value="all">All Levels</option>
+                        <option value="0">Cantrips</option>
+                        <option value="1">Level 1</option>
+                        <option value="2">Level 2</option>
+                        <option value="3">Level 3</option>
+                        <option value="4">Level 4</option>
+                        <option value="5">Level 5</option>
+                    </select>
+                    <select id="spell-school-select" onchange="filterSpells()">
+                        <option value="all">All Schools</option>
+                        <option value="abjuration">Abjuration</option>
+                        <option value="conjuration">Conjuration</option>
+                        <option value="divination">Divination</option>
+                        <option value="enchantment">Enchantment</option>
+                        <option value="evocation">Evocation</option>
+                        <option value="illusion">Illusion</option>
+                        <option value="necromancy">Necromancy</option>
+                        <option value="transmutation">Transmutation</option>
+                    </select>
+                    <select id="spell-class-select" onchange="filterSpells()">
+                        <option value="all">All Classes</option>
+                    </select>
+                </div>
+                <div class="spells-grid" id="spellbook-list">
+                    <div class="loading-spinner">Loading spells...</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="character-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚔️ Edit Character</h2>
+                <button class="modal-close" onclick="closeModal('character-modal')">×</button>
+            </div>
+            <form id="character-form" onsubmit="updateCharacter(event)">
+                <input type="hidden" id="char-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="char-name">Name</label>
+                        <input type="text" id="char-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="char-class">Class</label>
+                        <input type="text" id="char-class">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="char-race">Race</label>
+                        <input type="text" id="char-race">
+                    </div>
+                    <div class="form-group">
+                        <label for="char-level">Level</label>
+                        <input type="number" id="char-level" min="1" max="20">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="char-hp">HP</label>
+                        <div class="input-group">
+                            <input type="number" id="char-hp" placeholder="Current">
+                            <span>/</span>
+                            <input type="number" id="char-max-hp" placeholder="Max">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="char-mana">Mana</label>
+                        <div class="input-group">
+                            <input type="number" id="char-mana" placeholder="Current">
+                            <span>/</span>
+                            <input type="number" id="char-max-mana" placeholder="Max">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="char-gold">Gold</label>
+                    <input type="number" id="char-gold" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="char-backstory">Backstory</label>
+                    <textarea id="char-backstory" rows="4"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeModal('character-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="session-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🎮 Create New Session</h2>
+                <button class="modal-close" onclick="closeModal('session-modal')">×</button>
+            </div>
+            <form id="session-form" onsubmit="createSession(event)">
+                <div class="form-group">
+                    <label for="session-name">Session Name</label>
+                    <input type="text" id="session-name" required placeholder="The Dragon's Lair">
+                </div>
+                <div class="form-group">
+                    <label for="session-desc">Description</label>
+                    <textarea id="session-desc" placeholder="A mysterious adventure awaits..."></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="session-guild">Guild ID</label>
+                        <input type="number" id="session-guild" required placeholder="Discord Server ID">
+                    </div>
+                    <div class="form-group">
+                        <label for="session-dm">DM User ID</label>
+                        <input type="number" id="session-dm" required placeholder="Your Discord ID">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeModal('session-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Session</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="location-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🗺️ Create New Location</h2>
+                <button class="modal-close" onclick="closeModal('location-modal')">×</button>
+            </div>
+            <form id="location-form" onsubmit="createLocation(event)">
+                <div class="form-group">
+                    <label for="location-name">Location Name</label>
+                    <input type="text" id="location-name" required placeholder="Riverside Village">
+                </div>
+                <div class="form-group">
+                    <label for="location-desc">Description</label>
+                    <textarea id="location-desc" placeholder="A peaceful village by the river..."></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="location-type">Type</label>
+                        <select id="location-type">
+                            <option value="town">Town</option>
+                            <option value="village">Village</option>
+                            <option value="city">City</option>
+                            <option value="dungeon">Dungeon</option>
+                            <option value="wilderness">Wilderness</option>
+                            <option value="landmark">Landmark</option>
+                            <option value="building">Building</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="location-danger">Danger Level (0-10)</label>
+                        <input type="number" id="location-danger" min="0" max="10" value="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="location-weather">Current Weather</label>
+                    <input type="text" id="location-weather" placeholder="Clear skies">
+                </div>
+                <div class="form-group">
+                    <label for="location-secrets">Hidden Secrets (DM Only)</label>
+                    <textarea id="location-secrets" placeholder="A hidden treasure beneath the old oak..."></textarea>
+                </div>
+                <input type="hidden" id="location-guild">
+                <input type="hidden" id="location-creator">
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeModal('location-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Location</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="npc-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>👤 Create New NPC</h2>
+                <button class="modal-close" onclick="closeModal('npc-modal')">×</button>
+            </div>
+            <form id="npc-form" onsubmit="createNPC(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="npc-name">Name</label>
+                        <input type="text" id="npc-name" required placeholder="Aldric the Blacksmith">
+                    </div>
+                    <div class="form-group">
+                        <label for="npc-type">Type</label>
+                        <select id="npc-type">
+                            <option value="friendly">Friendly</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="hostile">Hostile</option>
+                            <option value="quest">Quest Giver</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="npc-desc">Description</label>
+                    <textarea id="npc-desc" placeholder="A burly man with soot-covered arms..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="npc-personality">Personality</label>
+                    <textarea id="npc-personality"
+                        placeholder="Gruff but fair, secretly has a soft spot for cats..."></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="npc-location">Location</label>
+                        <input type="text" id="npc-location" placeholder="Town Square">
+                    </div>
+                    <div class="form-group">
+                        <label for="npc-merchant">
+                            <input type="checkbox" id="npc-merchant">
+                            Is Merchant
+                        </label>
+                    </div>
+                </div>
+                <input type="hidden" id="npc-guild">
+                <input type="hidden" id="npc-creator">
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('npc-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create NPC</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="item-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📜 Create Story Item</h2>
+                <button class="modal-close" onclick="closeModal('item-modal')">×</button>
+            </div>
+            <form id="item-form" onsubmit="createItem(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="item-name">Item Name</label>
+                        <input type="text" id="item-name" required placeholder="Ancient Medallion">
+                    </div>
+                    <div class="form-group">
+                        <label for="item-type">Type</label>
+                        <select id="item-type">
+                            <option value="artifact">Artifact</option>
+                            <option value="clue">Clue</option>
+                            <option value="key">Key Item</option>
+                            <option value="letter">Letter/Document</option>
+                            <option value="misc">Misc</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="item-desc">Description</label>
+                    <textarea id="item-desc" placeholder="A golden medallion etched with strange runes..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="item-lore">Lore/Backstory</label>
+                    <textarea id="item-lore" placeholder="This medallion was crafted by the first mages..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="item-discovery">Discovery Conditions</label>
+                    <input type="text" id="item-discovery" placeholder="Found by investigating the altar">
+                </div>
+                <div class="form-group">
+                    <label for="item-notes">DM Notes</label>
+                    <textarea id="item-notes" placeholder="Important for the main quest..."></textarea>
+                </div>
+                <input type="hidden" id="item-guild">
+                <input type="hidden" id="item-creator">
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('item-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="event-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚡ Create Story Event</h2>
+                <button class="modal-close" onclick="closeModal('event-modal')">×</button>
+            </div>
+            <form id="event-form" onsubmit="createEvent(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="event-name">Event Name</label>
+                        <input type="text" id="event-name" required placeholder="Goblin Raid">
+                    </div>
+                    <div class="form-group">
+                        <label for="event-type">Type</label>
+                        <select id="event-type">
+                            <option value="main_plot">Main Plot</option>
+                            <option value="side_event">Side Event</option>
+                            <option value="random">Random Encounter</option>
+                            <option value="scheduled">Scheduled</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="event-desc">Description</label>
+                    <textarea id="event-desc" placeholder="A band of goblins attacks the village..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="event-trigger">Trigger Conditions</label>
+                    <input type="text" id="event-trigger" placeholder="When party enters the forest at night">
+                </div>
+                <div class="form-group">
+                    <label for="event-notes">DM Notes</label>
+                    <textarea id="event-notes" placeholder="This leads to the main quest..."></textarea>
+                </div>
+                <input type="hidden" id="event-guild">
+                <input type="hidden" id="event-creator">
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('event-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Event</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Session Detail Modal -->
+    <div id="session-detail-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="session-detail-title">🎮 Session Details</h2>
+                <button class="modal-close" onclick="closeModal('session-detail-modal')">×</button>
+            </div>
+            <div id="session-detail-content" class="session-detail-content">
+                <div class="loading-spinner">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Location Modal -->
+    <div id="edit-location-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🗺️ Edit Location</h2>
+                <button class="modal-close" onclick="closeModal('edit-location-modal')">×</button>
+            </div>
+            <form id="edit-location-form" onsubmit="updateLocation(event)">
+                <input type="hidden" id="edit-location-id">
+                <div class="form-group">
+                    <label for="edit-location-name">Location Name</label>
+                    <input type="text" id="edit-location-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-location-desc">Description</label>
+                    <textarea id="edit-location-desc"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-location-type">Type</label>
+                        <select id="edit-location-type">
+                            <option value="town">Town</option>
+                            <option value="village">Village</option>
+                            <option value="city">City</option>
+                            <option value="dungeon">Dungeon</option>
+                            <option value="wilderness">Wilderness</option>
+                            <option value="landmark">Landmark</option>
+                            <option value="building">Building</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-location-danger">Danger Level (0-10)</label>
+                        <input type="number" id="edit-location-danger" min="0" max="10" value="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-location-weather">Current Weather</label>
+                    <input type="text" id="edit-location-weather">
+                </div>
+                <div class="form-group">
+                    <label for="edit-location-secrets">Hidden Secrets (DM Only)</label>
+                    <textarea id="edit-location-secrets"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-location-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit NPC Modal -->
+    <div id="edit-npc-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>👤 Edit NPC</h2>
+                <button class="modal-close" onclick="closeModal('edit-npc-modal')">×</button>
+            </div>
+            <form id="edit-npc-form" onsubmit="updateNPC(event)">
+                <input type="hidden" id="edit-npc-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-npc-name">Name</label>
+                        <input type="text" id="edit-npc-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-npc-type">Type</label>
+                        <select id="edit-npc-type">
+                            <option value="friendly">Friendly</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="hostile">Hostile</option>
+                            <option value="quest">Quest Giver</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-npc-desc">Description</label>
+                    <textarea id="edit-npc-desc"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-npc-personality">Personality</label>
+                    <textarea id="edit-npc-personality"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-npc-location">Location</label>
+                        <input type="text" id="edit-npc-location">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-npc-merchant">
+                            <input type="checkbox" id="edit-npc-merchant">
+                            Is Merchant
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-npc-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Item Modal -->
+    <div id="edit-item-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📜 Edit Story Item</h2>
+                <button class="modal-close" onclick="closeModal('edit-item-modal')">×</button>
+            </div>
+            <form id="edit-item-form" onsubmit="updateItem(event)">
+                <input type="hidden" id="edit-item-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-item-name">Item Name</label>
+                        <input type="text" id="edit-item-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-item-type">Type</label>
+                        <select id="edit-item-type">
+                            <option value="artifact">Artifact</option>
+                            <option value="clue">Clue</option>
+                            <option value="key">Key Item</option>
+                            <option value="letter">Letter/Document</option>
+                            <option value="misc">Misc</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-item-desc">Description</label>
+                    <textarea id="edit-item-desc"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-item-lore">Lore/Backstory</label>
+                    <textarea id="edit-item-lore"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-item-discovery">Discovery Conditions</label>
+                    <input type="text" id="edit-item-discovery">
+                </div>
+                <div class="form-group">
+                    <label for="edit-item-notes">DM Notes</label>
+                    <textarea id="edit-item-notes"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-item-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Event Modal -->
+    <div id="edit-event-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚡ Edit Story Event</h2>
+                <button class="modal-close" onclick="closeModal('edit-event-modal')">×</button>
+            </div>
+            <form id="edit-event-form" onsubmit="updateEvent(event)">
+                <input type="hidden" id="edit-event-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-event-name">Event Name</label>
+                        <input type="text" id="edit-event-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-event-type">Type</label>
+                        <select id="edit-event-type">
+                            <option value="main_plot">Main Plot</option>
+                            <option value="side_event">Side Event</option>
+                            <option value="random">Random Encounter</option>
+                            <option value="scheduled">Scheduled</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-event-desc">Description</label>
+                    <textarea id="edit-event-desc"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-event-trigger">Trigger Conditions</label>
+                    <input type="text" id="edit-event-trigger">
+                </div>
+                <div class="form-group">
+                    <label for="edit-event-notes">DM Notes</label>
+                    <textarea id="edit-event-notes"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-event-status">Status</label>
+                    <select id="edit-event-status">
+                        <option value="pending">Pending</option>
+                        <option value="active">Active</option>
+                        <option value="completed">Completed</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-event-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Quest Modal (Create) -->
+    <div id="quest-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Create New Quest</h2>
+                <button class="modal-close" onclick="closeModal('quest-modal')">×</button>
+            </div>
+            <form id="quest-form" onsubmit="createQuest(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="quest-title">Quest Title</label>
+                        <input type="text" id="quest-title" required placeholder="The Lost Artifact">
+                    </div>
+                    <div class="form-group">
+                        <label for="quest-difficulty">Difficulty</label>
+                        <select id="quest-difficulty">
+                            <option value="easy">Easy</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="hard">Hard</option>
+                            <option value="deadly">Deadly</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="quest-desc">Description</label>
+                    <textarea id="quest-desc" placeholder="A mysterious artifact has been stolen..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="quest-objectives">Objectives (one per line)</label>
+                    <textarea id="quest-objectives" placeholder="Find the thief&#10;Recover the artifact&#10;Return to the quest giver"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="quest-notes">DM Notes</label>
+                    <textarea id="quest-notes" placeholder="Hidden clues, NPCs involved..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('quest-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Quest</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Quest Modal -->
+    <div id="edit-quest-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Edit Quest</h2>
+                <button class="modal-close" onclick="closeModal('edit-quest-modal')">×</button>
+            </div>
+            <form id="edit-quest-form" onsubmit="updateQuest(event)">
+                <input type="hidden" id="edit-quest-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-quest-title">Quest Title</label>
+                        <input type="text" id="edit-quest-title" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-quest-difficulty">Difficulty</label>
+                        <select id="edit-quest-difficulty">
+                            <option value="easy">Easy</option>
+                            <option value="medium">Medium</option>
+                            <option value="hard">Hard</option>
+                            <option value="deadly">Deadly</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-quest-desc">Description</label>
+                    <textarea id="edit-quest-desc"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-quest-objectives">Objectives (one per line)</label>
+                    <textarea id="edit-quest-objectives"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-quest-notes">DM Notes</label>
+                    <textarea id="edit-quest-notes"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-quest-status">Status</label>
+                    <select id="edit-quest-status">
+                        <option value="available">Available</option>
+                        <option value="active">Active</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-quest-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Inventory Modal -->
+    <div id="inventory-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>🎒 <span id="inventory-char-name">Character</span>'s Inventory</h2>
+                <button class="modal-close" onclick="closeModal('inventory-modal')">×</button>
+            </div>
+            <div class="inventory-toolbar">
+                <button class="btn btn-primary" onclick="openAddItemModal()">➕ Add Item</button>
+            </div>
+            <div id="inventory-list" class="inventory-list">
+                <div class="loading-spinner">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Item to Inventory Modal -->
+    <div id="add-item-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>➕ Add Item to Inventory</h2>
+                <button class="modal-close" onclick="closeModal('add-item-modal')">×</button>
+            </div>
+            
+            <!-- Item Database Search Section -->
+            <div class="item-db-search">
+                <h3>📦 Select from Item Database</h3>
+                <div class="form-row">
+                    <div class="form-group flex-2">
+                        <input type="text" id="item-db-search" placeholder="Search items..." oninput="searchItemDb(this.value)">
+                    </div>
+                    <div class="form-group">
+                        <select id="item-db-type-filter" onchange="filterItemDbByType(this.value)">
+                            <option value="">All Types</option>
+                            <option value="weapon">Weapons</option>
+                            <option value="armor">Armor</option>
+                            <option value="shield">Shields</option>
+                            <option value="helmet">Helmets</option>
+                            <option value="boots">Boots</option>
+                            <option value="gloves">Gloves</option>
+                            <option value="ring">Rings</option>
+                            <option value="amulet">Amulets</option>
+                            <option value="cloak">Cloaks</option>
+                            <option value="consumable">Consumables</option>
+                            <option value="material">Materials</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="item-db-results" class="item-db-results">
+                    <div class="empty-state">Search or browse the item database above</div>
+                </div>
+            </div>
+            
+            <div class="divider-text"><span>OR</span></div>
+            
+            <form id="add-item-form" onsubmit="addItemToInventory(event)">
+                <h3>✏️ Custom Item</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="add-item-name">Item Name</label>
+                        <input type="text" id="add-item-name" required placeholder="Sword of Flames">
+                    </div>
+                    <div class="form-group">
+                        <label for="add-item-type">Type</label>
+                        <select id="add-item-type">
+                            <option value="weapon">Weapon</option>
+                            <option value="armor">Armor</option>
+                            <option value="shield">Shield</option>
+                            <option value="helmet">Helmet</option>
+                            <option value="boots">Boots</option>
+                            <option value="gloves">Gloves</option>
+                            <option value="ring">Ring</option>
+                            <option value="amulet">Amulet</option>
+                            <option value="cloak">Cloak</option>
+                            <option value="consumable">Consumable</option>
+                            <option value="material">Material</option>
+                            <option value="misc">Misc</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="add-item-id">Item ID (optional)</label>
+                        <input type="text" id="add-item-id" placeholder="sword_flames_01">
+                    </div>
+                    <div class="form-group">
+                        <label for="add-item-quantity">Quantity</label>
+                        <input type="number" id="add-item-quantity" min="1" value="1">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('add-item-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Custom Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Class Modal -->
+    <div id="edit-class-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>⚔️ Edit Class</h2>
+                <button class="modal-close" onclick="closeModal('edit-class-modal')">×</button>
+            </div>
+            <form id="edit-class-form" onsubmit="updateClass(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-class-name">Class Name</label>
+                        <input type="text" id="edit-class-name" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-class-hitdie">Hit Die</label>
+                        <select id="edit-class-hitdie">
+                            <option value="d6">d6</option>
+                            <option value="d8">d8</option>
+                            <option value="d10">d10</option>
+                            <option value="d12">d12</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-class-desc">Description</label>
+                    <textarea id="edit-class-desc" rows="3"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-class-primary">Primary Ability</label>
+                        <input type="text" id="edit-class-primary" placeholder="Strength">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-class-saves">Saving Throws (comma-separated)</label>
+                        <input type="text" id="edit-class-saves" placeholder="Strength, Constitution">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-class-armor">Armor Proficiencies (comma-separated)</label>
+                        <input type="text" id="edit-class-armor" placeholder="Light Armor, Medium Armor">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-class-weapons">Weapon Proficiencies (comma-separated)</label>
+                        <input type="text" id="edit-class-weapons" placeholder="Simple Weapons, Martial Weapons">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-class-abilities">Abilities (JSON array)</label>
+                    <textarea id="edit-class-abilities" rows="10" placeholder='[{"name": "Second Wind", "level": 1, "description": "..."}]'></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-class-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Class</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Race Modal -->
+    <div id="edit-race-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>🧝 Edit Race</h2>
+                <button class="modal-close" onclick="closeModal('edit-race-modal')">×</button>
+            </div>
+            <form id="edit-race-form" onsubmit="updateRace(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-race-name">Race Name</label>
+                        <input type="text" id="edit-race-name" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-race-size">Size</label>
+                        <select id="edit-race-size">
+                            <option value="Tiny">Tiny</option>
+                            <option value="Small">Small</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Large">Large</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-race-desc">Description</label>
+                    <textarea id="edit-race-desc" rows="3"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-race-speed">Speed (feet)</label>
+                        <input type="number" id="edit-race-speed" min="5" step="5" value="30">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-race-bonuses">Ability Bonuses (format: STR:2, DEX:1)</label>
+                        <input type="text" id="edit-race-bonuses" placeholder="STR:2, CON:1">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-race-languages">Languages (comma-separated)</label>
+                    <input type="text" id="edit-race-languages" placeholder="Common, Elvish">
+                </div>
+                <div class="form-group">
+                    <label for="edit-race-traits">Traits (JSON array)</label>
+                    <textarea id="edit-race-traits" rows="10" placeholder='[{"name": "Darkvision", "description": "..."}]'></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-race-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Race</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container"></div>
+
+    <script type="module" src="/static/main.js"></script>
+</body>
+
+</html>

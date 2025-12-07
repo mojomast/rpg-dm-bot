@@ -1,0 +1,461 @@
+"""
+Party Member Bot - Owner Commands Cog
+Commands that can only be used by the bot owner via DMs
+"""
+
+import discord
+from discord.ext import commands
+import logging
+import json
+from typing import Optional
+from datetime import datetime
+
+logger = logging.getLogger('party_member.owner')
+
+
+class OwnerCommands(commands.Cog):
+    """Commands for the bot owner to configure and control the bot"""
+    
+    def __init__(self, bot):
+        self.bot = bot
+    
+    def is_owner(self, user_id: int) -> bool:
+        """Check if a user is the bot owner"""
+        return self.bot.owner_id_config and user_id == self.bot.owner_id_config
+    
+    @commands.command(name='create')
+    async def create_character(self, ctx: commands.Context):
+        """Start the character creation interview"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            await ctx.send("❌ Only the bot owner can use this command.")
+            return
+        
+        interview_cog = self.bot.get_cog('Interview')
+        if interview_cog:
+            await interview_cog.start_interview(ctx)
+        else:
+            await ctx.send("❌ Interview system not available.")
+    
+    @commands.command(name='cancel')
+    async def cancel_interview(self, ctx: commands.Context):
+        """Cancel the current character creation interview"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        interview_cog = self.bot.get_cog('Interview')
+        if interview_cog:
+            interview_cog.end_session(ctx.author.id)
+            await ctx.send("✅ Interview cancelled.")
+    
+    @commands.command(name='status')
+    async def show_status(self, ctx: commands.Context):
+        """Show the bot's current status"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        char = self.bot.character_data
+        
+        embed = discord.Embed(
+            title="🤖 Party Member Bot Status",
+            color=discord.Color.blue()
+        )
+        
+        # Bot info
+        embed.add_field(
+            name="🔧 Bot Info",
+            value=f"**Name:** {self.bot.user.name}\n"
+                  f"**ID:** {self.bot.user.id}\n"
+                  f"**Servers:** {len(self.bot.guilds)}",
+            inline=False
+        )
+        
+        # Character info
+        if char:
+            embed.add_field(
+                name="📜 Character",
+                value=f"**Name:** {char.get('name', 'Unknown')}\n"
+                      f"**Race/Class:** {char.get('race', '?')} {char.get('class', '?')}\n"
+                      f"**Level:** {char.get('level', 1)}\n"
+                      f"**Play Style:** {char.get('play_style', 'balanced').title()}",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="📜 Character",
+                value="❌ No character configured\nUse `!pm create` to create one!",
+                inline=False
+            )
+        
+        # Active sessions
+        active_channels = list(self.bot.active_sessions.keys())
+        if active_channels:
+            channels_str = "\n".join([f"<#{c}>" for c in active_channels])
+            embed.add_field(
+                name="🎮 Active Sessions",
+                value=channels_str,
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🎮 Active Sessions",
+                value="Not in any sessions\nUse `!pm join #channel` to join one!",
+                inline=False
+            )
+        
+        # Auto-play status
+        autoplay_channels = [c for c, enabled in self.bot.auto_play_mode.items() if enabled]
+        if autoplay_channels:
+            embed.add_field(
+                name="🤖 Auto-Play Enabled",
+                value="\n".join([f"<#{c}>" for c in autoplay_channels]),
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='join')
+    async def join_session(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Join a game session in a channel"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        # Check if bot can access the channel
+        if not channel.permissions_for(channel.guild.me).send_messages:
+            await ctx.send(f"❌ I don't have permission to send messages in {channel.mention}!")
+            return
+        
+        self.bot.active_sessions[channel.id] = {
+            'guild_id': channel.guild.id,
+            'guild_name': channel.guild.name,
+            'channel_name': channel.name,
+            'joined_at': datetime.utcnow().isoformat()
+        }
+        
+        await ctx.send(f"✅ Joined session in {channel.mention}!")
+        
+        # Announce arrival in channel
+        char_name = self.bot.character_data.get('name', 'Adventurer')
+        await channel.send(f"*{char_name} enters the scene, ready for adventure!*")
+    
+    @commands.command(name='leave')
+    async def leave_session(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Leave a game session"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        if channel.id not in self.bot.active_sessions:
+            await ctx.send(f"❌ Not currently in a session in {channel.mention}!")
+            return
+        
+        del self.bot.active_sessions[channel.id]
+        
+        # Disable auto-play for this channel too
+        if channel.id in self.bot.auto_play_mode:
+            del self.bot.auto_play_mode[channel.id]
+        
+        await ctx.send(f"✅ Left session in {channel.mention}!")
+        
+        # Announce departure in channel
+        char_name = self.bot.character_data.get('name', 'Adventurer')
+        await channel.send(f"*{char_name} departs, waving farewell.*")
+    
+    @commands.command(name='autoplay')
+    async def toggle_autoplay(self, ctx: commands.Context, state: str, channel: Optional[discord.TextChannel] = None):
+        """Toggle auto-play mode for a channel"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        state_lower = state.lower()
+        if state_lower not in ['on', 'off', 'true', 'false', '1', '0']:
+            await ctx.send("❌ Usage: `!pm autoplay on/off [#channel]`")
+            return
+        
+        enabled = state_lower in ['on', 'true', '1']
+        
+        if channel:
+            # Set for specific channel
+            if channel.id not in self.bot.active_sessions:
+                await ctx.send(f"❌ Not in a session in {channel.mention}! Join first with `!pm join {channel.mention}`")
+                return
+            
+            self.bot.auto_play_mode[channel.id] = enabled
+            status = "enabled" if enabled else "disabled"
+            await ctx.send(f"✅ Auto-play {status} for {channel.mention}!")
+        else:
+            # Set for all active sessions
+            for channel_id in self.bot.active_sessions.keys():
+                self.bot.auto_play_mode[channel_id] = enabled
+            
+            status = "enabled" if enabled else "disabled"
+            await ctx.send(f"✅ Auto-play {status} for all active sessions!")
+    
+    @commands.command(name='say')
+    async def say_as_character(self, ctx: commands.Context, channel: discord.TextChannel, *, message: str):
+        """Send a message as the character in a channel"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        if channel.id not in self.bot.active_sessions:
+            await ctx.send(f"❌ Not in a session in {channel.mention}!")
+            return
+        
+        gameplay_cog = self.bot.get_cog('Gameplay')
+        if gameplay_cog:
+            await gameplay_cog.send_character_message(channel, message)
+            await ctx.send(f"✅ Message sent to {channel.mention}!")
+        else:
+            await channel.send(message)
+            await ctx.send(f"✅ Message sent to {channel.mention}!")
+    
+    @commands.command(name='do')
+    async def do_action(self, ctx: commands.Context, channel: discord.TextChannel, *, action: str):
+        """Perform an action as the character"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        if channel.id not in self.bot.active_sessions:
+            await ctx.send(f"❌ Not in a session in {channel.mention}!")
+            return
+        
+        char_name = self.bot.character_data.get('name', 'Adventurer')
+        formatted = f"*{char_name} {action}*"
+        
+        await channel.send(formatted)
+        await ctx.send(f"✅ Action performed in {channel.mention}!")
+    
+    @commands.command(name='register')
+    async def register_character(self, ctx: commands.Context):
+        """Register the character with the RPG DM bot (sends /character create command)"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        char = self.bot.character_data
+        if not char:
+            await ctx.send("❌ No character configured! Use `!pm create` first.")
+            return
+        
+        guild_id = char.get('guild_id')
+        if not guild_id:
+            await ctx.send("❌ No server configured for this character. Run `!pm create` again.")
+            return
+        
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            await ctx.send("❌ Bot is not in the configured server!")
+            return
+        
+        # Find a channel to register in
+        for channel in guild.text_channels:
+            if channel.permissions_for(guild.me).send_messages:
+                embed = discord.Embed(
+                    title="📝 Manual Registration Required",
+                    description=f"To register **{char.get('name')}** with the RPG DM bot, "
+                               f"you need to run the character creation command manually.\n\n"
+                               f"Go to {channel.mention} and use:\n"
+                               f"`/character create race:{char.get('race', 'human').lower()} "
+                               f"char_class:{char.get('class', 'warrior').lower()}`\n\n"
+                               f"Then fill in:\n"
+                               f"• **Name:** {char.get('name', 'Adventurer')}\n"
+                               f"• **Backstory:** {char.get('backstory', '')[:100] or 'Optional'}",
+                    color=discord.Color.orange()
+                )
+                await ctx.send(embed=embed)
+                return
+        
+        await ctx.send("❌ Couldn't find a channel to register in!")
+    
+    @commands.command(name='character')
+    async def show_character(self, ctx: commands.Context):
+        """Show detailed character information"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        char = self.bot.character_data
+        if not char:
+            await ctx.send("❌ No character configured! Use `!pm create` to create one.")
+            return
+        
+        stats = char.get('stats', {})
+        
+        embed = discord.Embed(
+            title=f"📜 {char.get('name', 'Unknown')}",
+            description=f"Level {char.get('level', 1)} {char.get('race', '?')} {char.get('class', '?')}",
+            color=discord.Color.gold()
+        )
+        
+        if stats:
+            embed.add_field(
+                name="📊 Stats",
+                value=f"**STR:** {stats.get('strength', 10)} | "
+                      f"**DEX:** {stats.get('dexterity', 10)} | "
+                      f"**CON:** {stats.get('constitution', 10)}\n"
+                      f"**INT:** {stats.get('intelligence', 10)} | "
+                      f"**WIS:** {stats.get('wisdom', 10)} | "
+                      f"**CHA:** {stats.get('charisma', 10)}",
+                inline=False
+            )
+        
+        embed.add_field(
+            name="⚔️ Play Style",
+            value=char.get('play_style', 'balanced').title(),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🏰 Server",
+            value=char.get('guild_name', 'Unknown'),
+            inline=True
+        )
+        
+        if char.get('backstory'):
+            embed.add_field(
+                name="📖 Backstory",
+                value=char['backstory'][:1000] + ('...' if len(char['backstory']) > 1000 else ''),
+                inline=False
+            )
+        
+        if char.get('personality'):
+            embed.add_field(
+                name="🎭 Personality",
+                value=char['personality'][:500],
+                inline=False
+            )
+        
+        if char.get('created_at'):
+            embed.set_footer(text=f"Created: {char['created_at']}")
+        
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='edit')
+    async def edit_character(self, ctx: commands.Context, field: str, *, value: str):
+        """Edit a character field (name, backstory, personality, play_style)"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        char = self.bot.character_data
+        if not char:
+            await ctx.send("❌ No character configured! Use `!pm create` to create one.")
+            return
+        
+        valid_fields = ['name', 'backstory', 'personality', 'play_style']
+        field_lower = field.lower()
+        
+        if field_lower not in valid_fields:
+            await ctx.send(f"❌ Invalid field. Valid fields: {', '.join(valid_fields)}")
+            return
+        
+        if field_lower == 'play_style':
+            valid_styles = ['aggressive', 'defensive', 'balanced', 'cautious', 'reckless']
+            if value.lower() not in valid_styles:
+                await ctx.send(f"❌ Invalid play style. Valid: {', '.join(valid_styles)}")
+                return
+            value = value.lower()
+        
+        self.bot.character_data[field_lower] = value
+        await self.bot.save_character_data()
+        
+        await ctx.send(f"✅ Updated **{field}** to: {value[:100]}{'...' if len(value) > 100 else ''}")
+        
+        # Update presence if name changed
+        if field_lower == 'name':
+            activity = discord.Activity(
+                type=discord.ActivityType.playing,
+                name=f"as {value} | DM me to configure"
+            )
+            await self.bot.change_presence(activity=activity)
+    
+    @commands.command(name='help')
+    async def show_help(self, ctx: commands.Context):
+        """Show all available commands"""
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+        
+        if not self.is_owner(ctx.author.id):
+            return
+        
+        embed = discord.Embed(
+            title="🤖 Party Member Bot Commands",
+            description="All commands use the `!pm` prefix and must be sent via DM.",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name="📜 Character Management",
+            value="• `!pm create` - Start character creation interview\n"
+                  "• `!pm character` - View character details\n"
+                  "• `!pm edit <field> <value>` - Edit character field\n"
+                  "• `!pm register` - Get instructions to register with DM bot",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🎮 Session Management",
+            value="• `!pm join #channel` - Join a game session\n"
+                  "• `!pm leave #channel` - Leave a game session\n"
+                  "• `!pm autoplay on/off [#channel]` - Toggle auto-play",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💬 Communication",
+            value="• `!pm say #channel <message>` - Speak as character\n"
+                  "• `!pm do #channel <action>` - Perform an action",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="ℹ️ Information",
+            value="• `!pm status` - View bot status\n"
+                  "• `!pm help` - Show this help message",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+
+
+async def setup(bot):
+    await bot.add_cog(OwnerCommands(bot))

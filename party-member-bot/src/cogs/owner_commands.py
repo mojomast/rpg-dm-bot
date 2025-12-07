@@ -393,22 +393,66 @@ class OwnerCommands(commands.Cog):
                 command_id = cmd['id']
                 command_name = cmd['name']
 
-                # Build options based on known fields. Many DM bots require race and class.
-                options = []
-                race = char.get('race', '').lower()
-                char_class = char.get('class', '').lower() or char.get('char_class', '').lower()
+                # Build options based on known fields. Prefer nested subcommand usage
+                race_val = (char.get('race') or '').lower()
+                class_val = (char.get('class') or char.get('char_class') or '').lower()
 
-                # Try to include name/backstory if command supports them
-                for opt in cmd.get('options', []) or []:
-                    opt_name = opt.get('name', '').lower()
-                    if opt_name in ['race'] and race:
-                        options.append({'name': 'race', 'type': 3, 'value': race})
-                    if opt_name in ['char_class', 'class', 'charclass'] and char_class:
-                        options.append({'name': opt_name, 'type': 3, 'value': char_class})
-                    if opt_name in ['name'] and char.get('name'):
-                        options.append({'name': 'name', 'type': 3, 'value': char.get('name')})
-                    if opt_name in ['backstory', 'story', 'description'] and char.get('backstory'):
-                        options.append({'name': opt_name, 'type': 3, 'value': char.get('backstory')})
+                options = []
+
+                # Some application commands use subcommands (type 1). The DM bot's
+                # `/character` command defines a subcommand `create` with inner options
+                # for `race` and `char_class`. If we detect that shape, build a nested
+                # options structure like: { name: 'create', type:1, options: [ {name:'race', value:...}, ... ] }
+                found_subcommand = None
+                for top_opt in cmd.get('options', []) or []:
+                    if top_opt.get('type') == 1 and top_opt.get('name', '').lower() == 'create':
+                        found_subcommand = top_opt
+                        break
+
+                if found_subcommand:
+                    inner_opts = []
+                    for inner in found_subcommand.get('options', []) or []:
+                        in_name = inner.get('name', '').lower()
+                        # Only include values we actually have in character data and that match expected types
+                        if in_name == 'race' and race_val:
+                            # Try to match to one of the choice values if present
+                            choices = {c.get('value', '').lower(): True for c in inner.get('choices', [])}
+                            chosen = race_val
+                            if choices and chosen not in choices:
+                                # fallback: try to match by name (case-insensitive)
+                                for c in inner.get('choices', []):
+                                    if c.get('name', '').lower() == race_val:
+                                        chosen = c.get('value')
+                                        break
+                            inner_opts.append({'name': in_name, 'type': 3, 'value': chosen})
+                        if in_name in ('char_class', 'class', 'charclass') and class_val:
+                            choices = {c.get('value', '').lower(): True for c in inner.get('choices', [])}
+                            chosen = class_val
+                            if choices and chosen not in choices:
+                                for c in inner.get('choices', []):
+                                    if c.get('name', '').lower() == class_val:
+                                        chosen = c.get('value')
+                                        break
+                            inner_opts.append({'name': in_name, 'type': 3, 'value': chosen})
+                        if in_name in ('name',) and char.get('name'):
+                            inner_opts.append({'name': in_name, 'type': 3, 'value': char.get('name')})
+                        if in_name in ('backstory', 'story', 'description') and char.get('backstory'):
+                            inner_opts.append({'name': in_name, 'type': 3, 'value': char.get('backstory')})
+
+                    if inner_opts:
+                        options.append({'type': 1, 'name': 'create', 'options': inner_opts})
+                else:
+                    # Fallback: flat options (older or different command shapes)
+                    for opt in cmd.get('options', []) or []:
+                        opt_name = opt.get('name', '').lower()
+                        if opt_name in ['race'] and race_val:
+                            options.append({'name': 'race', 'type': 3, 'value': race_val})
+                        if opt_name in ['char_class', 'class', 'charclass'] and class_val:
+                            options.append({'name': opt_name, 'type': 3, 'value': class_val})
+                        if opt_name in ['name'] and char.get('name'):
+                            options.append({'name': 'name', 'type': 3, 'value': char.get('name')})
+                        if opt_name in ['backstory', 'story', 'description'] and char.get('backstory'):
+                            options.append({'name': opt_name, 'type': 3, 'value': char.get('backstory')})
 
                 # Build interaction payload (type 2 = application command)
                 interaction = {

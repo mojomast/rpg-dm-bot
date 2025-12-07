@@ -386,8 +386,48 @@ class OwnerCommands(commands.Cog):
                         cmd = c
                         break
 
+                # If we didn't find it, try a fallback: resolve the application's real id
+                # via /oauth2/applications/@me (requires using the DM bot token) and retry
                 if not cmd:
-                    await ctx.send("❌ Couldn't find a `character` command on the target bot.")
+                    try:
+                        me_url = 'https://discord.com/api/v10/oauth2/applications/@me'
+                        async with session.get(me_url) as me_resp:
+                            if me_resp.status == 200:
+                                app_json = await me_resp.json()
+                                real_app_id = str(app_json.get('id'))
+                                # If it differs, try fetching guild commands for the real app id
+                                if real_app_id and real_app_id != app_id:
+                                    app_id = real_app_id
+                                    retry_url = f'https://discord.com/api/v10/applications/{app_id}/guilds/{guild_id}/commands'
+                                    async with session.get(retry_url) as r2:
+                                        if r2.status == 200:
+                                            commands_list = await r2.json()
+                                            for c in commands_list:
+                                                if c.get('name', '').lower().startswith('character'):
+                                                    cmd = c
+                                                    break
+                    except Exception:
+                        # ignore and continue to try global commands below
+                        cmd = None
+
+                # If still not found in guild commands, try global commands for the app
+                if not cmd:
+                    try:
+                        global_url = f'https://discord.com/api/v10/applications/{app_id}/commands'
+                        async with session.get(global_url) as gresp:
+                            if gresp.status == 200:
+                                gcmds = await gresp.json()
+                                for c in gcmds:
+                                    if c.get('name', '').lower().startswith('character'):
+                                        cmd = c
+                                        break
+                    except Exception:
+                        cmd = None
+
+                if not cmd:
+                    await ctx.send("❌ Couldn't find a `character` command on the target bot.\n" \
+                                   "I attempted guild and global command listings and also tried resolving the bot's application id via `/oauth2/applications/@me`.\n" \
+                                   "Make sure `DM_BOT_TOKEN` is set and that the token belongs to the RPG DM bot, or provide the DM bot's Application ID (not the user id).")
                     return
 
                 command_id = cmd['id']

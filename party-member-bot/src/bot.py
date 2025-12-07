@@ -198,7 +198,8 @@ class PartyMemberBot(commands.Bot):
         
         # Handle DMs from owner for configuration
         if isinstance(message.channel, discord.DMChannel):
-            if self.owner_id_config and message.author.id == self.owner_id_config:
+            # Process any commands sent via DM (owner or otherwise)
+            if message.content and message.content.startswith(self.command_prefix):
                 await self.process_commands(message)
                 return
             
@@ -210,8 +211,15 @@ class PartyMemberBot(commands.Bot):
         
         # Handle guild messages
         channel_id = message.channel.id
-        
-        # Check if we're active in this channel
+
+        # If the message is a bot command (prefix), process it regardless
+        # This allows commands like `!pm help` to work in guild channels
+        # without requiring the channel to be an active session.
+        if message.content and message.content.startswith(self.command_prefix):
+            await self.process_commands(message)
+            return
+
+        # Check if we're active in this channel for non-command messages
         if channel_id not in self.active_sessions:
             return
         
@@ -223,7 +231,15 @@ class PartyMemberBot(commands.Bot):
             return
         
         # Process commands if from owner
-        if self.owner_id_config and message.author.id == self.owner_id_config:
+        # Only process owner commands when the message uses the command prefix.
+        # This prevents plain replies (like "1" during interviews) from being
+        # interpreted as commands and raising CommandNotFound errors.
+        if (
+            self.owner_id_config
+            and message.author.id == self.owner_id_config
+            and message.content
+            and message.content.startswith(self.command_prefix)
+        ):
             await self.process_commands(message)
 
 

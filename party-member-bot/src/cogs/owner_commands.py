@@ -352,9 +352,11 @@ class OwnerCommands(commands.Cog):
         # Use the DM bot id as the application id (best-effort)
         app_id = str(dm_bot_id)
 
-        token = os.getenv('DISCORD_TOKEN')
+        # Prefer an explicit DM bot token if provided (safer for cross-application calls).
+        # If you own both bots, set DM_BOT_TOKEN in the party-member-bot .env to the DM bot's token.
+        token = os.getenv('DM_BOT_TOKEN') or os.getenv('DISCORD_TOKEN')
         if not token:
-            await ctx.send("❌ Server token not available (DISCORD_TOKEN). Cannot perform auto-registration.")
+            await ctx.send("❌ Server token not available (set `DM_BOT_TOKEN` or `DISCORD_TOKEN`). Cannot perform auto-registration.")
             return
 
         headers = {
@@ -367,6 +369,11 @@ class OwnerCommands(commands.Cog):
                 # Discover guild application commands for the DM bot
                 url = f'https://discord.com/api/v10/applications/{app_id}/guilds/{guild_id}/commands'
                 async with session.get(url) as resp:
+                    if resp.status == 403:
+                        await ctx.send("❌ Failed to fetch commands from target bot (403 Forbidden).\n" \
+                                       "Possible fixes: ensure `DM_BOT_TOKEN` is set in `.env` to the DM bot's token,\n" \
+                                       "or use the manual `!pm register` flow. If you set `DM_BOT_TOKEN`, restart the bot and try again.")
+                        return
                     if resp.status != 200:
                         await ctx.send(f"❌ Failed to fetch commands from target bot (status {resp.status}).")
                         return

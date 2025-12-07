@@ -9,6 +9,10 @@ import logging
 import json
 from typing import Optional
 from datetime import datetime
+import os
+import aiohttp
+import time
+import uuid
 
 logger = logging.getLogger('party_member.owner')
 
@@ -298,6 +302,135 @@ class OwnerCommands(commands.Cog):
                 return
         
         await ctx.send("❌ Couldn't find a channel to register in!")
+
+    @commands.command(name='register-auto')
+    async def register_character_auto(self, ctx: commands.Context):
+        """Attempt to automatically invoke the RPG DM bot's `/character create` command.
+
+        This is a best-effort, opt-in feature. It will try to discover the RPG DM bot's
+        application command in the configured guild and post an interaction to invoke it
+        with the saved character data.
+        """
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command can only be used in DMs!")
+            return
+
+        if not self.is_owner(ctx.author.id):
+            return
+
+        char = self.bot.character_data
+        if not char:
+            await ctx.send("❌ No character configured! Use `!pm create` first.")
+            return
+
+        guild_id = char.get('guild_id')
+        if not guild_id:
+            await ctx.send("❌ No server configured for this character. Run `!pm create` again.")
+            return
+
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            await ctx.send("❌ Bot is not in the configured server!")
+            return
+
+        # Find a channel to register in
+        target_channel = None
+        for channel in guild.text_channels:
+            if channel.permissions_for(guild.me).send_messages:
+                target_channel = channel
+                break
+
+        if not target_channel:
+            await ctx.send("❌ Couldn't find a channel to register in!")
+            return
+
+        dm_bot_id = self.bot.dm_bot_id
+        if not dm_bot_id:
+            await ctx.send("❌ `DM_BOT_ID` not configured. Set DM_BOT_ID in your .env to the RPG DM bot's user id.")
+            return
+
+        # Use the DM bot id as the application id (best-effort)
+        app_id = str(dm_bot_id)
+
+        token = os.getenv('DISCORD_TOKEN')
+        if not token:
+            await ctx.send("❌ Server token not available (DISCORD_TOKEN). Cannot perform auto-registration.")
+            return
+
+        headers = {
+            'Authorization': f'Bot {token}',
+            'Content-Type': 'application/json'
+        }
+
+        async with aiohttp.ClientSession(headers=headers) as session:
+            try:
+                # Discover guild application commands for the DM bot
+                url = f'https://discord.com/api/v10/applications/{app_id}/guilds/{guild_id}/commands'
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        await ctx.send(f"❌ Failed to fetch commands from target bot (status {resp.status}).")
+                        return
+                    commands_list = await resp.json()
+
+                # Find a command named 'character' or similar
+                cmd = None
+                for c in commands_list:
+                    if c.get('name', '').lower().startswith('character'):
+                        cmd = c
+                        break
+
+                if not cmd:
+                    await ctx.send("❌ Couldn't find a `character` command on the target bot.")
+                    return
+
+                command_id = cmd['id']
+                command_name = cmd['name']
+
+                # Build options based on known fields. Many DM bots require race and class.
+                options = []
+                race = char.get('race', '').lower()
+                char_class = char.get('class', '').lower() or char.get('char_class', '').lower()
+
+                # Try to include name/backstory if command supports them
+                for opt in cmd.get('options', []) or []:
+                    opt_name = opt.get('name', '').lower()
+                    if opt_name in ['race'] and race:
+                        options.append({'name': 'race', 'type': 3, 'value': race})
+                    if opt_name in ['char_class', 'class', 'charclass'] and char_class:
+                        options.append({'name': opt_name, 'type': 3, 'value': char_class})
+                    if opt_name in ['name'] and char.get('name'):
+                        options.append({'name': 'name', 'type': 3, 'value': char.get('name')})
+                    if opt_name in ['backstory', 'story', 'description'] and char.get('backstory'):
+                        options.append({'name': opt_name, 'type': 3, 'value': char.get('backstory')})
+
+                # Build interaction payload (type 2 = application command)
+                interaction = {
+                    'type': 2,
+                    'application_id': app_id,
+                    'guild_id': str(guild_id),
+                    'channel_id': str(target_channel.id),
+                    'session_id': str(uuid.uuid4()),
+                    'data': {
+                        'id': command_id,
+                        'name': command_name,
+                        'type': 1,
+                        'options': options
+                    }
+                }
+
+                interact_url = 'https://discord.com/api/v10/interactions'
+                async with session.post(interact_url, json=interaction) as r:
+                    if r.status in (200, 204):
+                        await ctx.send(f"✅ Auto-registration sent to {target_channel.mention}. Check the channel for the DM bot's response.")
+                        return
+                    else:
+                        text = await r.text()
+                        await ctx.send(f"❌ Auto-registration failed (status {r.status}): {text}")
+                        return
+
+            except Exception as e:
+                await ctx.send(f"❌ Exception during auto-registration: {e}")
+                return
     
     @commands.command(name='character')
     async def show_character(self, ctx: commands.Context):

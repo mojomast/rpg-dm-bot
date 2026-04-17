@@ -725,6 +725,23 @@ class Database:
             await db.execute(f"UPDATE characters SET {fields} WHERE id = ?", values)
             await db.commit()
             return True
+
+    async def update_character_hp(self, character_id: int, hp_change: int) -> Dict[str, Any]:
+        """Apply an HP delta to a character and return the updated state."""
+        char = await self.get_character(character_id)
+        if not char:
+            return {"error": "Character not found"}
+
+        new_hp = max(0, min(char['max_hp'], char['hp'] + hp_change))
+        await self.update_character(character_id, hp=new_hp)
+
+        return {
+            "name": char['name'],
+            "old_hp": char['hp'],
+            "new_hp": new_hp,
+            "max_hp": char['max_hp'],
+            "is_dead": new_hp <= 0,
+        }
     
     async def set_active_character(self, user_id: int, guild_id: int, character_id: int) -> bool:
         """Set a character as active (deactivate others)"""
@@ -1986,6 +2003,33 @@ class Database:
                 (initiative, participant_id))
             await db.commit()
             return True
+
+    async def set_initiative_order(self, encounter_id: int, combatant_ids: List[int]) -> bool:
+        """Persist initiative order and per-participant turn order for a combat."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE combat_encounters SET initiative_order = ? WHERE id = ?",
+                (json.dumps(combatant_ids), encounter_id),
+            )
+
+            for turn_order, participant_id in enumerate(combatant_ids):
+                await db.execute(
+                    "UPDATE combat_participants SET turn_order = ? WHERE id = ? AND encounter_id = ?",
+                    (turn_order, participant_id, encounter_id),
+                )
+
+            await db.commit()
+            return True
+
+    async def set_current_turn(self, encounter_id: int, current_turn: int) -> bool:
+        """Persist the current turn index for a combat encounter."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE combat_encounters SET current_turn = ? WHERE id = ?",
+                (current_turn, encounter_id),
+            )
+            await db.commit()
+            return True
     
     async def add_status_effect(self, participant_id: int, effect: str, 
                                duration: int = -1) -> bool:
@@ -2591,6 +2635,32 @@ class Database:
                 quest['rewards'] = json.loads(quest['rewards']) if quest.get('rewards') else {}
                 return quest
             return None
+
+    async def get_quest_stages(self, quest_id: int) -> List[Dict[str, Any]]:
+        """Return quest objectives as stages for callers that expect staged quests."""
+        quest = await self.get_quest(quest_id)
+        if not quest:
+            return []
+
+        stages = []
+        for index, objective in enumerate(quest.get('objectives', []), start=1):
+            if isinstance(objective, dict):
+                title = objective.get('title') or objective.get('name') or f"Objective {index}"
+                description = objective.get('description') or title
+                completed = bool(objective.get('completed', False))
+            else:
+                title = f"Objective {index}"
+                description = str(objective)
+                completed = False
+
+            stages.append({
+                'id': index - 1,
+                'title': title,
+                'description': description,
+                'completed': completed,
+            })
+
+        return stages
     
     async def update_quest(self, quest_id: int, **kwargs) -> bool:
         """Update quest fields"""
@@ -2682,6 +2752,7 @@ class Database:
             for row in rows:
                 p = dict(row)
                 p['status_effects'] = json.loads(p['status_effects']) if p.get('status_effects') else []
+                p['character_id'] = p['participant_id'] if p.get('participant_type') == 'character' else None
                 participants.append(p)
             return participants
 
@@ -2909,13 +2980,22 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO locations 
-                (session_id, guild_id, name, description, type, coordinates, 
-                 danger_level, weather, secrets, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, guild_id, name, description, location_type,
-                  poi_json, danger_level, current_weather, hidden_secrets, now))
-            await db.commit()
-            return cursor.lastrowid
+                (session_id, guild_id, name, description, location_type, danger_level,
+                 current_weather, hidden_secrets, connected_locations, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                guild_id,
+                name,
+                description,
+                location_type,
+                danger_level,
+                current_weather,
+                hidden_secrets,
+                poi_json,
+                now,
+                now,
+            ))
             await db.commit()
             return cursor.lastrowid
     
@@ -2925,12 +3005,9 @@ class Database:
             return False
         
         # Map API field names to DB column names
-        if 'location_type' in kwargs:
-            kwargs['type'] = kwargs.pop('location_type')
-        if 'current_weather' in kwargs:
-            kwargs['weather'] = kwargs.pop('current_weather')
-        if 'hidden_secrets' in kwargs:
-            kwargs['secrets'] = kwargs.pop('hidden_secrets')
+        if 'points_of_interest' in kwargs:
+            kwargs['connected_locations'] = json.dumps(kwargs.pop('points_of_interest') or [])
+        kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [location_id]
@@ -3915,12 +3992,16 @@ class Database:
             db.row_factory = aiosqlite.Row
             # Get both outgoing and incoming connections
             cursor = await db.execute("""
-                SELECT lc.*, l.name as to_name, l.location_type, l.danger_level, l.description
+                SELECT l.id, l.name, l.location_type, l.danger_level, l.description,
+                       lc.id AS connection_id, lc.from_location_id, lc.to_location_id,
+                       lc.direction, lc.travel_time, lc.requirements, lc.hidden, lc.bidirectional,
+                       l.name AS to_name
                 FROM location_connections lc
                 JOIN locations l ON lc.to_location_id = l.id
                 WHERE lc.from_location_id = ? AND lc.hidden = 0
                 UNION
-                SELECT lc.id, lc.to_location_id as from_location_id, lc.from_location_id as to_location_id,
+                SELECT l.id, l.name, l.location_type, l.danger_level, l.description,
+                       lc.id AS connection_id, lc.to_location_id as from_location_id, lc.from_location_id as to_location_id,
                        CASE lc.direction 
                            WHEN 'north' THEN 'south'
                            WHEN 'south' THEN 'north'
@@ -3930,8 +4011,8 @@ class Database:
                            WHEN 'down' THEN 'up'
                            ELSE lc.direction
                        END as direction,
-                       lc.travel_time, lc.requirements, lc.hidden,
-                       l.name as to_name, l.location_type, l.danger_level, l.description
+                       lc.travel_time, lc.requirements, lc.hidden, lc.bidirectional,
+                       l.name as to_name
                 FROM location_connections lc
                 JOIN locations l ON lc.from_location_id = l.id
                 WHERE lc.to_location_id = ? AND lc.bidirectional = 1 AND lc.hidden = 0

@@ -158,6 +158,20 @@ class TestCharacters:
         result = await db.add_experience(99999, 100)
         assert 'error' in result
 
+    async def test_update_character_hp_clamps_and_returns_state(self, db_with_character):
+        """Test updating character HP returns the expected state."""
+        db, char_id = db_with_character
+
+        result = await db.update_character_hp(char_id, -999)
+
+        assert result['name'] == "Test Hero"
+        assert result['new_hp'] == 0
+        assert result['max_hp'] > 0
+        assert result['is_dead'] is True
+
+        char = await db.get_character(char_id)
+        assert char['hp'] == 0
+
 
 # =============================================================================
 # INVENTORY TESTS
@@ -390,6 +404,17 @@ class TestQuests:
         assert char['gold'] == 100
         assert char['experience'] == 50
 
+    async def test_get_quest_stages_from_objectives(self, db_with_full_setup):
+        """Test synthesizing quest stages from objective data."""
+        data = db_with_full_setup
+
+        stages = await data['db'].get_quest_stages(data['quest_id'])
+
+        assert len(stages) == 3
+        assert stages[0]['title'] == "Objective 1"
+        assert stages[0]['description'] == "Talk to the innkeeper"
+        assert stages[0]['completed'] is False
+
 
 # =============================================================================
 # NPC TESTS
@@ -584,6 +609,27 @@ class TestCombat:
         assert effects[0]['effect'] == "poisoned"
         assert effects[0]['duration'] == 3
 
+    async def test_set_initiative_order_and_current_turn(self, db):
+        """Test persisting initiative order and turn index."""
+        combat_id = await db.create_combat(67890, 11111)
+        player_id = await db.add_combatant(
+            combat_id, "character", 12345, "Test Hero", 20, 20, 15
+        )
+        enemy_id = await db.add_combatant(
+            combat_id, "enemy", 1, "Goblin", 7, 7, 12, is_player=False
+        )
+
+        await db.set_initiative_order(combat_id, [enemy_id, player_id])
+        await db.set_current_turn(combat_id, 1)
+
+        combat = await db.get_active_combat(channel_id=11111)
+        participants = await db.get_combat_participants(combat_id)
+
+        assert combat['initiative_order'] == [enemy_id, player_id]
+        assert combat['current_turn'] == 1
+        assert [p['id'] for p in participants] == [enemy_id, player_id]
+        assert participants[1]['character_id'] == 12345
+
     async def test_advance_combat_turn(self, db):
         """Test advancing turns in combat"""
         combat_id = await db.create_combat(67890, 11111)
@@ -726,6 +772,43 @@ class TestSessions:
         session = await db.get_session(session_id)
         assert session['world_state']['time_of_day'] == "night"
         assert session['world_state']['weather'] == "stormy"
+
+
+# =============================================================================
+# LOCATION TESTS
+# =============================================================================
+
+class TestLocations:
+    """Tests for location operations."""
+
+    async def test_get_nearby_locations_returns_destination_shape(self, db_with_session):
+        """Test nearby locations return the destination fields callers expect."""
+        db, session_id = db_with_session
+
+        town_id = await db.create_location(
+            guild_id=67890,
+            name="Town",
+            description="Starting town",
+            created_by=12345,
+            session_id=session_id,
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            name="Forest",
+            description="Dark woods",
+            created_by=12345,
+            session_id=session_id,
+            location_type="wilderness",
+        )
+
+        await db.connect_locations(town_id, forest_id, direction="north", travel_time=2)
+
+        nearby = await db.get_nearby_locations(town_id)
+
+        assert len(nearby) == 1
+        assert nearby[0]['id'] == forest_id
+        assert nearby[0]['name'] == "Forest"
+        assert nearby[0]['location_type'] == "wilderness"
 
 
 # =============================================================================

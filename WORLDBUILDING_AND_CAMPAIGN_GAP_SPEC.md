@@ -4,6 +4,13 @@
 
 `mojomast/rpg-dm-bot` already has a broad feature surface: Discord slash commands, AI DM chat, session records, characters, inventory, combat, quests, NPCs, browser chat, and campaign preview/finalization. It does not yet support a fully coherent multiplayer campaign lifecycle end to end.
 
+This document is an implementation-planning and gap-specification document. It describes:
+
+- what is implemented today
+- what is broken or incomplete today
+- what should be treated as the v1 implementation boundary
+- what is explicitly deferred to later phases
+
 The main issue is not the absence of all features. The main issue is that many systems exist in parallel, in partial form, or with schema/runtime drift:
 
 - Theme and genre support exists mostly as generation flavor, not as first-class runtime content selection.
@@ -24,6 +31,17 @@ Top missing systems and must-fix gaps:
 8. Removal of duplicate or conflicting command/runtime paths.
 
 This spec builds on `WORLDBUILDING_SPEC.md` and extends it with a brute-force wiring audit of Discord, web, DB, tools, prompts, and tests.
+
+### Reconciliation Notes
+
+The cross-lane reconciliation decisions for this spec are:
+
+1. `/session` is the canonical lifecycle namespace for v1.
+2. `quest_progress.current_node_id` is the canonical quest progress pointer for forward-compatible quest state.
+3. Content references should use `content_pack_id` plus local IDs in v1.
+4. Clue discovery should be party/session-scoped in v1.
+5. v1 is a fantasy-only runtime with `fantasy_core` persisted as the default content pack.
+6. Dynamic factions, storyline graph execution, maps, boss phases, and multi-theme runtime switching are planned architecture, but not all are required for minimum playable v1.
 
 ## Current State Audit
 
@@ -56,6 +74,21 @@ The following subsystems exist but are incomplete, duplicated, stubbed, or struc
 13. Prompt/runtime context consistency.
 14. Story item/story event schema correctness.
 15. Web API/frontend contract correctness.
+
+### Current vs Planned
+
+| Domain | Current | Planned | v1 Scope |
+|---|---|---|---|
+| Session lifecycle | Duplicate `/game` and `/session` flows | one canonical `/session` lifecycle | required |
+| Character creation | split across command and interview flows | one canonical campaign-bound flow | required |
+| Browser chat | usable attach-to-session path | full parity with canonical lifecycle | partial in v1 |
+| Theme support | preview-generation flavor only | first-class content-pack architecture | persist `fantasy_core` only in v1 |
+| World model | flat locations + connections | hierarchy, lore, discovery, maps | adjacency-only travel in v1 |
+| Factions | generated flavor / JSON only | relational faction runtime | deferred after v1 |
+| Storyline graph | flat quests + story log | storyline nodes, edges, clues, reveals | deferred after v1 |
+| Boss mechanics | ad hoc enemies | template-driven bosses and phases | deferred after v1 |
+| Snapshots | schema/UI present, runtime missing | implemented save/load/checkpoint system | deferred unless needed to support pause/resume |
+| Browser admin/editoring | partially implemented | full campaign/world editors | deferred after v1 |
 
 ### Classification of observed issues
 
@@ -103,6 +136,8 @@ The following subsystems exist but are incomplete, duplicated, stubbed, or struc
 
 ## Theme and Genre Architecture
 
+This section describes the target architecture. For minimum playable v1, the runtime should persist `world_theme='fantasy'` and `content_pack_id='fantasy_core'`, but runtime switching and non-fantasy parity are deferred.
+
 ### What exists
 
 - `web/api.py` campaign preview/finalization accepts theme inputs such as `world_theme`, `magic_level`, `technology_level`, and `tone`.
@@ -144,6 +179,11 @@ Add to `game_state`:
 - `active_content_pack_id TEXT`
 - `theme_state TEXT NOT NULL DEFAULT '{}'`
 - `allowed_content_packs TEXT NOT NULL DEFAULT '[]'`
+
+V1 note:
+
+- `world_theme` and `content_pack_id` are mandatory in v1.
+- `genre_family`, `rules_profile_id`, `theme_config`, `active_content_pack_id`, `theme_state`, and `allowed_content_packs` can be added now if convenient, but only `fantasy_core` needs to be actively supported in v1 runtime behavior.
 
 #### Content-pack filesystem
 
@@ -200,7 +240,13 @@ Fantasy is closest to viable, but still internally inconsistent. `classes.json` 
 - DM prompt construction must use session theme and rules profile.
 - Content validation must reject fantasy-only entities in non-fantasy packs unless explicitly shared.
 
+V1 requirement:
+
+- All runtime reads must consistently resolve against `fantasy_core` rather than the current root flat files once the migration is complete.
+
 ## Worldbuilding Architecture
+
+This section describes the target world model. Minimum playable v1 only requires connected-location travel with canonical `current_location_id`, not full hierarchy/maps/lore/discovery execution.
 
 ### What exists
 
@@ -278,6 +324,11 @@ Add tables:
 - `map_location_nodes`
 - optional `map_layers`
 
+V1 note:
+
+- `maps` and `map_location_nodes` are deferred after v1.
+- v1 should reuse `locations` and `location_connections` with adjacency validation only.
+
 Each map node must support:
 
 - `location_id`
@@ -294,6 +345,11 @@ Add tables:
 - `location_lore_links`
 - `discovery_rules`
 - `discoveries`
+
+V1 note:
+
+- Lore and discovery systems are deferred after v1.
+- If clue-like behavior is needed in v1, it should remain lightweight and quest/objective-driven rather than implemented as the full target model.
 
 Support reveal of:
 
@@ -317,6 +373,8 @@ The world editor must support:
 - occupant management for NPCs, items, and story events
 
 ## NPC / Monster / Boss / Faction Architecture
+
+This section describes the target NPC/monster/faction architecture. Minimum playable v1 only requires reliable enemy stats in combat and simple NPC persistence; dynamic factions and boss phases are deferred.
 
 ### What exists
 
@@ -388,6 +446,11 @@ Extend `combat_participants` with:
 - `encounter_tier`
 - `armor_class`
 
+V1 note:
+
+- The only mandatory additions for v1 in this domain are the fields needed to stop ad hoc enemy combat drift, especially `armor_class` and stable combat stat snapshots or equivalent runtime fixes.
+- `factions`, `faction_memberships`, `character_faction_reputation`, `monster_templates`, and `boss_phases` are deferred after v1 unless implementation chooses to land them early behind unused or lightly used surfaces.
+
 ### Boss mechanics spec
 
 Bosses must support:
@@ -423,6 +486,8 @@ Factions must affect:
 Personal NPC reputation in `npc_relationships` should remain separate from faction reputation.
 
 ## Storyline and Quest Architecture
+
+This section describes the target narrative architecture. Minimum playable v1 should keep quests linear and objective-driven, while adopting a forward-compatible quest progress pointer.
 
 ### What exists
 
@@ -461,6 +526,11 @@ Add tables:
 - `quest_locations`
 - `quest_story_items`
 
+V1 note:
+
+- `storylines`, `storyline_nodes`, `storyline_edges`, `storyline_progress`, `plot_points`, `plot_clues`, and the quest link tables are deferred after v1.
+- v1 should instead fix quest state drift and use `quest_progress.current_node_id` as a forward-compatible field, even if the runtime still behaves like a linear staged quest system.
+
 ### Required quest model extensions
 
 Extend `quests` with:
@@ -484,6 +554,11 @@ Extend `quest_progress` with:
 - `failed_at`
 - `failure_reason`
 - `last_advanced_at`
+
+V1 note:
+
+- `quest_progress.current_node_id` is mandatory in v1.
+- `quests.start_node_id`, `success_node_id`, `failure_node_id`, and the broader branching/failure JSON fields are optional in v1 and become required once the storyline graph is implemented.
 
 ### Clue and reveal system
 
@@ -636,6 +711,11 @@ Canonical v1 Discord lifecycle:
 - `quest_npcs`
 - `quest_locations`
 - `quest_story_items`
+
+V1 note:
+
+- This list is the target architecture list, not the minimum v1 schema list.
+- Mandatory v1 schema additions are intentionally smaller and are defined in `## Minimum Playable v1` below.
 
 ### Column additions required
 
@@ -874,7 +954,17 @@ Canonical v1 Discord lifecycle:
 
 ### Scope
 
-The minimum playable v1 should prioritize a coherent multiplayer fantasy campaign flow first, while laying the theme/content-pack foundation for future non-fantasy packs.
+The minimum playable v1 should prioritize one coherent multiplayer fantasy campaign flow first, while laying only the minimum schema foundation needed to avoid rework.
+
+Authoritative v1 boundary:
+
+- 1 DM + 4 players
+- 1 character per player, bound to one session
+- 1 `fantasy` campaign using `fantasy_core`
+- 3 linked but effectively linear quests
+- connected-location travel using `location_connections`
+- one canonical Discord play flow and browser continuation flow
+- pause/resume continuity without state reset
 
 ### Required for v1
 
@@ -887,7 +977,23 @@ The minimum playable v1 should prioritize a coherent multiplayer fantasy campaig
 7. Fixed story item and story event persistence.
 8. Fixed location/travel/current-location wiring.
 9. Browser chat parity for ongoing play, not necessarily full campaign administration.
-10. Theme/content-pack schema added, with fantasy core pack migrated first.
+10. `sessions` persists `world_theme='fantasy'` and `content_pack_id='fantasy_core'`.
+
+Mandatory v1 schema additions:
+
+1. `sessions.primary_channel_id`
+2. `sessions.last_active_channel_id`
+3. `sessions.world_theme`
+4. `sessions.content_pack_id`
+5. `game_state.current_location_id`
+6. `quest_progress.current_node_id`
+
+Mandatory v1 product decisions:
+
+1. `/session` is the canonical lifecycle namespace.
+2. `/game` becomes compatibility/UI sugar only and must not own different state transitions.
+3. Browser support in v1 means attaching to an existing playable session, not full campaign administration.
+4. Quest progression remains linear/objective-based in behavior, even if stored with a forward-compatible node pointer.
 
 ### Explicit v1 happy path
 
@@ -906,8 +1012,12 @@ The minimum playable v1 should prioritize a coherent multiplayer fantasy campaig
 ### Out of scope for v1
 
 - Full map editor polish.
-- Full multi-theme content parity across all genres.
-- Advanced boss/lair systems beyond foundational schema/runtime.
+- Full multi-theme runtime parity across all genres.
+- Dynamic faction gameplay and faction reputation systems.
+- Storyline graph execution, clue/reveal systems, and branching campaign graph runtime.
+- Advanced boss/lair systems.
+- Map, lore, and discovery runtime/editor systems.
+- Full snapshot management UI and archive tooling unless required to satisfy pause/resume continuity.
 - Fully visual storyline graph editor.
 
 ## Implementation Roadmap

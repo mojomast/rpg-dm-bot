@@ -2,6 +2,28 @@
 RPG DM Bot - Tool Schemas
 Centralized location for all LLM tool definitions (function calling).
 These tools allow the AI DM to manage the game mechanically.
+
+TODO(worldbuilding-v1): Keep this file in exact lockstep with ToolExecutor.execute_tool().
+Before adding any new tool schema here, add and verify:
+1. a matching ToolExecutor dispatch branch,
+2. a concrete handler implementation,
+3. a stable DB/API contract for any persisted fields it reads or writes.
+
+TODO(contract-fixes): Do not add new story/world tools until these existing contract drifts are fixed:
+- story_items helper methods still target legacy columns instead of the real schema
+- story_events helper methods still target legacy columns/status semantics
+- quest stage consumers read `current_stage`, but that field is not canonical yet
+- current location handling is split between `current_location` text and `current_location_id`
+- move_party/location travel is not yet authoritative against normalized connections
+
+TODO(next-tool-surface): After the above fixes, add first-class schemas + handlers for:
+- theme/content-pack management
+- location tree / maps / lore / discovery
+- factions / monster templates / boss actions
+- storyline / plot-point / clue progression
+
+TODO(prompt-audit): When a tool is added, update prompt tool documentation in src/prompts.py
+and verify any slash-command/API/frontend surface that depends on the same contract.
 """
 
 from typing import List, Dict, Any
@@ -2353,4 +2375,3 @@ class ToolSchemas:
                              GENERATE_LOOT_SCHEMA, INITIALIZE_CAMPAIGN_SCHEMA],
         }
         return categories.get(category.lower(), [])
-

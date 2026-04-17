@@ -2,9 +2,41 @@
 
 **Date:** April 17, 2026  
 **Project:** RPG Dungeon Master Discord Bot  
-**Status:** Phase 7 Complete - Slash Command and Session Hardening
+**Status:** Recent hardening complete, but campaign architecture still partial
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
+
+## Current Operational State
+
+What is usable today:
+
+- Discord-based RPG play with sessions, characters, inventory, combat, quests, NPCs, AI DM chat, and basic persistence.
+- Browser chat with persisted session-scoped history and live side panels for combat, spells, status effects, and location connections.
+- Web dashboard CRUD for many gameplay entities and game-data browsing/editing.
+
+What is not yet coherent end to end:
+
+- There is not yet one canonical campaign lifecycle across Discord and browser.
+- `/game`, `/session`, and `/resume` still split lifecycle responsibility.
+- Character creation, combat, and quest progression still have duplicate or drifting implementations.
+- Theme/content-pack support is still mostly generation flavor, not first-class runtime content selection.
+- Storyline graph, faction runtime, map/discovery systems, and full snapshot continuity are not implemented end to end.
+
+Reference spec for the next implementation wave:
+
+- `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`
+
+## Known Architectural Gaps
+
+The highest-priority architectural gaps are:
+
+1. broken schema/runtime/API drift in story items, story events, quest stage reads, and location state
+2. duplicate lifecycle flows across `/game`, `/session`, and `/resume`
+3. missing persistent channel binding and incomplete pause/resume continuity
+4. fantasy-only flat game data with no first-class content-pack runtime
+5. incomplete browser/dashboard contracts for snapshots, campaign editing, and onboarding
+
+The implementation-ready source of truth for these gaps is `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`.
 
 ---
 
@@ -631,124 +663,39 @@ c:\Users\kyle\projects\rpg-dm-bot\
 3. **No WebSocket** - frontend requires manual refresh
 4. **Limited validation** - inputs not fully sanitized
 5. **Frontend build toolchain in repo is incomplete** - TypeScript CLI package contents/permissions need repair for `npm run build`
+6. **Campaign lifecycle is duplicated** - `/game`, `/session`, and `/resume` still split responsibility
+7. **Some schema/runtime drift remains** - especially `story_items`, `story_events`, `quest current_stage`, and `current_location_id`
+8. **Theme/content-pack architecture is not runtime-complete** - current non-fantasy support is mostly generation flavor
 
 ---
-## Next Steps (Phase 5 - Browser Chat Feature)
+## Next Steps
 
-### Goal
-Enable users to interact with the AI Dungeon Master from within the browser instead of requiring Discord.
+The old browser-chat implementation plan is stale; browser chat already exists. Future work should follow `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`.
 
-### Implementation Plan
+### Priority Order
 
-#### 1. Backend: Add Chat API Endpoint
-Create `/api/chat` endpoint in `web/api.py`:
+1. Stabilize broken schema/runtime/API drift
+2. Unify campaign lifecycle under one canonical `/session` flow
+3. Fix pause/resume continuity and persistent channel binding
+4. Persist first-class `world_theme` and `content_pack_id` with `fantasy_core` as the v1 runtime target
+5. Bring browser/dashboard contracts into alignment with the canonical playable session flow
 
-```python
-@app.post("/api/chat")
-async def chat_with_dm(request: ChatRequest):
-    """
-    Send a message to the AI DM and get a response.
-    
-    Request body:
-    - session_id: int - Active game session
-    - user_id: int - User identifier (can be generated for web users)
-    - message: str - User's message to the DM
-    
-    Response:
-    - response: str - DM's narrative response
-    - tool_results: list - Any game state changes made
-    - updated_state: dict - Current game state after changes
-    """
-```
+### Immediate Must-Fix Items
 
-This endpoint should:
-1. Load the session and character context (reuse `get_game_context()` from `dm_chat.py`)
-2. Build the system prompt (reuse `build_dm_system_prompt()` from `prompts.py`)  
-3. Call the LLM with tools enabled (reuse logic from `handle_mention()` in `dm_chat.py`)
-4. Execute any tool calls (reuse `ToolExecutor` from `tools.py`)
-5. Return the response and any state changes
+- Correct `story_items` helper/schema drift
+- Correct `story_events` helper/schema drift
+- Stop reading nonexistent `quest['current_stage']`
+- Add and use `game_state.current_location_id`
+- Fix broken API endpoints calling missing DB methods or wrong signatures
+- Remove or deprecate duplicate lifecycle ownership across `/game`, `/session`, and `/resume`
 
-#### 2. Backend: Add WebSocket Support (Optional but Recommended)
-For real-time updates during tool execution:
+### Planned-Not-Implemented Yet
 
-```python
-@app.websocket("/ws/chat/{session_id}")
-async def websocket_chat(websocket: WebSocket, session_id: int):
-    """
-    WebSocket endpoint for streaming DM responses and real-time updates.
-    """
-```
-
-#### 3. Frontend: Chat Interface Component
-Add to `web/frontend/src/main.ts`:
-
-```typescript
-class ChatInterface {
-    private sessionId: number;
-    private chatHistory: ChatMessage[];
-    private websocket?: WebSocket;
-    
-    async sendMessage(message: string): Promise<void>;
-    renderMessage(message: ChatMessage): void;
-    renderToolResult(result: ToolResult): void;
-    updateGameState(state: GameState): void;
-}
-```
-
-#### 4. Frontend: Chat UI
-Add to `web/frontend/index.html`:
-- Chat panel (collapsible sidebar or dedicated tab)
-- Message input with send button
-- Message history display with DM/player distinction
-- Typing indicator during LLM response
-- Tool execution feedback (dice rolls, damage, etc.)
-- Quick action buttons (Attack, Defend, Cast Spell, etc.)
-
-#### 5. User Identity for Web
-Options:
-- **Simple**: Generate UUID on first visit, store in localStorage
-- **Better**: Add simple username registration (no password)
-- **Full**: Discord OAuth integration (reuse Discord identity)
-
-### Files to Create/Modify
-
-| File | Changes |
-|------|---------|
-| `web/api.py` | Add `/api/chat` endpoint, optionally WebSocket `/ws/chat/{session_id}` |
-| `src/chat_handler.py` | NEW: Extract DM chat logic from `dm_chat.py` into reusable class |
-| `web/frontend/src/main.ts` | Add `ChatInterface` class and chat rendering |
-| `web/frontend/index.html` | Add chat panel HTML structure |
-| `web/frontend/styles.css` | Add chat panel styling |
-
-### Key Code to Reuse
-
-From `src/cogs/dm_chat.py`:
-- `get_game_context()` - Gathers all game state for AI context
-- `handle_mention()` - Main chat loop with tool execution
-
-From `src/prompts.py`:
-- `build_dm_system_prompt()` - Creates the AI DM personality and instructions
-- `DM_CAPABILITIES` - Tool usage guidance for the AI
-
-From `src/tools.py`:
-- `ToolExecutor.execute_tool()` - Executes game state changes
-
-From `src/llm.py`:
-- `LLMClient.chat_completion_with_tools()` - LLM API call with function calling
-
-### Architecture Decision: Stateless vs Stateful
-
-**Recommended: Stateless HTTP**
-- Each POST to `/api/chat` is independent
-- Session context loaded from database each request
-- Simpler to implement, works with existing database layer
-- Frontend stores chat history display locally
-
-**Alternative: WebSocket (Stateful)**
-- Persistent connection per session
-- Better for streaming responses
-- More complex server-side state management
-- Consider for Phase 6 if needed
+- full content-pack runtime switching beyond `fantasy_core`
+- relational faction runtime and faction reputation systems
+- storyline graph execution and clue/reveal systems
+- maps, lore, and discovery runtime/editor systems
+- complete snapshot/save-point system behind the current UI
 
 ---
 

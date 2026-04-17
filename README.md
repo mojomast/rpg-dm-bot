@@ -4,6 +4,14 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot. The AI designed the architecture, implemented all features, wrote tests, and created documentation autonomously.
 
+## Current State
+
+The repo already has substantial working systems for Discord play, browser chat, persistence, combat, quests, NPCs, and dashboard administration. It does not yet have one fully unified campaign architecture across Discord, browser, DB, tools, and worldbuilding content.
+
+Implementation planning and remaining gap details live in:
+
+- `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`
+
 ## ✨ Features
 
 ### 🧙 Character System
@@ -30,7 +38,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Quest Planning**: DMs can create detailed quest plans with objectives
 - **Quest Progress**: Track objectives and milestones
 - **Rewards**: Automatic reward distribution on completion
-- **Branching Paths**: Multiple quest outcomes based on player choices
+- **Branching Paths**: Some branching and generative quest behavior exists, but canonical branching quest-state modeling is still in progress
 
 ### 🗣️ NPC System
 - **Interactive NPCs**: AI-powered dialogue with persistent NPCs
@@ -49,7 +57,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Encounter Generation**: Create combat, social, puzzle, or trap encounters scaled to party
 - **Backstory Generation**: Expand character backstories with plot connections
 - **Loot Generation**: Context-appropriate loot scaled to party level
-- **Theme Support**: All generation respects campaign theme (Duke Nukem style, fantasy, grimdark, etc.)
+- **Theme-Aware Generation**: Campaign preview/generation supports multiple themes, but first-class runtime content-pack switching is still planned work
 
 ### 🎲 Dice Rolling
 - **Standard Dice**: Roll any dice (d4, d6, d8, d10, d12, d20, d100)
@@ -61,7 +69,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Campaign Management**: Create and join campaigns
 - **Session Tracking**: Track active sessions and participants
 - **Party System**: Form adventuring parties
-- **Shared Progress**: All players see the same story progression
+- **Shared Progress**: Players can share one session, though the canonical campaign lifecycle is still being consolidated
 - **Session Isolation**: Multiple games can run simultaneously without context bleed - the AI DM correctly tracks which characters belong to which session
 - **Guild-Scoped Session Commands**: Session/game resume, join, pause, end, and quest actions now reject session IDs from other servers
 - **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
@@ -85,11 +93,34 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 ### 🌐 Web Dashboard
 - **Game Management**: View and edit sessions, characters, quests, NPCs from a web browser
 - **Data Editors**: Edit character classes, races, items, and spells
-- **Real-time Sync**: Changes made in the web interface are immediately available in Discord
+- **Shared Data Store**: Changes made in the web interface are available to Discord-backed play through the same database
 - **REST API**: Full API access for custom integrations (~76 endpoints)
 - **Browser Chat**: Talk to the AI Dungeon Master from the web UI with persisted history and live session panels
 - **Play Panels**: Browser chat includes combat viewer, spell management, location connections, and status effects panels
 - **Basic Web Hardening**: Browser chat uses server-issued identities and per-IP rate limiting on `/api/chat`
+
+## Content Packs
+
+The long-term content direction is theme-separated content packs under `data/game_data/packs/<theme>/<pack>/`.
+
+Planned pack structure:
+
+- `archetypes.json`
+- `origins.json`
+- `items.json`
+- `powers.json`
+- `skills.json`
+- `enemies.json`
+- `npc_templates.json`
+- `starter_kits.json`
+- `world_templates.json`
+- `factions.json`
+
+Runtime target:
+
+- sessions persist `world_theme` and `content_pack_id`
+- v1 runtime target is `fantasy_core`
+- legacy flat files under `data/game_data/` are expected to migrate into `fantasy_core`
 
 
 ## 🚀 Quick Start
@@ -148,6 +179,10 @@ The web dashboard provides a browser-based interface for game management:
 - **Classes/Races**: Edit character class and race definitions with full CRUD operations
 - **Skill Trees**: Browse and edit class skill trees and branches
 - **Items/Spells**: Browse and search the item and spell databases with filtering
+
+Current limitation:
+
+- Browser play exists, but some dashboard management/editor flows are still incomplete or placeholder-backed.
 
 ### REST API
 The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api.py` for the complete API reference. Key endpoints:
@@ -268,21 +303,31 @@ The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api
 
 ## 🎮 Getting Started Guide
 
+### Canonical Campaign Flow
+
+1. The DM creates a campaign with `/session create`.
+2. Each player joins with `/session join`.
+3. Each player selects or creates one character for that campaign.
+4. The DM launches the campaign in one play channel.
+5. Players use the DM chat and the normal gameplay commands against that shared session state.
+6. The DM can pause and later resume the campaign without resetting progress.
+7. Players can continue the same campaign from browser chat by selecting the same session and character.
+
 ### For Players
 
-1. **Create a Character**: Use `/character create` to make your first character
-2. **Join a Campaign**: Use `/session join` to join an existing campaign
-3. **Interact with the World**: @mention the bot to talk to the DM
-4. **Roll Dice**: Use `/roll dice 1d20` for any rolls needed
-5. **Learn & Cast Spells**: If your class supports magic, use `/spell learn` to pick spells and `/spell cast` to cast them during play.
+1. Create or select your character.
+2. Join the campaign shared by the DM.
+3. Wait for the DM to launch the campaign.
+4. Play in the campaign's channel or continue through browser chat with the same character.
+5. Use quest, inventory, spell, and combat commands as the story progresses.
 
 ### For Dungeon Masters
 
-1. **Create a Campaign**: Use `/session create` to start a new campaign
-2. **Plan Quests**: Use `/dm quest create` to set up adventures
-3. **Create NPCs**: Use `/dm npc create` to populate your world
-4. **Run Sessions**: Use `/session start` when ready to play
-5. **Manage Sessions**: Use `/game list` for a UI-driven game management experience including join, begin, pause, and reset conversation history.
+1. Create the campaign.
+2. Wait for players to join and bind characters.
+3. Launch the campaign in one play channel.
+4. Use the session status/lobby tools to track readiness, active quest, and continuity.
+5. Pause and resume the campaign as needed until the final quest is complete.
 
 ## 🏗️ Project Structure
 

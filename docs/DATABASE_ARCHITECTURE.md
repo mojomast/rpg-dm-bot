@@ -4,6 +4,27 @@
 **Database Type:** SQLite (async via aiosqlite)  
 **Location:** `data/rpg.db`
 
+## Schema Status
+
+This document describes the currently implemented database plus known drift points.
+
+- Current implemented schema: `src/database.py`
+- Proposed campaign/worldbuilding expansion: `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`
+
+Use this file for current-state reference.
+Use the gap spec for planned schema additions and phased migration work.
+
+## Known Schema / Runtime Drift
+
+These are important current mismatches between declared schema and runtime/helper usage:
+
+1. `story_items` helper methods still target legacy columns instead of the implemented schema.
+2. `story_events` helper methods still target legacy columns and mismatched status semantics.
+3. chat/UI code reads `quest['current_stage']`, but that is not a canonical stored field.
+4. chat/runtime expects `game_state.current_location_id`, but the current schema stores only `current_location` text.
+5. `locations.points_of_interest` exists, but current write helpers misroute POI data into `connected_locations`.
+6. snapshot UI/API surfaces exist, but snapshot DB method coverage is incomplete.
+
 ---
 
 ## 🔄 Database Migrations
@@ -499,21 +520,35 @@ These tools enable AI-driven procedural content generation:
 
 ---
 
-## 🔧 Wiring Checklist (MVP Verification)
+## Planned Extensions
+
+Planned schema expansions are tracked in `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md` and include:
+
+- first-class `world_theme` and `content_pack_id` on sessions
+- canonical `game_state.current_location_id`
+- theme/content-pack-aware runtime support
+- faction tables and reputation state
+- storyline graph and clue/reveal tables
+- maps, lore, and discovery tables
+- richer monster/boss runtime state
+
+These are not all implemented in the current database yet.
+
+## 🔧 Wiring Checklist (Current-State Verification)
 
 **Last Verified:** December 4, 2025  
 **Test Results:** ✅ 127 tests pass
 
 Use this checklist to verify all systems are properly connected:
 
-### ✅ Core Systems (VERIFIED)
+### ✅ Core Systems (Implemented)
 - [x] Characters link to sessions via `session_id`
 - [x] Characters link to locations via `current_location_id`
 - [x] Session participants link characters to sessions
 - [x] Game state exists for each active session (auto-created via `initialize_session()`)
 - [x] Story log records events per session
 
-### ✅ Character Subsystems (VERIFIED)
+### ✅ Character Subsystems (Implemented)
 - [x] Inventory items link to character
 - [x] Spells link to character
 - [x] Abilities link to character
@@ -522,27 +557,30 @@ Use this checklist to verify all systems are properly connected:
 - [x] Skill points link to character
 - [x] Status effects link to character
 
-### ✅ Quest System (VERIFIED)
+### ⚠️ Quest System (Implemented With Drift)
 - [x] Quests link to session
 - [x] Quest progress links quest ↔ character
 - [x] Quest giver NPC links quest ↔ NPC
 - [x] Quest completion auto-grants rewards via `complete_quest_with_rewards()`
+- [ ] Canonical quest stage state is not yet normalized; some consumers still expect nonexistent `current_stage`
 
-### ✅ NPC System (VERIFIED)
+### ⚠️ NPC System (Implemented With Gaps)
 - [x] NPCs link to session
 - [x] NPCs link to locations via `location_id`
 - [x] NPC relationships link NPC ↔ character
 - [x] NPC relationship values capped at ±100
+- [ ] No first-class faction runtime or membership schema yet
 
-### ✅ Combat System (VERIFIED)
+### ⚠️ Combat System (Implemented With Gaps)
 - [x] Combat encounters link to session
 - [x] Combat participants link to encounter
 - [x] Combat participants reference characters via `participant_id`
 - [x] Damage syncs to character HP via `sync_combat_damage_to_character()`
 - [x] Combat end awards XP/gold/loot via `end_combat_with_rewards()`
 - [x] `get_active_combat(channel_id=)` properly detects active combat
+- [ ] Enemy templates, armor class, and boss runtime state are not yet normalized end to end
 
-### ✅ World System (VERIFIED)
+### ⚠️ World System (Implemented With Drift)
 - [x] Locations link to session
 - [x] Locations connect via `location_connections` table
 - [x] Story items link to locations and characters
@@ -550,19 +588,23 @@ Use this checklist to verify all systems are properly connected:
 - [x] Story events link to locations
 - [x] Story events track involved characters via `involved_characters`
 - [x] Locations can have parent locations
+- [ ] `points_of_interest` persistence is currently miswired in helper methods
+- [ ] `current_location_id` is not yet canonical at the session game-state level
+- [ ] Maps, lore, and discovery runtime are planned, not implemented
 
 ### ✅ Dice System (VERIFIED)
 - [x] Dice rolls link to sessions via `session_id`
 - [x] Dice rolls link to characters via `character_id`
 - [x] Session roll history available via `get_session_roll_history()`
 
-### ✅ Tools System (VERIFIED - 67 tools)
-- [x] All tool schemas in `tool_schemas.py` have implementations in `tools.py`
+### ⚠️ Tools System (Implemented With Drift)
+- [x] Most registered tool schemas in `tool_schemas.py` have implementations in `tools.py`
 - [x] All tool implementations callable via `execute_tool()`
 - [x] Tool argument validation working
 - [x] Error handling returns user-friendly messages
+- [ ] Some handlers and helper contracts still drift from DB/runtime reality, especially story and worldbuilding paths
 
-### ✅ API Endpoints (VERIFIED - ~76 endpoints)
+### ⚠️ API Endpoints (Implemented With Drift)
 - [x] `/api/characters` - CRUD for characters
 - [x] `/api/characters/{id}/spells` - Character spells
 - [x] `/api/characters/{id}/abilities` - Character abilities
@@ -580,8 +622,10 @@ Use this checklist to verify all systems are properly connected:
 - [x] `/api/events` (story events) - Event management
 - [x] `/api/combat` - Combat management
 - [x] `/api/gamedata/*` - Static game data (classes, races, items, spells, skills)
+- [ ] Some API routes still call missing DB methods or mismatched DB signatures
+- [ ] Snapshot routes and some location/event/NPC filters are not fully backed by DB implementations
 
-### ✅ Frontend Pages (PARTIAL - API methods exist, some UI missing)
+### ⚠️ Frontend Pages (Partial)
 - [x] Dashboard - Overview
 - [x] Sessions - Session management
 - [x] Characters - Character list/edit
@@ -598,7 +642,9 @@ Use this checklist to verify all systems are properly connected:
 - [ ] Combat viewer - UI not built (API ready)
 - [ ] Spell management panel - UI not built (API ready)
 - [ ] Location connection map - UI not built (API ready)
-- [ ] Browser chat interface - Not implemented (see HANDOFF.md for plan)
+- [x] Browser chat interface - Implemented
+- [ ] Save points UI is exposed, but backend snapshot support is incomplete
+- [ ] Some campaign creator review/edit actions are still placeholder-backed
 
 ---
 

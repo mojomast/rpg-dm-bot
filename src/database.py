@@ -29,9 +29,12 @@ JSON_NPC_FIELDS = {
 JSON_QUEST_FIELDS = {
     'objectives': [],
     'rewards': {},
+    'failure_rules_json': {},
 }
 JSON_QUEST_PROGRESS_FIELDS = {
     'objectives_completed': [],
+    'branch_path_json': [],
+    'variables_json': {},
 }
 JSON_FACTION_FIELDS = {
     'goals': [],
@@ -48,6 +51,22 @@ JSON_MONSTER_TEMPLATE_FIELDS = {
 JSON_BOSS_PHASE_FIELDS = {
     'actions': [],
     'traits': [],
+}
+JSON_STORYLINE_NODE_FIELDS = {
+    'data_json': {},
+}
+JSON_STORYLINE_EDGE_FIELDS = {
+    'conditions_json': {},
+}
+JSON_STORYLINE_PROGRESS_FIELDS = {
+    'branch_path_json': [],
+    'variables_json': {},
+}
+JSON_PLOT_POINT_FIELDS = {
+    'metadata_json': {},
+}
+JSON_PLOT_CLUE_FIELDS = {
+    'metadata_json': {},
 }
 
 
@@ -774,6 +793,113 @@ class Database:
             """)
 
             # ================================================================
+            # STORYLINE GRAPH TABLES
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS storylines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    session_id INTEGER,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT DEFAULT 'active',
+                    current_node_id INTEGER,
+                    created_by INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS storyline_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    storyline_id INTEGER NOT NULL,
+                    node_key TEXT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    node_type TEXT DEFAULT 'scene',
+                    is_start INTEGER DEFAULT 0,
+                    is_end INTEGER DEFAULT 0,
+                    reveal_order INTEGER DEFAULT 0,
+                    data_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (storyline_id) REFERENCES storylines(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS storyline_edges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    storyline_id INTEGER NOT NULL,
+                    from_node_id INTEGER NOT NULL,
+                    to_node_id INTEGER NOT NULL,
+                    edge_type TEXT DEFAULT 'progression',
+                    conditions_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (storyline_id) REFERENCES storylines(id),
+                    FOREIGN KEY (from_node_id) REFERENCES storyline_nodes(id),
+                    FOREIGN KEY (to_node_id) REFERENCES storyline_nodes(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS storyline_progress (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    storyline_id INTEGER NOT NULL,
+                    character_id INTEGER,
+                    session_id INTEGER,
+                    current_node_id INTEGER,
+                    status TEXT DEFAULT 'active',
+                    branch_path_json TEXT DEFAULT '[]',
+                    variables_json TEXT DEFAULT '{}',
+                    started_at TEXT NOT NULL,
+                    last_advanced_at TEXT,
+                    completed_at TEXT,
+                    FOREIGN KEY (storyline_id) REFERENCES storylines(id),
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    UNIQUE(storyline_id, character_id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS plot_points (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER,
+                    storyline_id INTEGER,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    reveal_threshold INTEGER DEFAULT 1,
+                    is_revealed INTEGER DEFAULT 0,
+                    revealed_at TEXT,
+                    metadata_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (storyline_id) REFERENCES storylines(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS plot_clues (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plot_point_id INTEGER NOT NULL,
+                    session_id INTEGER,
+                    clue_text TEXT NOT NULL,
+                    source_type TEXT,
+                    source_id INTEGER,
+                    discovered_by INTEGER,
+                    discovered_at TEXT,
+                    metadata_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (plot_point_id) REFERENCES plot_points(id),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (discovered_by) REFERENCES characters(id)
+                )
+            """)
+            
+            # ================================================================
             # SESSION SNAPSHOTS TABLE (save/load game state)
             # ================================================================
             await db.execute("""
@@ -1123,6 +1249,53 @@ class Database:
             await db.execute("UPDATE combat_participants SET resource_state = COALESCE(NULLIF(resource_state, ''), '{}')")
             await db.execute("UPDATE combat_participants SET phase_state = COALESCE(NULLIF(phase_state, ''), '{}')")
             await db.execute("UPDATE combat_participants SET encounter_tier = COALESCE(NULLIF(encounter_tier, ''), 'standard')")
+            await db.commit()
+        except Exception:
+            pass
+
+        # Migration 9: Phase 6 quest and progress columns
+        try:
+            cursor = await db.execute("PRAGMA table_info(quests)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'storyline_id' not in columns:
+                await db.execute("ALTER TABLE quests ADD COLUMN storyline_id INTEGER")
+                await db.commit()
+            if 'primary_location_id' not in columns:
+                await db.execute("ALTER TABLE quests ADD COLUMN primary_location_id INTEGER")
+                await db.commit()
+            if 'quest_type' not in columns:
+                await db.execute("ALTER TABLE quests ADD COLUMN quest_type TEXT DEFAULT 'quest'")
+                await db.commit()
+            if 'failure_rules_json' not in columns:
+                await db.execute("ALTER TABLE quests ADD COLUMN failure_rules_json TEXT DEFAULT '{}' ")
+                await db.commit()
+
+            await db.execute("UPDATE quests SET quest_type = COALESCE(NULLIF(quest_type, ''), 'quest')")
+            await db.execute("UPDATE quests SET failure_rules_json = COALESCE(NULLIF(failure_rules_json, ''), '{}')")
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(quest_progress)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'branch_path_json' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN branch_path_json TEXT DEFAULT '[]'")
+                await db.commit()
+            if 'variables_json' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN variables_json TEXT DEFAULT '{}' ")
+                await db.commit()
+            if 'failed_at' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN failed_at TEXT")
+                await db.commit()
+            if 'failure_reason' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN failure_reason TEXT")
+                await db.commit()
+
+            await db.execute("UPDATE quest_progress SET branch_path_json = COALESCE(NULLIF(branch_path_json, ''), '[]')")
+            await db.execute("UPDATE quest_progress SET variables_json = COALESCE(NULLIF(variables_json, ''), '{}')")
             await db.commit()
         except Exception:
             pass
@@ -1997,18 +2170,22 @@ class Database:
                            objectives: List[Dict], rewards: Dict, created_by: int,
                            session_id: int = None, difficulty: str = "medium",
                            quest_giver_npc_id: int = None, dm_notes: str = None,
-                           dm_plan: str = None) -> int:
+                           dm_plan: str = None, storyline_id: int = None,
+                           primary_location_id: int = None, quest_type: str = 'quest',
+                           failure_rules_json: Dict[str, Any] = None) -> int:
         """Create a new quest"""
         now = datetime.utcnow().isoformat()
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO quests (guild_id, session_id, title, description, objectives,
-                    rewards, difficulty, quest_giver_npc_id, dm_notes, dm_plan, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rewards, difficulty, quest_giver_npc_id, dm_notes, dm_plan, created_by, created_at,
+                    storyline_id, primary_location_id, quest_type, failure_rules_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (guild_id, session_id, title, description, json.dumps(objectives),
                   json.dumps(rewards), difficulty, quest_giver_npc_id, dm_notes, dm_plan,
-                  created_by, now))
+                  created_by, now, storyline_id, primary_location_id, quest_type,
+                  json.dumps(failure_rules_json or {})))
             await db.commit()
             return cursor.lastrowid
     
@@ -2052,9 +2229,11 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             try:
                 await db.execute("""
-                    INSERT INTO quest_progress (quest_id, character_id, session_id, current_node_id, started_at, last_advanced_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (quest_id, character_id, quest.get('session_id'), 0, now, now))
+                    INSERT INTO quest_progress (
+                        quest_id, character_id, session_id, current_node_id, objectives_completed,
+                        branch_path_json, variables_json, started_at, last_advanced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (quest_id, character_id, quest.get('session_id'), 0, '[]', '[]', '{}', now, now))
                 await db.commit()
                 return {"success": True}
             except aiosqlite.IntegrityError:
@@ -2110,9 +2289,9 @@ class Database:
                 completed.append(objective_index)
             
             await db.execute("""
-                UPDATE quest_progress SET objectives_completed = ?, current_node_id = ?, last_advanced_at = ?
+                UPDATE quest_progress SET objectives_completed = ?, current_node_id = ?, last_advanced_at = ?, branch_path_json = ?
                 WHERE quest_id = ? AND character_id = ?
-            """, (json.dumps(completed), len(completed), datetime.utcnow().isoformat(), quest_id, character_id))
+            """, (json.dumps(completed), len(completed), datetime.utcnow().isoformat(), json.dumps(completed), quest_id, character_id))
             await db.commit()
             
             # Check if all objectives complete
@@ -2517,6 +2696,21 @@ class Database:
 
     def _normalize_boss_phase_record(self, phase: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _normalize_json_fields(phase, JSON_BOSS_PHASE_FIELDS)
+
+    def _normalize_storyline_node_record(self, node: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(node, JSON_STORYLINE_NODE_FIELDS)
+
+    def _normalize_storyline_edge_record(self, edge: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(edge, JSON_STORYLINE_EDGE_FIELDS)
+
+    def _normalize_storyline_progress_record(self, progress: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(progress, JSON_STORYLINE_PROGRESS_FIELDS)
+
+    def _normalize_plot_point_record(self, plot_point: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(plot_point, JSON_PLOT_POINT_FIELDS)
+
+    def _normalize_plot_clue_record(self, clue: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(clue, JSON_PLOT_CLUE_FIELDS)
     
     async def get_active_combat(self, guild_id: int = None, channel_id: int = None) -> Optional[Dict[str, Any]]:
         """Get active combat in a channel or guild"""
@@ -5049,6 +5243,399 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [self._normalize_boss_phase_record(dict(row)) for row in rows]
+
+    # ==================== PHASE 6: STORYLINES & CLUES ====================
+
+    async def create_storyline(
+        self,
+        guild_id: int,
+        title: str,
+        created_by: int,
+        session_id: int = None,
+        description: str = None,
+        status: str = 'active',
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO storylines (guild_id, session_id, title, description, status, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (guild_id, session_id, title, description, status, created_by, now, now),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_storyline(self, storyline_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM storylines WHERE id = ?", (storyline_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_storylines(self, session_id: int = None, guild_id: int = None) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions = []
+            params = []
+            if session_id is not None:
+                conditions.append('session_id = ?')
+                params.append(session_id)
+            if guild_id is not None:
+                conditions.append('guild_id = ?')
+                params.append(guild_id)
+            where_clause = ' AND '.join(conditions) if conditions else '1=1'
+            cursor = await db.execute(
+                f"SELECT * FROM storylines WHERE {where_clause} ORDER BY updated_at DESC, id DESC",
+                params,
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def create_storyline_node(
+        self,
+        storyline_id: int,
+        title: str,
+        description: str = None,
+        node_type: str = 'scene',
+        node_key: str = None,
+        is_start: bool = False,
+        is_end: bool = False,
+        reveal_order: int = 0,
+        data_json: Dict[str, Any] = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO storyline_nodes (
+                    storyline_id, node_key, title, description, node_type, is_start, is_end, reveal_order, data_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    storyline_id,
+                    node_key,
+                    title,
+                    description,
+                    node_type,
+                    1 if is_start else 0,
+                    1 if is_end else 0,
+                    reveal_order,
+                    json.dumps(data_json or {}),
+                    now,
+                ),
+            )
+            node_id = cursor.lastrowid
+            if is_start:
+                await db.execute(
+                    "UPDATE storylines SET current_node_id = COALESCE(current_node_id, ?), updated_at = ? WHERE id = ?",
+                    (node_id, now, storyline_id),
+                )
+            await db.commit()
+            return node_id
+
+    async def get_storyline_node(self, node_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM storyline_nodes WHERE id = ?", (node_id,))
+            row = await cursor.fetchone()
+            return self._normalize_storyline_node_record(dict(row)) if row else None
+
+    async def get_storyline_nodes(self, storyline_id: int) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM storyline_nodes WHERE storyline_id = ? ORDER BY reveal_order ASC, id ASC",
+                (storyline_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_storyline_node_record(dict(row)) for row in rows]
+
+    async def create_storyline_edge(
+        self,
+        storyline_id: int,
+        from_node_id: int,
+        to_node_id: int,
+        edge_type: str = 'progression',
+        conditions_json: Dict[str, Any] = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO storyline_edges (storyline_id, from_node_id, to_node_id, edge_type, conditions_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (storyline_id, from_node_id, to_node_id, edge_type, json.dumps(conditions_json or {}), now),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_storyline_edges(self, storyline_id: int) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM storyline_edges WHERE storyline_id = ? ORDER BY id ASC", (storyline_id,))
+            rows = await cursor.fetchall()
+            return [self._normalize_storyline_edge_record(dict(row)) for row in rows]
+
+    async def get_storyline_progress(self, storyline_id: int, character_id: int = None) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if character_id is None:
+                cursor = await db.execute(
+                    "SELECT * FROM storyline_progress WHERE storyline_id = ? ORDER BY id DESC LIMIT 1",
+                    (storyline_id,),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM storyline_progress WHERE storyline_id = ? AND character_id = ?",
+                    (storyline_id, character_id),
+                )
+            row = await cursor.fetchone()
+            return self._normalize_storyline_progress_record(dict(row)) if row else None
+
+    async def advance_storyline_node(
+        self,
+        storyline_id: int,
+        to_node_id: int,
+        character_id: int = None,
+        session_id: int = None,
+        branch_choice: str = None,
+        variables: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        now = datetime.utcnow().isoformat()
+        storyline = await self.get_storyline(storyline_id)
+        if not storyline:
+            return {'error': 'Storyline not found'}
+        node = await self.get_storyline_node(to_node_id)
+        if not node or node.get('storyline_id') != storyline_id:
+            return {'error': 'Storyline node not found'}
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if character_id is None:
+                cursor = await db.execute(
+                    "SELECT * FROM storyline_progress WHERE storyline_id = ? ORDER BY id DESC LIMIT 1",
+                    (storyline_id,),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM storyline_progress WHERE storyline_id = ? AND character_id = ?",
+                    (storyline_id, character_id),
+                )
+            existing = await cursor.fetchone()
+
+            branch_path = []
+            merged_variables = {}
+            if existing:
+                existing = self._normalize_storyline_progress_record(dict(existing))
+                branch_path = list(existing.get('branch_path_json') or [])
+                merged_variables = dict(existing.get('variables_json') or {})
+            if branch_choice:
+                branch_path.append(branch_choice)
+            if variables:
+                merged_variables.update(variables)
+
+            if existing:
+                await db.execute(
+                    """
+                    UPDATE storyline_progress
+                    SET current_node_id = ?, branch_path_json = ?, variables_json = ?, last_advanced_at = ?, status = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        to_node_id,
+                        json.dumps(branch_path),
+                        json.dumps(merged_variables),
+                        now,
+                        'completed' if node.get('is_end') else 'active',
+                        existing['id'],
+                    ),
+                )
+                progress_id = existing['id']
+            else:
+                cursor = await db.execute(
+                    """
+                    INSERT INTO storyline_progress (
+                        storyline_id, character_id, session_id, current_node_id, status,
+                        branch_path_json, variables_json, started_at, last_advanced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        storyline_id,
+                        character_id,
+                        session_id or storyline.get('session_id'),
+                        to_node_id,
+                        'completed' if node.get('is_end') else 'active',
+                        json.dumps(branch_path),
+                        json.dumps(merged_variables),
+                        now,
+                        now,
+                    ),
+                )
+                progress_id = cursor.lastrowid
+
+            await db.execute(
+                "UPDATE storylines SET current_node_id = ?, updated_at = ? WHERE id = ?",
+                (to_node_id, now, storyline_id),
+            )
+            await db.commit()
+
+        progress = await self.get_storyline_progress(storyline_id, character_id)
+        return {
+            'success': True,
+            'storyline_id': storyline_id,
+            'current_node_id': to_node_id,
+            'node': node,
+            'progress_id': progress_id,
+            'progress': progress,
+        }
+
+    async def get_storyline_state(self, session_id: int) -> Dict[str, Any]:
+        storylines = await self.get_storylines(session_id=session_id)
+        result = []
+        for storyline in storylines:
+            nodes = await self.get_storyline_nodes(storyline['id'])
+            edges = await self.get_storyline_edges(storyline['id'])
+            progress = await self.get_storyline_progress(storyline['id'])
+            result.append({
+                'storyline': storyline,
+                'nodes': nodes,
+                'edges': edges,
+                'progress': progress,
+            })
+        return {'storylines': result}
+
+    async def create_plot_point(
+        self,
+        title: str,
+        session_id: int = None,
+        storyline_id: int = None,
+        description: str = None,
+        reveal_threshold: int = 1,
+        metadata_json: Dict[str, Any] = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO plot_points (
+                    session_id, storyline_id, title, description, reveal_threshold,
+                    metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, storyline_id, title, description, max(1, int(reveal_threshold or 1)), json.dumps(metadata_json or {}), now, now),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_plot_point(self, plot_point_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM plot_points WHERE id = ?", (plot_point_id,))
+            row = await cursor.fetchone()
+            return self._normalize_plot_point_record(dict(row)) if row else None
+
+    async def get_plot_points(self, session_id: int = None, storyline_id: int = None) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions = []
+            params = []
+            if session_id is not None:
+                conditions.append('session_id = ?')
+                params.append(session_id)
+            if storyline_id is not None:
+                conditions.append('storyline_id = ?')
+                params.append(storyline_id)
+            where_clause = ' AND '.join(conditions) if conditions else '1=1'
+            cursor = await db.execute(
+                f"SELECT * FROM plot_points WHERE {where_clause} ORDER BY id ASC",
+                params,
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_plot_point_record(dict(row)) for row in rows]
+
+    async def create_plot_clue(
+        self,
+        plot_point_id: int,
+        clue_text: str,
+        session_id: int = None,
+        source_type: str = None,
+        source_id: int = None,
+        metadata_json: Dict[str, Any] = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO plot_clues (
+                    plot_point_id, session_id, clue_text, source_type, source_id, metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (plot_point_id, session_id, clue_text, source_type, source_id, json.dumps(metadata_json or {}), now),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_plot_clue(self, clue_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM plot_clues WHERE id = ?", (clue_id,))
+            row = await cursor.fetchone()
+            return self._normalize_plot_clue_record(dict(row)) if row else None
+
+    async def get_plot_clues(self, plot_point_id: int) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM plot_clues WHERE plot_point_id = ? ORDER BY id ASC",
+                (plot_point_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_plot_clue_record(dict(row)) for row in rows]
+
+    async def reveal_plot_point(self, plot_point_id: int) -> bool:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE plot_points SET is_revealed = 1, revealed_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, plot_point_id),
+            )
+            await db.commit()
+            return True
+
+    async def discover_clue(self, clue_id: int, discovered_by: int = None) -> Dict[str, Any]:
+        now = datetime.utcnow().isoformat()
+        clue = await self.get_plot_clue(clue_id)
+        if not clue:
+            return {'error': 'Clue not found'}
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE plot_clues SET discovered_by = ?, discovered_at = ? WHERE id = ?",
+                (discovered_by, now, clue_id),
+            )
+            await db.commit()
+
+        plot_point = await self.get_plot_point(clue['plot_point_id'])
+        clues = await self.get_plot_clues(clue['plot_point_id'])
+        discovered_count = sum(1 for item in clues if item.get('discovered_at'))
+        threshold = max(1, int(plot_point.get('reveal_threshold') or 1)) if plot_point else 1
+        plot_point_revealed = bool(plot_point and plot_point.get('is_revealed'))
+        if plot_point and not plot_point_revealed and discovered_count >= threshold:
+            await self.reveal_plot_point(plot_point['id'])
+            plot_point_revealed = True
+            plot_point = await self.get_plot_point(plot_point['id'])
+
+        return {
+            'success': True,
+            'clue': await self.get_plot_clue(clue_id),
+            'plot_point': plot_point,
+            'discovered_count': discovered_count,
+            'threshold': threshold,
+            'plot_point_revealed': plot_point_revealed,
+        }
 
     # ==================== STORY EVENTS METHODS ====================
     

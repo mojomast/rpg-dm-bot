@@ -318,6 +318,17 @@ class ToolExecutor:
                 return await self._resolve_event(tool_args)
             elif tool_name == "get_active_events":
                 return await self._get_active_events(context)
+            elif tool_name == "get_storyline_state":
+                return await self._get_storyline_state(context, tool_args)
+            elif tool_name == "advance_storyline_node":
+                return await self._advance_storyline_node(context, tool_args)
+            elif tool_name == "create_plot_point":
+                return await self._create_plot_point(context, tool_args)
+            elif tool_name == "record_clue_discovery":
+                return await self._record_clue_discovery(tool_args)
+            elif tool_name == "reveal_plot_point":
+                return await self._reveal_plot_point(tool_args)
+            
             # Enhanced NPC tools  
             elif tool_name == "generate_npc":
                 return await self._generate_npc(context, tool_args)
@@ -1406,6 +1417,58 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
         
         return "\n".join(lines)
 
+    async def _get_storyline_state(self, context: Dict, args: Dict) -> str:
+        """Get storyline graph state for the current session."""
+        session = await self._get_session_for_context(context)
+        session_id = args.get('session_id') or (session or {}).get('id')
+        if not session_id:
+            return "Error: No active session."
+        state = await self.db.get_storyline_state(session_id)
+        return json.dumps(state, indent=2, sort_keys=True)
+
+    async def _advance_storyline_node(self, context: Dict, args: Dict) -> str:
+        """Advance a storyline to a specific node."""
+        session = await self._get_session_for_context(context)
+        result = await self.db.advance_storyline_node(
+            storyline_id=args.get('storyline_id'),
+            to_node_id=args.get('node_id'),
+            character_id=args.get('character_id'),
+            session_id=(session or {}).get('id'),
+            branch_choice=args.get('branch_choice'),
+            variables=args.get('variables'),
+        )
+        if 'error' in result:
+            return f"Error: {result['error']}"
+        node = result['node']
+        return f"Storyline advanced to node {node['id']}: {node['title']}"
+
+    async def _create_plot_point(self, context: Dict, args: Dict) -> str:
+        """Create a plot point in the current session."""
+        session = await self._get_session_for_context(context)
+        plot_point_id = await self.db.create_plot_point(
+            title=args.get('title'),
+            description=args.get('description'),
+            session_id=(session or {}).get('id'),
+            storyline_id=args.get('storyline_id'),
+            reveal_threshold=args.get('reveal_threshold', 1),
+            metadata_json=args.get('metadata_json'),
+        )
+        return f"Created plot point **{args.get('title')}** (ID: {plot_point_id})"
+
+    async def _record_clue_discovery(self, args: Dict) -> str:
+        """Mark a clue as discovered and auto-reveal its plot point if threshold is met."""
+        result = await self.db.discover_clue(args.get('clue_id'), discovered_by=args.get('character_id'))
+        if 'error' in result:
+            return f"Error: {result['error']}"
+        if result.get('plot_point_revealed'):
+            return f"Clue discovered. Plot point revealed: {result['plot_point']['title']}"
+        return f"Clue discovered ({result['discovered_count']}/{result['threshold']})."
+
+    async def _reveal_plot_point(self, args: Dict) -> str:
+        """Force-reveal a plot point."""
+        await self.db.reveal_plot_point(args.get('plot_point_id'))
+        return f"Plot point {args.get('plot_point_id')} revealed."
+     
     # =========================================================================
     # MEMORY TOOL IMPLEMENTATIONS
     # =========================================================================

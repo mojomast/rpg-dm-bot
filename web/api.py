@@ -194,6 +194,49 @@ class CharacterFactionReputationUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class StorylineCreate(BaseModel):
+    guild_id: int
+    title: str
+    created_by: int
+    session_id: Optional[int] = None
+    description: Optional[str] = None
+    status: str = "active"
+
+
+class StorylineNodeCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    node_type: str = "scene"
+    node_key: Optional[str] = None
+    is_start: bool = False
+    is_end: bool = False
+    reveal_order: int = 0
+    data_json: Dict[str, Any] = {}
+
+
+class StorylineEdgeCreate(BaseModel):
+    from_node_id: int
+    to_node_id: int
+    edge_type: str = "progression"
+    conditions_json: Dict[str, Any] = {}
+
+
+class StorylineAdvanceRequest(BaseModel):
+    node_id: int
+    character_id: Optional[int] = None
+    branch_choice: Optional[str] = None
+    variables: Dict[str, Any] = {}
+
+
+class PlotPointCreate(BaseModel):
+    title: str
+    session_id: Optional[int] = None
+    storyline_id: Optional[int] = None
+    description: Optional[str] = None
+    reveal_threshold: int = 1
+    metadata_json: Dict[str, Any] = {}
+
+
 class LocationConnectionCreate(BaseModel):
     from_location_id: int
     to_location_id: int
@@ -2055,6 +2098,94 @@ async def get_npc_relationships(npc_id: int):
         """, (npc_id,))
         relationships = [dict(row) for row in await cursor.fetchall()]
     return {"relationships": relationships}
+
+
+# ============================================================================
+# STORYLINE / PLOT ENDPOINTS
+# ============================================================================
+
+@app.get("/api/storylines")
+async def list_storylines(session_id: Optional[int] = None, guild_id: Optional[int] = None):
+    """List storylines."""
+    storylines = await db.get_storylines(session_id=session_id, guild_id=guild_id)
+    return {"storylines": storylines}
+
+
+@app.post("/api/storylines")
+async def create_storyline(storyline: StorylineCreate):
+    """Create a storyline."""
+    storyline_id = await db.create_storyline(**storyline.dict())
+    return {"id": storyline_id, "message": "Storyline created"}
+
+
+@app.get("/api/storylines/{storyline_id}")
+async def get_storyline(storyline_id: int):
+    """Get a storyline with nodes and edges."""
+    storyline = await db.get_storyline(storyline_id)
+    if not storyline:
+        raise HTTPException(status_code=404, detail="Storyline not found")
+    nodes = await db.get_storyline_nodes(storyline_id)
+    edges = await db.get_storyline_edges(storyline_id)
+    progress = await db.get_storyline_progress(storyline_id)
+    return {"storyline": storyline, "nodes": nodes, "edges": edges, "progress": progress}
+
+
+@app.post("/api/storylines/{storyline_id}/nodes")
+async def create_storyline_node(storyline_id: int, node: StorylineNodeCreate):
+    """Create a storyline node."""
+    node_id = await db.create_storyline_node(storyline_id=storyline_id, **node.dict())
+    return {"id": node_id, "message": "Storyline node created"}
+
+
+@app.post("/api/storylines/{storyline_id}/edges")
+async def create_storyline_edge(storyline_id: int, edge: StorylineEdgeCreate):
+    """Create a storyline edge."""
+    edge_id = await db.create_storyline_edge(storyline_id=storyline_id, **edge.dict())
+    return {"id": edge_id, "message": "Storyline edge created"}
+
+
+@app.post("/api/storylines/{storyline_id}/advance")
+async def advance_storyline(storyline_id: int, payload: StorylineAdvanceRequest):
+    """Advance storyline progress to a specific node."""
+    result = await db.advance_storyline_node(
+        storyline_id=storyline_id,
+        to_node_id=payload.node_id,
+        character_id=payload.character_id,
+        branch_choice=payload.branch_choice,
+        variables=payload.variables,
+    )
+    if result.get('error'):
+        raise HTTPException(status_code=400, detail=result['error'])
+    return result
+
+
+@app.get("/api/sessions/{session_id}/storyline-state")
+async def get_session_storyline_state(session_id: int):
+    """Get storyline state for a session."""
+    return await db.get_storyline_state(session_id)
+
+
+@app.get("/api/plot-points")
+async def list_plot_points(session_id: Optional[int] = None, storyline_id: Optional[int] = None):
+    """List plot points."""
+    plot_points = await db.get_plot_points(session_id=session_id, storyline_id=storyline_id)
+    return {"plot_points": plot_points}
+
+
+@app.post("/api/plot-points")
+async def create_plot_point(plot_point: PlotPointCreate):
+    """Create a plot point."""
+    plot_point_id = await db.create_plot_point(**plot_point.dict())
+    return {"id": plot_point_id, "message": "Plot point created"}
+
+
+@app.post("/api/plot-clues/{clue_id}/discover")
+async def discover_plot_clue(clue_id: int, character_id: Optional[int] = Query(None)):
+    """Mark a plot clue as discovered."""
+    result = await db.discover_clue(clue_id, discovered_by=character_id)
+    if result.get('error'):
+        raise HTTPException(status_code=404, detail=result['error'])
+    return result
 
 
 # ============================================================================

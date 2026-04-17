@@ -423,6 +423,83 @@ GET_STAT_BLOCK_SCHEMA = {
     }
 }
 
+GET_STORYLINE_STATE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_storyline_state",
+        "description": "Get storyline graph and progress state for the current session.",
+        "parameters": {"type": "object", "properties": {"session_id": {"type": "integer", "description": "Optional session override"}}, "required": []}
+    }
+}
+
+ADVANCE_STORYLINE_NODE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "advance_storyline_node",
+        "description": "Advance a storyline to a specific node.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "storyline_id": {"type": "integer", "description": "Storyline ID"},
+                "node_id": {"type": "integer", "description": "Target storyline node ID"},
+                "character_id": {"type": "integer", "description": "Optional character-specific progress owner"},
+                "branch_choice": {"type": "string", "description": "Optional branch label"},
+                "variables": {"type": "object", "description": "Optional storyline variable updates"}
+            },
+            "required": ["storyline_id", "node_id"]
+        }
+    }
+}
+
+CREATE_PLOT_POINT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "create_plot_point",
+        "description": "Create a plot point tied to a storyline or session.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Plot point title"},
+                "description": {"type": "string", "description": "Plot point description"},
+                "storyline_id": {"type": "integer", "description": "Optional storyline ID"},
+                "reveal_threshold": {"type": "integer", "description": "Number of discovered clues required to reveal it"}
+            },
+            "required": ["title"]
+        }
+    }
+}
+
+RECORD_CLUE_DISCOVERY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "record_clue_discovery",
+        "description": "Record that a clue was discovered and auto-reveal the plot point if its threshold is met.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "clue_id": {"type": "integer", "description": "Plot clue ID"},
+                "character_id": {"type": "integer", "description": "Optional discovering character ID"}
+            },
+            "required": ["clue_id"]
+        }
+    }
+}
+
+REVEAL_PLOT_POINT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "reveal_plot_point",
+        "description": "Force-reveal a plot point.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plot_point_id": {"type": "integer", "description": "Plot point ID"}
+            },
+            "required": ["plot_point_id"]
+        }
+    }
+}
+
 ROLL_INITIATIVE_SCHEMA = {
     "type": "function",
     "function": {
@@ -2420,6 +2497,11 @@ TOOLS_SCHEMA = [
     TRIGGER_EVENT_SCHEMA,
     RESOLVE_EVENT_SCHEMA,
     GET_ACTIVE_EVENTS_SCHEMA,
+    GET_STORYLINE_STATE_SCHEMA,
+    ADVANCE_STORYLINE_NODE_SCHEMA,
+    CREATE_PLOT_POINT_SCHEMA,
+    RECORD_CLUE_DISCOVERY_SCHEMA,
+    REVEAL_PLOT_POINT_SCHEMA,
     # Generative AI / Worldbuilding
     GENERATE_WORLD_SCHEMA,
     GENERATE_KEY_NPCS_SCHEMA,
@@ -2495,7 +2577,10 @@ class ToolSchemas:
                           TRANSFER_STORY_ITEM_SCHEMA, GET_STORY_ITEMS_SCHEMA,
                           PICKUP_STORY_ITEM_SCHEMA, DROP_STORY_ITEM_SCHEMA],
             "story_event": [CREATE_STORY_EVENT_SCHEMA, TRIGGER_EVENT_SCHEMA,
-                            RESOLVE_EVENT_SCHEMA, GET_ACTIVE_EVENTS_SCHEMA],
+                            RESOLVE_EVENT_SCHEMA, GET_ACTIVE_EVENTS_SCHEMA,
+                            GET_STORYLINE_STATE_SCHEMA, ADVANCE_STORYLINE_NODE_SCHEMA,
+                            CREATE_PLOT_POINT_SCHEMA, RECORD_CLUE_DISCOVERY_SCHEMA,
+                            REVEAL_PLOT_POINT_SCHEMA],
             "worldbuilding": [GENERATE_WORLD_SCHEMA, GENERATE_KEY_NPCS_SCHEMA,
                              GENERATE_LOCATION_SCHEMA, GENERATE_QUEST_SCHEMA,
                              GENERATE_ENCOUNTER_SCHEMA, GENERATE_BACKSTORY_SCHEMA,

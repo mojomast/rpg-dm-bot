@@ -300,7 +300,6 @@ async function loadPageData(pageId: string): Promise<void> {
                 await loadEvents();
                 break;
             case 'saves':
-                showToast('Save points are temporarily unavailable in the web UI', 'info');
                 break;
             case 'characters':
                 await loadCharacters();
@@ -394,7 +393,6 @@ async function loadSessions(): Promise<void> {
                 </div>
                 <div class="entity-actions">
                     <button class="btn btn-small btn-secondary" onclick="viewSession(${session.id})">View</button>
-                    <button class="btn btn-small btn-primary" onclick="createSavepoint(${session.id})">💾 Save</button>
                 </div>
             </div>
         `).join('');
@@ -846,33 +844,6 @@ async function resolveEvent(id: number): Promise<void> {
 // SAVE POINTS
 // ============================================================================
 
-async function loadSavesPage(): Promise<void> {
-    const container = document.getElementById('saves-list');
-    if (container) {
-        container.innerHTML = '<div class="empty-state">Save-point management is currently unavailable in the web UI.</div>';
-    }
-}
-
-async function loadSnapshots(): Promise<void> {
-    const container = document.getElementById('saves-list')!;
-    container.innerHTML = '<div class="empty-state">Save-point management is currently unavailable in the web UI.</div>';
-}
-
-async function createSavepoint(sessionId: number): Promise<void> {
-    void sessionId;
-    showToast('Save points are temporarily unavailable in the web UI', 'info');
-}
-
-async function loadSavepoint(id: number): Promise<void> {
-    void id;
-    showToast('Save points are temporarily unavailable in the web UI', 'info');
-}
-
-async function deleteSavepoint(id: number): Promise<void> {
-    void id;
-    showToast('Save points are temporarily unavailable in the web UI', 'info');
-}
-
 // ============================================================================
 // CHARACTERS
 // ============================================================================
@@ -1107,8 +1078,12 @@ async function loadItemDbCache(): Promise<void> {
     if (itemDbLoaded) return;
     
     try {
-        const data = await api.getItems();
-        itemDbCache = data.items || [];
+        const data = await api.getGameItems();
+        itemDbCache = Object.entries(data.items || {}).flatMap(([category, categoryItems]: [string, any]) => (
+            Array.isArray(categoryItems)
+                ? categoryItems.map((item: any) => ({ ...item, category }))
+                : []
+        ));
         itemDbLoaded = true;
     } catch (error) {
         console.error('Failed to load item database:', error);
@@ -1622,51 +1597,54 @@ function viewClass(name: string): void {
     if (!cls) return;
 
     const details = document.getElementById('class-details');
-    if (details) {
-        // Handle abilities as either object (keyed by level) or array
-        const abilities = cls.abilities || {};
-        const abilitiesList = Array.isArray(abilities) 
-            ? abilities 
-            : Object.entries(abilities).flatMap(([level, abs]: [string, any]) => 
-                (Array.isArray(abs) ? abs : [abs]).map(a => ({ name: a, level }))
-            );
-        const primaryStat = cls.primary_ability || cls.primary_stat || 'Unknown';
-        
-        details.innerHTML = `
-            <div class="detail-card">
-                <h3>${escapeHtml(cls.name || name)}</h3>
-                <p>${escapeHtml(cls.description || 'No description')}</p>
-                <div class="detail-section">
-                    <h4>Base Stats</h4>
-                    <ul>
-                        <li><strong>Hit Die:</strong> ${cls.hit_die || 'd8'}</li>
-                        <li><strong>Primary Stat:</strong> ${primaryStat}</li>
-                        <li><strong>Saving Throws:</strong> ${(cls.saving_throws || []).join(', ')}</li>
-                        <li><strong>Starting HP:</strong> ${cls.starting_hp || 'N/A'}</li>
-                        <li><strong>HP per Level:</strong> ${cls.hp_per_level || 'N/A'}</li>
-                    </ul>
-                </div>
-                <div class="detail-section">
-                    <h4>Starting Equipment</h4>
-                    <ul>
-                        ${(cls.starting_equipment || []).map((e: string) => `<li>${escapeHtml(e)}</li>`).join('') || '<li>None</li>'}
-                    </ul>
-                </div>
-                <div class="detail-section">
-                    <h4>Abilities by Level</h4>
-                    <div class="abilities-list">
-                        ${abilitiesList.map((a: any) => `
-                            <div class="ability-item">
-                                <strong>${escapeHtml(typeof a === 'string' ? a : a.name)}</strong>
-                                ${a.level ? `<span class="level-badge">Level ${a.level}</span>` : ''}
-                            </div>
-                        `).join('') || '<div class="empty-state">No abilities defined</div>'}
-                    </div>
+    if (!details) {
+        // The current layout has no dedicated class detail panel.
+        return;
+    }
+
+    // Handle abilities as either object (keyed by level) or array
+    const abilities = cls.abilities || {};
+    const abilitiesList = Array.isArray(abilities) 
+        ? abilities 
+        : Object.entries(abilities).flatMap(([level, abs]: [string, any]) => 
+            (Array.isArray(abs) ? abs : [abs]).map(a => ({ name: a, level }))
+        );
+    const primaryStat = cls.primary_ability || cls.primary_stat || 'Unknown';
+    
+    details.innerHTML = `
+        <div class="detail-card">
+            <h3>${escapeHtml(cls.name || name)}</h3>
+            <p>${escapeHtml(cls.description || 'No description')}</p>
+            <div class="detail-section">
+                <h4>Base Stats</h4>
+                <ul>
+                    <li><strong>Hit Die:</strong> ${cls.hit_die || 'd8'}</li>
+                    <li><strong>Primary Stat:</strong> ${primaryStat}</li>
+                    <li><strong>Saving Throws:</strong> ${(cls.saving_throws || []).join(', ')}</li>
+                    <li><strong>Starting HP:</strong> ${cls.starting_hp || 'N/A'}</li>
+                    <li><strong>HP per Level:</strong> ${cls.hp_per_level || 'N/A'}</li>
+                </ul>
+            </div>
+            <div class="detail-section">
+                <h4>Starting Equipment</h4>
+                <ul>
+                    ${(cls.starting_equipment || []).map((e: string) => `<li>${escapeHtml(e)}</li>`).join('') || '<li>None</li>'}
+                </ul>
+            </div>
+            <div class="detail-section">
+                <h4>Abilities by Level</h4>
+                <div class="abilities-list">
+                    ${abilitiesList.map((a: any) => `
+                        <div class="ability-item">
+                            <strong>${escapeHtml(typeof a === 'string' ? a : a.name)}</strong>
+                            ${a.level ? `<span class="level-badge">Level ${a.level}</span>` : ''}
+                        </div>
+                    `).join('') || '<div class="empty-state">No abilities defined</div>'}
                 </div>
             </div>
-        `;
-        details.classList.add('active');
-    }
+        </div>
+    `;
+    details.classList.add('active');
 }
 
 function editClass(name: string): void {
@@ -1774,48 +1752,51 @@ function viewRace(name: string): void {
     if (!race) return;
 
     const details = document.getElementById('race-details');
-    if (details) {
-        details.innerHTML = `
-            <div class="detail-card">
-                <h3>${escapeHtml(name)}</h3>
-                <p>${escapeHtml(race.description || 'No description')}</p>
-                <div class="detail-section">
-                    <h4>Base Stats</h4>
-                    <ul>
-                        <li><strong>Size:</strong> ${race.size || 'Medium'}</li>
-                        <li><strong>Speed:</strong> ${race.speed || 30}ft</li>
-                        <li><strong>Ability Bonuses:</strong> ${Object.entries(race.ability_bonuses || {}).map(([k, v]) => `${k}+${v}`).join(', ') || 'None'}</li>
-                        <li><strong>Languages:</strong> ${(race.languages || []).join(', ')}</li>
-                    </ul>
+    if (!details) {
+        // The current layout has no dedicated race detail panel.
+        return;
+    }
+
+    details.innerHTML = `
+        <div class="detail-card">
+            <h3>${escapeHtml(name)}</h3>
+            <p>${escapeHtml(race.description || 'No description')}</p>
+            <div class="detail-section">
+                <h4>Base Stats</h4>
+                <ul>
+                    <li><strong>Size:</strong> ${race.size || 'Medium'}</li>
+                    <li><strong>Speed:</strong> ${race.speed || 30}ft</li>
+                    <li><strong>Ability Bonuses:</strong> ${Object.entries(race.ability_bonuses || {}).map(([k, v]) => `${k}+${v}`).join(', ') || 'None'}</li>
+                    <li><strong>Languages:</strong> ${(race.languages || []).join(', ')}</li>
+                </ul>
+            </div>
+            <div class="detail-section">
+                <h4>Traits (${(race.traits || []).length})</h4>
+                <div class="traits-list">
+                    ${(race.traits || []).map((t: any) => `
+                        <div class="trait-item">
+                            <strong>${escapeHtml(typeof t === 'string' ? t : t.name)}</strong>
+                            ${typeof t === 'object' ? `<p>${escapeHtml(t.description || '')}</p>` : ''}
+                        </div>
+                    `).join('')}
                 </div>
+            </div>
+            ${(race.subraces && Object.keys(race.subraces).length > 0) ? `
                 <div class="detail-section">
-                    <h4>Traits (${(race.traits || []).length})</h4>
-                    <div class="traits-list">
-                        ${(race.traits || []).map((t: any) => `
-                            <div class="trait-item">
-                                <strong>${escapeHtml(typeof t === 'string' ? t : t.name)}</strong>
-                                ${typeof t === 'object' ? `<p>${escapeHtml(t.description || '')}</p>` : ''}
+                    <h4>Subraces</h4>
+                    <div class="subraces-list">
+                        ${Object.entries(race.subraces || {}).map(([sname, sub]: [string, any]) => `
+                            <div class="subrace-item">
+                                <strong>${escapeHtml(sname)}</strong>
+                                <p>${escapeHtml(sub.description || '')}</p>
                             </div>
                         `).join('')}
                     </div>
                 </div>
-                ${(race.subraces && Object.keys(race.subraces).length > 0) ? `
-                    <div class="detail-section">
-                        <h4>Subraces</h4>
-                        <div class="subraces-list">
-                            ${Object.entries(race.subraces || {}).map(([sname, sub]: [string, any]) => `
-                                <div class="subrace-item">
-                                    <strong>${escapeHtml(sname)}</strong>
-                                    <p>${escapeHtml(sub.description || '')}</p>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-        details.classList.add('active');
-    }
+            ` : ''}
+        </div>
+    `;
+    details.classList.add('active');
 }
 
 function editRace(name: string): void {
@@ -2631,7 +2612,7 @@ async function generateCampaignPreview(): Promise<void> {
 
     } catch (error) {
         console.error('Campaign generation error:', error);
-        showToast('Failed to generate campaign. Check API connection.', 'error');
+        showToast((error as Error).message || 'Failed to generate campaign', 'error');
         goToStep(1);
     }
 }
@@ -2876,6 +2857,7 @@ async function finalizeCampaign(): Promise<void> {
             dm_user_id: apiSettings.dm_user_id,
             name: config.name,
             description: config.description || generatedCampaignData.scenario?.description || '',
+            content_pack_id: generatedCampaignData.world?.content_pack_id,
             world_setting: generatedCampaignData.world || {},
             locations: generatedCampaignData.locations || [],
             npcs: generatedCampaignData.npcs || [],
@@ -2884,6 +2866,7 @@ async function finalizeCampaign(): Promise<void> {
             starting_scenario: generatedCampaignData.scenario?.description || 'Your adventure begins...',
             generation_settings: {
                 world_theme: config.world_theme,
+                content_pack_id: generatedCampaignData.world?.content_pack_id,
                 world_scale: config.world_scale,
                 magic_level: config.magic_level,
                 technology_level: config.tech_level,
@@ -2934,7 +2917,7 @@ async function finalizeCampaign(): Promise<void> {
 
     } catch (error) {
         console.error('Campaign creation error:', error);
-        showToast('Failed to create campaign', 'error');
+        showToast((error as Error).message || 'Failed to create campaign', 'error');
     }
 }
 
@@ -3371,8 +3354,9 @@ class ChatInterface {
         }
 
         const sessions = sessionsData.sessions || [];
+        const playableSessions = sessions.filter((session: any) => session.status === 'active');
         sessionSelect.innerHTML = '<option value="">Select a session...</option>' +
-            sessions.map((session: any) => `<option value="${session.id}">${escapeHtml(session.name)}</option>`).join('');
+            playableSessions.map((session: any) => `<option value="${session.id}">${escapeHtml(session.name)}</option>`).join('');
 
         sessionSelect.onchange = async () => {
             this.sessionId = sessionSelect.value ? parseInt(sessionSelect.value) : null;
@@ -3645,6 +3629,14 @@ class ChatInterface {
                 <div>${escapeHtml(this.latestState.name || 'Unknown')}</div>
             </div>
             <div class="state-block">
+                <h4>Theme</h4>
+                <div>${escapeHtml(this.latestState.world_theme || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
+                <h4>Content Pack</h4>
+                <div>${escapeHtml(this.latestState.game_state?.active_content_pack_id || this.latestState.content_pack_id || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
                 <h4>Current Location</h4>
                 <div>${escapeHtml(currentLocation)}</div>
             </div>
@@ -3807,10 +3799,6 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).editEvent = editEvent;
 (window as any).updateEvent = updateEvent;
 (window as any).deleteEvent = deleteEvent;
-(window as any).loadSnapshots = loadSnapshots;
-(window as any).createSavepoint = createSavepoint;
-(window as any).loadSavepoint = loadSavepoint;
-(window as any).deleteSavepoint = deleteSavepoint;
 (window as any).editCharacter = editCharacter;
 (window as any).updateCharacter = updateCharacter;
 (window as any).showCharacterInventory = showCharacterInventory;

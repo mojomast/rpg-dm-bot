@@ -371,7 +371,7 @@ class ChatHistoryMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    session_id: int
+    session_id: Optional[int] = None
     message: str
     character_id: Optional[int] = None
     chat_history: List[ChatHistoryMessage] = []
@@ -399,6 +399,51 @@ class ChatBootstrapResponse(BaseModel):
     active_combat: Optional[Dict[str, Any]] = None
     location: Optional[Dict[str, Any]] = None
     connections: List[Dict[str, Any]] = []
+
+
+async def _require_active_browser_session(session_id: Optional[int]) -> Dict[str, Any]:
+    """Validate that browser chat is targeting a playable active session."""
+    if session_id is None:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=400, detail="Invalid session_id")
+    if session.get('status') != 'active':
+        raise HTTPException(status_code=400, detail="Browser chat only supports active sessions")
+    return session
+
+
+async def _require_browser_actor(
+    session_id: int,
+    x_web_identity: Optional[str],
+    character_id: Optional[int],
+    *,
+    require_character: bool,
+) -> tuple[str, int, List[Dict[str, Any]], List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Validate browser identity ownership against the selected session participant."""
+    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
+        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+
+    web_user_id = web_user_id_from_uuid(x_web_identity)
+    participants = await db.get_session_participants(session_id)
+    owned_participants = [participant for participant in participants if participant.get('user_id') == web_user_id]
+    owned_character_ids = {
+        participant.get('character_id') for participant in owned_participants if participant.get('character_id')
+    }
+
+    if require_character and character_id is None:
+        raise HTTPException(status_code=400, detail="character_id is required")
+
+    character = None
+    if character_id is not None:
+        character = await db.get_character(character_id)
+        if not character or character.get('session_id') != session_id:
+            raise HTTPException(status_code=400, detail="Character does not belong to the selected session")
+        if character_id not in owned_character_ids:
+            raise HTTPException(status_code=403, detail="Browser identity does not control that character")
+
+    return x_web_identity, web_user_id, participants, owned_participants, character
 
 
 def _normalize_preview_connections(locations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -569,21 +614,15 @@ async def chat_with_dm(
 ):
     """Send a message to the AI DM and get a response."""
     handler = get_chat_handler()
-    session = await db.get_session(request.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _require_active_browser_session(request.session_id)
+    x_web_identity, web_user_id, _, _, character = await _require_browser_actor(
+        session['id'],
+        x_web_identity,
+        request.character_id,
+        require_character=True,
+    )
 
-    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
-        raise HTTPException(status_code=401, detail="Invalid web chat identity")
-
-    web_user_id = web_user_id_from_uuid(x_web_identity)
-    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{request.session_id}:user:{x_web_identity}")
-    character = await db.get_character(request.character_id) if request.character_id else None
-    if request.character_id:
-        participants = await db.get_session_participants(request.session_id)
-        valid_character_ids = {participant.get('character_id') for participant in participants if participant.get('character_id')}
-        if not character or character.get('session_id') != request.session_id or character['id'] not in valid_character_ids:
-            raise HTTPException(status_code=400, detail="Character does not belong to the selected session")
+    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{session['id']}:user:{x_web_identity}")
 
     actor_name = character['name'] if character else f"Web Player {x_web_identity[:8]}"
     actor = ChatActor(
@@ -641,39 +680,36 @@ async def chat_with_dm(
 
 @app.get("/api/chat/bootstrap", response_model=ChatBootstrapResponse)
 async def get_chat_bootstrap(
-    session_id: int,
+    session_id: Optional[int] = None,
     character_id: Optional[int] = None,
     x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity"),
 ):
     """Return browser-chat bootstrap state for a playable session."""
-    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
-        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+    session = await _require_active_browser_session(session_id)
+    _, web_user_id, participants, owned_participants, _ = await _require_browser_actor(
+        session['id'],
+        x_web_identity,
+        character_id,
+        require_character=False,
+    )
 
-    session = await db.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    full_state = await db.get_full_session_state(session['id'])
+    participants = full_state.get('participants', participants) if full_state else participants
+    available_characters = [p for p in owned_participants if p.get('character_id')]
 
-    full_state = await db.get_full_session_state(session_id)
-    participants = full_state.get('participants', []) if full_state else []
-    available_characters = [p for p in participants if p.get('character_id')]
-
-    if character_id is not None:
-        valid_character_ids = {participant.get('character_id') for participant in available_characters}
-        if character_id not in valid_character_ids:
-            raise HTTPException(status_code=400, detail="Character does not belong to the selected session")
-
-    web_user_id = web_user_id_from_uuid(x_web_identity)
-    recent = await db.get_recent_messages_by_session(web_user_id, session_id, limit=20)
+    recent = await db.get_recent_messages_by_session(web_user_id, session['id'], limit=20)
     recent_messages = [{"role": msg["role"], "content": msg["content"]} for msg in recent]
 
-    game_state = await db.get_game_state(session_id) or {}
+    game_state = await db.get_game_state(session['id']) or {}
+    if not game_state.get('active_content_pack_id'):
+        game_state['active_content_pack_id'] = session.get('content_pack_id')
     location = None
     connections: List[Dict[str, Any]] = []
     if game_state.get('current_location_id'):
         location = await db.get_location(game_state['current_location_id'])
         connections = await db.get_nearby_locations(game_state['current_location_id'])
 
-    active_combat = await db.get_active_combat_by_session(session_id)
+    active_combat = await db.get_active_combat_by_session(session['id'])
 
     return ChatBootstrapResponse(
         session=session,
@@ -1031,9 +1067,7 @@ async def create_browser_character(
     if not x_web_identity or not await db.web_identity_exists(x_web_identity):
         raise HTTPException(status_code=401, detail="Invalid web chat identity")
 
-    session = await db.get_session(character.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _require_active_browser_session(character.session_id)
 
     web_user_id = web_user_id_from_uuid(x_web_identity)
     existing_participants = await db.get_session_participants(character.session_id)
@@ -1066,6 +1100,10 @@ async def create_browser_character(
         session_id=character.session_id,
     )
     await db.join_session(character.session_id, web_user_id, character_id=char_id)
+
+    game_state = await db.get_game_state(character.session_id)
+    if game_state and game_state.get('current_location_id'):
+        await db.update_character(char_id, current_location_id=game_state['current_location_id'])
 
     created = await db.get_character(char_id)
     return {"character": created}
@@ -1722,6 +1760,16 @@ async def get_items(category: Optional[str] = None, content_pack_id: str = DEFAU
     items = {k: v for k, v in data.items() if k in item_categories}
     return {"items": items}
 
+
+@app.put("/api/gamedata/items")
+async def update_all_items(items_data: Dict[str, Any]):
+    """Bulk update item data while preserving metadata keys when omitted."""
+    existing = load_game_data("items.json")
+    existing.update(items_data.get("items", items_data))
+    if save_game_data("items.json", existing):
+        return {"message": "Items updated"}
+    raise HTTPException(status_code=500, detail="Failed to save")
+
 @app.get("/api/gamedata/items/categories")
 async def get_item_categories():
     """Get item categories and metadata"""
@@ -1818,6 +1866,19 @@ async def get_spells(school: Optional[str] = None, level: Optional[int] = None, 
         return {"spells": filtered}
     
     return {"spells": spells}
+
+
+@app.put("/api/gamedata/spells")
+async def update_all_spells(spells_data: Dict[str, Any]):
+    """Bulk update spell data while preserving class lists when omitted."""
+    existing = load_game_data("spells.json")
+    if "spells" in spells_data:
+        existing["spells"] = spells_data["spells"]
+    else:
+        existing.update(spells_data)
+    if save_game_data("spells.json", existing):
+        return {"message": "Spells updated"}
+    raise HTTPException(status_code=500, detail="Failed to save")
 
 @app.get("/api/gamedata/spells/class-lists")
 async def get_class_spell_lists():
@@ -2200,6 +2261,7 @@ class CampaignSettings(BaseModel):
     
     # World settings
     world_theme: str = "fantasy"  # fantasy, sci-fi, horror, modern, steampunk
+    content_pack_id: Optional[str] = None
     world_scale: str = "regional"  # local, regional, continental, world
     magic_level: str = "high"  # none, low, medium, high
     technology_level: str = "medieval"  # primitive, medieval, renaissance, industrial, modern, futuristic
@@ -2381,6 +2443,7 @@ class CampaignFinalize(BaseModel):
     dm_user_id: int
     name: str
     description: Optional[str] = None
+    content_pack_id: Optional[str] = None
     world_setting: Dict[str, Any]
     locations: List[Dict[str, Any]]
     npcs: List[Dict[str, Any]]
@@ -2411,7 +2474,12 @@ async def finalize_campaign(data: CampaignFinalize):
         
         world_theme = data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'fantasy'
         theme_manifest = themes_manifest.get('themes', {}).get(world_theme) or themes_manifest.get('themes', {}).get(themes_manifest.get('default_theme', 'fantasy')) or {}
-        content_pack_id = theme_manifest.get('default_content_pack_id', DEFAULT_CONTENT_PACK_ID)
+        content_pack_id = (
+            data.content_pack_id
+            or data.world_setting.get('content_pack_id')
+            or data.generation_settings.get('content_pack_id')
+            or theme_manifest.get('default_content_pack_id', DEFAULT_CONTENT_PACK_ID)
+        )
         rules_profile_id = theme_manifest.get('default_rules_profile_id', 'd20_fantasy')
         genre_family = theme_manifest.get('genre_family', world_theme or 'fantasy')
         theme_config = {
@@ -2444,8 +2512,8 @@ async def finalize_campaign(data: CampaignFinalize):
         session_id = cursor.lastrowid
 
         preview_connections = _normalize_preview_connections(data.locations)
-        starting_location_preview_id = data.locations[0].get('id') if data.locations else None
         starting_location_id = None
+        first_location_id = None
         
         # Create game state
         await conn.execute("""
@@ -2474,7 +2542,7 @@ async def finalize_campaign(data: CampaignFinalize):
         location_id_map = {}  # Map preview IDs to real IDs
         
         # Create locations
-        for loc in data.locations:
+        for index, loc in enumerate(data.locations):
             preview_location_id = loc.get('id') or f"loc_{len(location_id_map) + 1}"
             cursor = await conn.execute("""
                 INSERT INTO locations (
@@ -2502,9 +2570,13 @@ async def finalize_campaign(data: CampaignFinalize):
                     now,
                 ))
             location_id_map[preview_location_id] = cursor.lastrowid
-
-            if preview_location_id == starting_location_preview_id:
+            if first_location_id is None:
+                first_location_id = cursor.lastrowid
+            if index == 0:
                 starting_location_id = cursor.lastrowid
+
+        if starting_location_id is None:
+            starting_location_id = first_location_id
 
         if starting_location_id is not None:
             await conn.execute(

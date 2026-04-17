@@ -3,9 +3,9 @@
     "version": "1.0.0",
     "description": "Web management interface for RPG DM Bot",
     "scripts": {
-        "dev": "tsc --watch",
-        "build": "tsc && npm run copy-html",
-        "copy-html": "xcopy /Y index.html dist\\ && xcopy /Y styles.css dist\\"
+        "dev": "node ./node_modules/typescript/bin/tsc --watch",
+        "build": "node ./node_modules/typescript/bin/tsc && npm run copy-html",
+        "copy-html": "mkdir -p dist && cp index.html styles.css dist/"
     },
     "devDependencies": {
         "typescript": "^5.9.3"

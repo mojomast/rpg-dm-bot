@@ -28,6 +28,12 @@ from src.llm import LLMClient
 from src.prompts import Prompts
 from src.tool_schemas import ToolSchemas
 from src.tools import ToolExecutor
+from src.content_loader import (
+    DEFAULT_CONTENT_PACK_ID,
+    get_content_packs_manifest,
+    get_pack_data,
+    get_themes_manifest,
+)
 
 logger = logging.getLogger('rpg.api')
 
@@ -50,15 +56,16 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Initialize LLM client for worldbuilding (if API key available)
-REQUESTY_API_KEY = os.getenv('REQUESTY_API_KEY')
+LLM_API_KEY = os.getenv('OPENROUTER_API_KEY') or os.getenv('REQUESTY_API_KEY')
 LLM_MODEL = os.getenv('LLM_MODEL', 'openai/gpt-4o-mini')
+LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'https://router.requesty.ai/v1')
 llm_client: Optional[LLMClient] = None
 
-if REQUESTY_API_KEY:
-    llm_client = LLMClient(REQUESTY_API_KEY, LLM_MODEL)
+if LLM_API_KEY:
+    llm_client = LLMClient(LLM_API_KEY, LLM_MODEL, base_url=LLM_BASE_URL)
     logger.info("LLM client initialized for worldbuilding")
 else:
-    logger.warning("REQUESTY_API_KEY not set - worldbuilding will use placeholder data")
+    logger.warning("No LLM API key set - worldbuilding will use placeholder data")
 
 # CORS for frontend
 app.add_middleware(
@@ -100,6 +107,12 @@ class LocationCreate(BaseModel):
     session_id: Optional[int] = None
     description: Optional[str] = None
     location_type: str = "generic"
+    slug: Optional[str] = None
+    hierarchy_kind: str = "location"
+    tags: List[str] = []
+    dm_notes: Optional[str] = None
+    is_hidden: bool = False
+    discoverability: str = "visible"
     points_of_interest: List[str] = []
     current_weather: Optional[str] = None
     danger_level: int = 0
@@ -109,6 +122,12 @@ class LocationUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     location_type: Optional[str] = None
+    slug: Optional[str] = None
+    hierarchy_kind: Optional[str] = None
+    tags: Optional[List[str]] = None
+    dm_notes: Optional[str] = None
+    is_hidden: Optional[bool] = None
+    discoverability: Optional[str] = None
     current_weather: Optional[str] = None
     danger_level: Optional[int] = None
     hidden_secrets: Optional[str] = None
@@ -122,6 +141,7 @@ class NPCCreate(BaseModel):
     personality: Optional[str] = None
     npc_type: str = "neutral"
     location: Optional[str] = None
+    location_id: Optional[int] = None
     is_merchant: bool = False
 
 class NPCUpdate(BaseModel):
@@ -130,7 +150,116 @@ class NPCUpdate(BaseModel):
     personality: Optional[str] = None
     npc_type: Optional[str] = None
     location: Optional[str] = None
+    location_id: Optional[int] = None
     is_merchant: Optional[bool] = None
+
+
+class FactionCreate(BaseModel):
+    guild_id: int
+    name: str
+    created_by: int
+    session_id: Optional[int] = None
+    description: Optional[str] = None
+    faction_type: str = "neutral"
+    alignment: Optional[str] = None
+    influence: int = 0
+    goals: List[Dict[str, Any]] = []
+    resources: List[Dict[str, Any]] = []
+    allies: List[Any] = []
+    enemies: List[Any] = []
+
+
+class FactionUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    faction_type: Optional[str] = None
+    alignment: Optional[str] = None
+    influence: Optional[int] = None
+    goals: Optional[List[Dict[str, Any]]] = None
+    resources: Optional[List[Dict[str, Any]]] = None
+    allies: Optional[List[Any]] = None
+    enemies: Optional[List[Any]] = None
+
+
+class FactionMemberCreate(BaseModel):
+    actor_id: int
+    actor_type: str = "npc"
+    role: Optional[str] = None
+    rank: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CharacterFactionReputationUpdate(BaseModel):
+    reputation_change: int = 0
+    notes: Optional[str] = None
+
+
+class StorylineCreate(BaseModel):
+    guild_id: int
+    title: str
+    created_by: int
+    session_id: Optional[int] = None
+    description: Optional[str] = None
+    status: str = "active"
+
+
+class StorylineNodeCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    node_type: str = "scene"
+    node_key: Optional[str] = None
+    is_start: bool = False
+    is_end: bool = False
+    reveal_order: int = 0
+    data_json: Dict[str, Any] = {}
+
+
+class StorylineEdgeCreate(BaseModel):
+    from_node_id: int
+    to_node_id: int
+    edge_type: str = "progression"
+    conditions_json: Dict[str, Any] = {}
+
+
+class StorylineAdvanceRequest(BaseModel):
+    node_id: int
+    character_id: Optional[int] = None
+    branch_choice: Optional[str] = None
+    variables: Dict[str, Any] = {}
+
+
+class PlotPointCreate(BaseModel):
+    title: str
+    session_id: Optional[int] = None
+    storyline_id: Optional[int] = None
+    description: Optional[str] = None
+    reveal_threshold: int = 1
+    metadata_json: Dict[str, Any] = {}
+
+
+class LocationConnectionCreate(BaseModel):
+    from_location_id: int
+    to_location_id: int
+    direction: str = "path"
+    travel_time: int = 1
+    requirements: Optional[str] = None
+    hidden: bool = False
+    bidirectional: bool = True
+
+
+class LocationConnectionUpdate(BaseModel):
+    from_location_id: Optional[int] = None
+    to_location_id: Optional[int] = None
+    direction: Optional[str] = None
+    travel_time: Optional[int] = None
+    requirements: Optional[str] = None
+    hidden: Optional[bool] = None
+    bidirectional: Optional[bool] = None
+
+
+class CombatMonsterSpawn(BaseModel):
+    template_id: str
+    count: int = 1
 
 class StoryItemCreate(BaseModel):
     guild_id: int
@@ -146,8 +275,13 @@ class StoryItemCreate(BaseModel):
 class StoryItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    item_type: Optional[str] = None
     lore: Optional[str] = None
+    discovery_conditions: Optional[str] = None
+    dm_notes: Optional[str] = None
+    location_id: Optional[int] = None
     is_discovered: Optional[bool] = None
+    discovered: Optional[bool] = None
 
 class StoryEventCreate(BaseModel):
     guild_id: int
@@ -162,8 +296,12 @@ class StoryEventCreate(BaseModel):
 class StoryEventUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    event_type: Optional[str] = None
     status: Optional[str] = None
     trigger_conditions: Optional[str] = None
+    dm_notes: Optional[str] = None
+    location_id: Optional[int] = None
+    resolution_outcome: Optional[str] = None
 
 class SnapshotCreate(BaseModel):
     session_id: int
@@ -182,6 +320,14 @@ class CharacterUpdate(BaseModel):
     mana: Optional[int] = None
     max_mana: Optional[int] = None
     gold: Optional[int] = None
+
+
+class BrowserCharacterCreate(BaseModel):
+    session_id: int
+    name: str
+    race: str
+    char_class: str
+    backstory: Optional[str] = None
 
 class InventoryItemAdd(BaseModel):
     item_id: str
@@ -225,7 +371,7 @@ class ChatHistoryMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    session_id: int
+    session_id: Optional[int] = None
     message: str
     character_id: Optional[int] = None
     chat_history: List[ChatHistoryMessage] = []
@@ -243,6 +389,103 @@ class ChatResponse(BaseModel):
 class ChatIdentityResponse(BaseModel):
     user_id: str
 
+
+class ChatBootstrapResponse(BaseModel):
+    session: Dict[str, Any]
+    participants: List[Dict[str, Any]]
+    available_characters: List[Dict[str, Any]]
+    game_state: Dict[str, Any]
+    recent_messages: List[Dict[str, str]]
+    active_combat: Optional[Dict[str, Any]] = None
+    location: Optional[Dict[str, Any]] = None
+    connections: List[Dict[str, Any]] = []
+
+
+async def _require_active_browser_session(session_id: Optional[int]) -> Dict[str, Any]:
+    """Validate that browser chat is targeting a playable active session."""
+    if session_id is None:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=400, detail="Invalid session_id")
+    if session.get('status') != 'active':
+        raise HTTPException(status_code=400, detail="Browser chat only supports active sessions")
+    return session
+
+
+async def _require_browser_actor(
+    session_id: int,
+    x_web_identity: Optional[str],
+    character_id: Optional[int],
+    *,
+    require_character: bool,
+) -> tuple[str, int, List[Dict[str, Any]], List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Validate browser identity ownership against the selected session participant."""
+    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
+        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+
+    web_user_id = web_user_id_from_uuid(x_web_identity)
+    participants = await db.get_session_participants(session_id)
+    owned_participants = [participant for participant in participants if participant.get('user_id') == web_user_id]
+    owned_character_ids = {
+        participant.get('character_id') for participant in owned_participants if participant.get('character_id')
+    }
+
+    if require_character and character_id is None:
+        raise HTTPException(status_code=400, detail="character_id is required")
+
+    character = None
+    if character_id is not None:
+        character = await db.get_character(character_id)
+        if not character or character.get('session_id') != session_id:
+            raise HTTPException(status_code=400, detail="Character does not belong to the selected session")
+        if character_id not in owned_character_ids:
+            raise HTTPException(status_code=403, detail="Browser identity does not control that character")
+
+    return x_web_identity, web_user_id, participants, owned_participants, character
+
+
+def _normalize_preview_connections(locations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize preview location connections into unique DB-ready edges."""
+    connections: List[Dict[str, Any]] = []
+    seen_edges = set()
+
+    for location in locations:
+        source_id = location.get('id')
+        for raw_connection in location.get('connections', []) or []:
+            if isinstance(raw_connection, str):
+                target_id = raw_connection
+                direction = 'path'
+                travel_time = 1
+                hidden = False
+                bidirectional = True
+            else:
+                target_id = raw_connection.get('target_id') or raw_connection.get('to_location_id') or raw_connection.get('id')
+                direction = raw_connection.get('direction') or raw_connection.get('type') or 'path'
+                travel_time = raw_connection.get('travel_time') or 1
+                hidden = bool(raw_connection.get('hidden', False))
+                bidirectional = raw_connection.get('bidirectional', True)
+
+            if not source_id or not target_id or source_id == target_id:
+                continue
+
+            edge_key = (source_id, target_id, direction)
+            if edge_key in seen_edges:
+                continue
+
+            seen_edges.add(edge_key)
+            connections.append({
+                'from_preview_id': source_id,
+                'to_preview_id': target_id,
+                'direction': direction,
+                'travel_time': travel_time,
+                'hidden': hidden,
+                'bidirectional': bidirectional,
+            })
+
+    return connections
+
 # ============================================================================
 # STARTUP / SHUTDOWN
 # ============================================================================
@@ -257,7 +500,7 @@ async def startup():
 
 def get_chat_handler() -> ChatHandler:
     if not chat_handler:
-        raise HTTPException(status_code=503, detail="Chat is unavailable until REQUESTY_API_KEY is configured")
+        raise HTTPException(status_code=503, detail="Chat is unavailable until an LLM API key is configured")
     return chat_handler
 
 # ============================================================================
@@ -371,16 +614,16 @@ async def chat_with_dm(
 ):
     """Send a message to the AI DM and get a response."""
     handler = get_chat_handler()
-    session = await db.get_session(request.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _require_active_browser_session(request.session_id)
+    x_web_identity, web_user_id, _, _, character = await _require_browser_actor(
+        session['id'],
+        x_web_identity,
+        request.character_id,
+        require_character=True,
+    )
 
-    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
-        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{session['id']}:user:{x_web_identity}")
 
-    web_user_id = web_user_id_from_uuid(x_web_identity)
-    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{request.session_id}:user:{x_web_identity}")
-    character = await db.get_character(request.character_id) if request.character_id else None
     actor_name = character['name'] if character else f"Web Player {x_web_identity[:8]}"
     actor = ChatActor(
         user_id=web_user_id,
@@ -434,6 +677,51 @@ async def chat_with_dm(
         session_id=request.session_id,
     )
 
+
+@app.get("/api/chat/bootstrap", response_model=ChatBootstrapResponse)
+async def get_chat_bootstrap(
+    session_id: Optional[int] = None,
+    character_id: Optional[int] = None,
+    x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity"),
+):
+    """Return browser-chat bootstrap state for a playable session."""
+    session = await _require_active_browser_session(session_id)
+    _, web_user_id, participants, owned_participants, _ = await _require_browser_actor(
+        session['id'],
+        x_web_identity,
+        character_id,
+        require_character=False,
+    )
+
+    full_state = await db.get_full_session_state(session['id'])
+    participants = full_state.get('participants', participants) if full_state else participants
+    available_characters = [p for p in owned_participants if p.get('character_id')]
+
+    recent = await db.get_recent_messages_by_session(web_user_id, session['id'], limit=20)
+    recent_messages = [{"role": msg["role"], "content": msg["content"]} for msg in recent]
+
+    game_state = await db.get_game_state(session['id']) or {}
+    if not game_state.get('active_content_pack_id'):
+        game_state['active_content_pack_id'] = session.get('content_pack_id')
+    location = None
+    connections: List[Dict[str, Any]] = []
+    if game_state.get('current_location_id'):
+        location = await db.get_location(game_state['current_location_id'])
+        connections = await db.get_nearby_locations(game_state['current_location_id'])
+
+    active_combat = await db.get_active_combat_by_session(session['id'])
+
+    return ChatBootstrapResponse(
+        session=session,
+        participants=participants,
+        available_characters=available_characters,
+        game_state=game_state,
+        recent_messages=recent_messages,
+        active_combat=active_combat,
+        location=location,
+        connections=connections,
+    )
+
 # ============================================================================
 # LOCATION ENDPOINTS
 # ============================================================================
@@ -451,6 +739,14 @@ async def get_location(location_id: int):
     if not loc:
         raise HTTPException(status_code=404, detail="Location not found")
     return loc
+
+@app.get("/api/locations/{location_id}/adjacent")
+async def get_adjacent_locations(location_id: int):
+    """Get visible adjacent locations for a specific location."""
+    loc = await db.get_location(location_id)
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"locations": await db.get_nearby_locations(location_id)}
 
 @app.post("/api/locations")
 async def create_location(location: LocationCreate):
@@ -473,9 +769,9 @@ async def delete_location(location_id: int):
     return {"message": "Location deleted"}
 
 @app.post("/api/locations/{location_id}/connect/{target_id}")
-async def connect_locations(location_id: int, target_id: int):
+async def connect_locations(location_id: int, target_id: int, direction: str = "path", travel_time: int = 1, hidden: bool = False):
     """Connect two locations"""
-    await db.connect_locations(location_id, target_id)
+    await db.connect_locations(location_id, target_id, direction=direction, travel_time=travel_time, hidden=hidden)
     return {"message": "Locations connected"}
 
 # ============================================================================
@@ -524,6 +820,73 @@ async def delete_npc(npc_id: int):
     """Delete an NPC"""
     await db.delete_npc(npc_id)
     return {"message": "NPC deleted"}
+
+
+# ============================================================================
+# FACTION ENDPOINTS
+# ============================================================================
+
+@app.get("/api/factions")
+async def list_factions(session_id: Optional[int] = None, guild_id: Optional[int] = None):
+    """List factions."""
+    factions = await db.get_factions(session_id=session_id, guild_id=guild_id)
+    return {"factions": factions}
+
+
+@app.post("/api/factions")
+async def create_faction(faction: FactionCreate):
+    """Create a faction."""
+    faction_id = await db.create_faction(**faction.dict())
+    return {"id": faction_id, "message": "Faction created"}
+
+
+@app.patch("/api/factions/{faction_id}")
+async def update_faction(faction_id: int, faction: FactionUpdate):
+    """Update a faction."""
+    updates = {k: v for k, v in faction.dict().items() if v is not None}
+    if updates:
+        await db.update_faction(faction_id, **updates)
+    return {"message": "Faction updated"}
+
+
+@app.delete("/api/factions/{faction_id}")
+async def delete_faction(faction_id: int):
+    """Delete a faction."""
+    await db.delete_faction(faction_id)
+    return {"message": "Faction deleted"}
+
+
+@app.get("/api/factions/{faction_id}/members")
+async def get_faction_members(faction_id: int):
+    """List faction members."""
+    members = await db.get_faction_members(faction_id)
+    return {"members": members}
+
+
+@app.post("/api/factions/{faction_id}/members")
+async def add_faction_member(faction_id: int, member: FactionMemberCreate):
+    """Add a faction member."""
+    membership_id = await db.add_faction_member(faction_id=faction_id, **member.dict())
+    return {"id": membership_id, "message": "Faction member added"}
+
+
+@app.get("/api/characters/{char_id}/factions")
+async def get_character_factions(char_id: int):
+    """Get character faction reputation entries."""
+    factions = await db.get_character_faction_reputation(char_id)
+    return {"factions": factions}
+
+
+@app.patch("/api/characters/{char_id}/factions/{faction_id}")
+async def update_character_faction_reputation(char_id: int, faction_id: int, payload: CharacterFactionReputationUpdate):
+    """Update character faction reputation."""
+    reputation = await db.update_character_faction_reputation(
+        character_id=char_id,
+        faction_id=faction_id,
+        reputation_change=payload.reputation_change,
+        notes=payload.notes,
+    )
+    return {"reputation": reputation, "message": "Faction reputation updated"}
 
 # ============================================================================
 # STORY ITEM ENDPOINTS
@@ -604,7 +967,11 @@ async def trigger_story_event(event_id: int):
 @app.post("/api/events/{event_id}/resolve")
 async def resolve_story_event(event_id: int, outcome: str = "success", notes: str = None):
     """Resolve an event"""
-    await db.resolve_event(event_id, outcome, notes)
+    updates = {"resolution_outcome": outcome}
+    if notes:
+        updates["dm_notes"] = notes
+    await db.update_story_event(event_id, **updates)
+    await db.resolve_event(event_id, outcome)
     return {"message": "Event resolved"}
 
 # ============================================================================
@@ -632,7 +999,8 @@ async def create_snapshot(snapshot: SnapshotCreate):
         session_id=snapshot.session_id,
         name=snapshot.name,
         created_by=snapshot.created_by,
-        description=snapshot.description
+        description=snapshot.description,
+        snapshot_type='manual'
     )
     return {"id": snapshot_id, "message": "Save point created"}
 
@@ -688,6 +1056,57 @@ async def update_character(char_id: int, character: CharacterUpdate):
     if updates:
         await db.update_character(char_id, **updates)
     return {"message": "Character updated"}
+
+
+@app.post("/api/characters/browser")
+async def create_browser_character(
+    character: BrowserCharacterCreate,
+    x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity"),
+):
+    """Create and attach a browser-playable character to a session."""
+    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
+        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+
+    session = await _require_active_browser_session(character.session_id)
+
+    web_user_id = web_user_id_from_uuid(x_web_identity)
+    existing_participants = await db.get_session_participants(character.session_id)
+    existing_character_id = next(
+        (
+            participant.get('character_id')
+            for participant in existing_participants
+            if participant.get('user_id') == web_user_id and participant.get('character_id')
+        ),
+        None,
+    )
+    if existing_character_id:
+        raise HTTPException(status_code=400, detail="Browser player already has a character in this session")
+
+    char_id = await db.create_character(
+        user_id=web_user_id,
+        guild_id=session['guild_id'],
+        name=character.name,
+        race=character.race,
+        char_class=character.char_class,
+        stats={
+            'strength': 12,
+            'dexterity': 12,
+            'constitution': 12,
+            'intelligence': 12,
+            'wisdom': 12,
+            'charisma': 12,
+        },
+        backstory=character.backstory,
+        session_id=character.session_id,
+    )
+    await db.join_session(character.session_id, web_user_id, character_id=char_id)
+
+    game_state = await db.get_game_state(character.session_id)
+    if game_state and game_state.get('current_location_id'):
+        await db.update_character(char_id, current_location_id=game_state['current_location_id'])
+
+    created = await db.get_character(char_id)
+    return {"character": created}
 
 # ============================================================================
 # INVENTORY ENDPOINTS
@@ -938,34 +1357,87 @@ async def delete_story_event(event_id: int):
 # ============================================================================
 
 @app.get("/api/templates/npcs")
-async def get_npc_templates():
+async def get_npc_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get NPC generation templates"""
-    import json
-    template_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "data", "game_data", "npc_templates.json"
-    )
     try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except:
+        return get_pack_data(content_pack_id, "npc_templates.json")
+    except Exception:
         return {"templates": {}}
+
+
+@app.get("/api/templates/enemies")
+async def get_enemy_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
+    """Get monster templates for combat spawning."""
+    try:
+        templates = []
+        try:
+            templates = await db.get_monster_templates(content_pack_id=content_pack_id)
+        except Exception:
+            templates = []
+        if templates:
+            normalized = []
+            for template in templates:
+                row = dict(template)
+                row.setdefault('ac', row.get('armor_class'))
+                row.setdefault('hp', row.get('max_hp'))
+                normalized.append(row)
+            return {"templates": normalized}
+        data = get_pack_data(content_pack_id, "enemies.json")
+        templates = []
+        for template_id, template in data.get('enemies', {}).items():
+            row = dict(template)
+            row.setdefault('id', template_id)
+            templates.append(row)
+        return {"templates": sorted(templates, key=lambda item: item.get('name') or item.get('id') or '')}
+    except Exception:
+        return {"templates": []}
+
+
+@app.get("/api/monsters")
+async def list_monsters(content_pack_id: str = DEFAULT_CONTENT_PACK_ID, session_id: Optional[int] = None):
+    """List relational monster templates."""
+    monsters = await db.get_monster_templates(content_pack_id=content_pack_id, session_id=session_id)
+    return {"monsters": monsters}
+
+
+@app.get("/api/monsters/{template_id}")
+async def get_monster(template_id: str, content_pack_id: str = DEFAULT_CONTENT_PACK_ID, session_id: Optional[int] = None):
+    """Get one monster template."""
+    monster = await db.get_monster_template(template_id=template_id, content_pack_id=content_pack_id, session_id=session_id)
+    if not monster:
+        raise HTTPException(status_code=404, detail="Monster template not found")
+    return monster
 
 # ============================================================================
 # GAME DATA ENDPOINTS - Classes, Races, Skills, Items, Spells
 # ============================================================================
 
-def load_game_data(filename: str) -> Dict[str, Any]:
+def load_game_data(filename: str, content_pack_id: str = DEFAULT_CONTENT_PACK_ID, use_content_pack: bool = True) -> Dict[str, Any]:
     """Load game data from JSON file"""
-    filepath = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "data", "game_data", filename
-    )
     try:
+        if use_content_pack and "/" not in filename:
+            return get_pack_data(content_pack_id, filename)
+
+        filepath = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "data", "game_data", filename
+        )
         with open(filepath, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/api/content-packs")
+async def get_content_packs():
+    """List available content packs."""
+    return get_content_packs_manifest()
+
+
+@app.get("/api/themes")
+async def get_themes():
+    """List available world themes."""
+    return get_themes_manifest()
 
 def save_game_data(filename: str, data: Dict[str, Any]) -> bool:
     """Save game data to JSON file"""
@@ -983,9 +1455,9 @@ def save_game_data(filename: str, data: Dict[str, Any]) -> bool:
 # --- CLASSES ---
 
 @app.get("/api/gamedata/classes")
-async def get_classes():
+async def get_classes(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all character classes"""
-    data = load_game_data("classes.json")
+    data = load_game_data("classes.json", content_pack_id=content_pack_id)
     return {"classes": data.get("classes", {})}
 
 @app.get("/api/gamedata/classes/{class_id}")
@@ -1087,9 +1559,9 @@ async def update_all_classes(classes_data: Dict[str, Any]):
 # --- RACES ---
 
 @app.get("/api/gamedata/races")
-async def get_races():
+async def get_races(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all races"""
-    data = load_game_data("races.json")
+    data = load_game_data("races.json", content_pack_id=content_pack_id)
     return {"races": data.get("races", {})}
 
 @app.get("/api/gamedata/races/{race_id}")
@@ -1185,9 +1657,9 @@ async def update_all_races(races_data: Dict[str, Any]):
 # --- SKILLS ---
 
 @app.get("/api/gamedata/skills")
-async def get_skills():
+async def get_skills(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all skills and skill trees"""
-    data = load_game_data("skills.json")
+    data = load_game_data("skills.json", content_pack_id=content_pack_id)
     return data
 
 @app.get("/api/gamedata/skills/trees")
@@ -1275,9 +1747,9 @@ async def get_status_effects():
 # --- ITEMS ---
 
 @app.get("/api/gamedata/items")
-async def get_items(category: Optional[str] = None):
+async def get_items(category: Optional[str] = None, content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all items, optionally filtered by category"""
-    data = load_game_data("items.json")
+    data = load_game_data("items.json", content_pack_id=content_pack_id)
     
     if category:
         return {"items": {category: data.get(category, [])}, "category": category}
@@ -1287,6 +1759,16 @@ async def get_items(category: Optional[str] = None):
     item_categories = ["weapons", "armor", "consumables", "accessories", "gear", "ammunition", "materials"]
     items = {k: v for k, v in data.items() if k in item_categories}
     return {"items": items}
+
+
+@app.put("/api/gamedata/items")
+async def update_all_items(items_data: Dict[str, Any]):
+    """Bulk update item data while preserving metadata keys when omitted."""
+    existing = load_game_data("items.json")
+    existing.update(items_data.get("items", items_data))
+    if save_game_data("items.json", existing):
+        return {"message": "Items updated"}
+    raise HTTPException(status_code=500, detail="Failed to save")
 
 @app.get("/api/gamedata/items/categories")
 async def get_item_categories():
@@ -1368,9 +1850,9 @@ async def delete_item(category: str, item_id: str):
 # --- SPELLS ---
 
 @app.get("/api/gamedata/spells")
-async def get_spells(school: Optional[str] = None, level: Optional[int] = None):
+async def get_spells(school: Optional[str] = None, level: Optional[int] = None, content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all spells, optionally filtered"""
-    data = load_game_data("spells.json")
+    data = load_game_data("spells.json", content_pack_id=content_pack_id)
     spells = data.get("spells", {})
     
     if school or level is not None:
@@ -1384,6 +1866,19 @@ async def get_spells(school: Optional[str] = None, level: Optional[int] = None):
         return {"spells": filtered}
     
     return {"spells": spells}
+
+
+@app.put("/api/gamedata/spells")
+async def update_all_spells(spells_data: Dict[str, Any]):
+    """Bulk update spell data while preserving class lists when omitted."""
+    existing = load_game_data("spells.json")
+    if "spells" in spells_data:
+        existing["spells"] = spells_data["spells"]
+    else:
+        existing.update(spells_data)
+    if save_game_data("spells.json", existing):
+        return {"message": "Spells updated"}
+    raise HTTPException(status_code=500, detail="Failed to save")
 
 @app.get("/api/gamedata/spells/class-lists")
 async def get_class_spell_lists():
@@ -1457,6 +1952,25 @@ async def list_combats(session_id: Optional[int] = None, status: Optional[str] =
         combats = [dict(row) for row in await cursor.fetchall()]
     return {"combats": combats}
 
+@app.get("/api/combat/active")
+async def get_active_combat(session_id: int = Query(...)):
+    """Get active combat for a session"""
+    import aiosqlite
+    async with aiosqlite.connect(db.db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM combat_encounters WHERE session_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+            (session_id,)
+        )
+        combat = await cursor.fetchone()
+        if not combat:
+            return {"combat": None}
+        combat = dict(combat)
+        
+        cursor = await conn.execute("SELECT * FROM combat_participants WHERE encounter_id = ?", (combat['id'],))
+        combat['participants'] = [dict(row) for row in await cursor.fetchall()]
+    return {"combat": combat}
+
 @app.get("/api/combat/{combat_id}")
 async def get_combat(combat_id: int):
     """Get combat encounter with participants"""
@@ -1475,24 +1989,33 @@ async def get_combat(combat_id: int):
         combat['participants'] = participants
     return combat
 
-@app.get("/api/combat/active")
-async def get_active_combat(session_id: int):
-    """Get active combat for a session"""
-    import aiosqlite
-    async with aiosqlite.connect(db.db_path) as conn:
-        conn.row_factory = aiosqlite.Row
-        cursor = await conn.execute(
-            "SELECT * FROM combat_encounters WHERE session_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-            (session_id,)
+
+@app.post("/api/combat/{combat_id}/spawn-template")
+async def spawn_combat_template_enemy(combat_id: int, spawn: CombatMonsterSpawn):
+    """Spawn one or more monster-template combatants into an encounter."""
+    combat = await get_combat(combat_id)
+    if not combat:
+        raise HTTPException(status_code=404, detail="Combat not found")
+
+    session = await db.get_session(combat['session_id']) if combat.get('session_id') else None
+    context = {
+        'session_id': combat.get('session_id'),
+        'guild_id': combat.get('guild_id'),
+    }
+    if session:
+        context['content_pack_id'] = session.get('content_pack_id')
+
+    try:
+        created_ids = await tools.spawn_enemy_template_combatants(
+            combat['id'],
+            spawn.template_id,
+            count=spawn.count,
+            context=context,
         )
-        combat = await cursor.fetchone()
-        if not combat:
-            return {"combat": None}
-        combat = dict(combat)
-        
-        cursor = await conn.execute("SELECT * FROM combat_participants WHERE encounter_id = ?", (combat['id'],))
-        combat['participants'] = [dict(row) for row in await cursor.fetchall()]
-    return {"combat": combat}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"combatant_ids": created_ids, "message": "Monster spawned"}
 
 # ============================================================================
 # CHARACTER SPELLS & ABILITIES ENDPOINTS
@@ -1549,23 +2072,73 @@ async def get_location_connections(location_id: int):
     connections = await db.get_nearby_locations(location_id)
     return {"connections": connections}
 
+
+@app.get("/api/location-connections")
+async def list_location_connections(location_id: Optional[int] = None, session_id: Optional[int] = None):
+    """List canonical location connection records."""
+    connections = await db.list_location_connections(location_id=location_id, session_id=session_id)
+    return {"connections": connections}
+
+
+@app.post("/api/location-connections")
+async def create_location_connection_resource(connection: LocationConnectionCreate):
+    """Create a canonical location connection."""
+    try:
+        connection_id = await db.create_location_connection(**connection.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"id": connection_id, "message": "Location connection created"}
+
+
+@app.patch("/api/location-connections/{connection_id}")
+async def update_location_connection_resource(connection_id: int, connection: LocationConnectionUpdate):
+    """Update a canonical location connection."""
+    updates = {k: v for k, v in connection.dict().items() if v is not None}
+    if not updates:
+        return {"message": "Location connection updated"}
+    try:
+        updated = await db.update_location_connection(connection_id, **updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Location connection not found")
+    return {"message": "Location connection updated"}
+
+
+@app.delete("/api/location-connections/{connection_id}")
+async def delete_location_connection_resource(connection_id: int):
+    """Delete a canonical location connection."""
+    deleted = await db.delete_location_connection(connection_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Location connection not found")
+    return {"message": "Location connection deleted"}
+
+
+# Preserve module-level names used by direct tests while keeping
+# distinct internal handler names from the legacy compatibility wrapper.
+create_location_connection = create_location_connection_resource
+update_location_connection = update_location_connection_resource
+delete_location_connection = delete_location_connection_resource
+
 @app.post("/api/locations/{from_id}/connect/{to_id}")
-async def create_location_connection(
+async def create_location_connection_legacy(
     from_id: int, 
     to_id: int,
     direction: str = "path",
     travel_time: int = 1,
-    bidirectional: bool = True,
     hidden: bool = False
 ):
     """Create a connection between two locations"""
-    await db.connect_locations(
-        from_id, to_id, 
-        direction=direction,
-        travel_time=travel_time,
-        bidirectional=bidirectional,
-        hidden=hidden
-    )
+    try:
+        await db.create_location_connection(
+            from_location_id=from_id,
+            to_location_id=to_id,
+            direction=direction,
+            travel_time=travel_time,
+            hidden=hidden,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "Locations connected"}
 
 # ============================================================================
@@ -1589,6 +2162,94 @@ async def get_npc_relationships(npc_id: int):
 
 
 # ============================================================================
+# STORYLINE / PLOT ENDPOINTS
+# ============================================================================
+
+@app.get("/api/storylines")
+async def list_storylines(session_id: Optional[int] = None, guild_id: Optional[int] = None):
+    """List storylines."""
+    storylines = await db.get_storylines(session_id=session_id, guild_id=guild_id)
+    return {"storylines": storylines}
+
+
+@app.post("/api/storylines")
+async def create_storyline(storyline: StorylineCreate):
+    """Create a storyline."""
+    storyline_id = await db.create_storyline(**storyline.dict())
+    return {"id": storyline_id, "message": "Storyline created"}
+
+
+@app.get("/api/storylines/{storyline_id}")
+async def get_storyline(storyline_id: int):
+    """Get a storyline with nodes and edges."""
+    storyline = await db.get_storyline(storyline_id)
+    if not storyline:
+        raise HTTPException(status_code=404, detail="Storyline not found")
+    nodes = await db.get_storyline_nodes(storyline_id)
+    edges = await db.get_storyline_edges(storyline_id)
+    progress = await db.get_storyline_progress(storyline_id)
+    return {"storyline": storyline, "nodes": nodes, "edges": edges, "progress": progress}
+
+
+@app.post("/api/storylines/{storyline_id}/nodes")
+async def create_storyline_node(storyline_id: int, node: StorylineNodeCreate):
+    """Create a storyline node."""
+    node_id = await db.create_storyline_node(storyline_id=storyline_id, **node.dict())
+    return {"id": node_id, "message": "Storyline node created"}
+
+
+@app.post("/api/storylines/{storyline_id}/edges")
+async def create_storyline_edge(storyline_id: int, edge: StorylineEdgeCreate):
+    """Create a storyline edge."""
+    edge_id = await db.create_storyline_edge(storyline_id=storyline_id, **edge.dict())
+    return {"id": edge_id, "message": "Storyline edge created"}
+
+
+@app.post("/api/storylines/{storyline_id}/advance")
+async def advance_storyline(storyline_id: int, payload: StorylineAdvanceRequest):
+    """Advance storyline progress to a specific node."""
+    result = await db.advance_storyline_node(
+        storyline_id=storyline_id,
+        to_node_id=payload.node_id,
+        character_id=payload.character_id,
+        branch_choice=payload.branch_choice,
+        variables=payload.variables,
+    )
+    if result.get('error'):
+        raise HTTPException(status_code=400, detail=result['error'])
+    return result
+
+
+@app.get("/api/sessions/{session_id}/storyline-state")
+async def get_session_storyline_state(session_id: int):
+    """Get storyline state for a session."""
+    return await db.get_storyline_state(session_id)
+
+
+@app.get("/api/plot-points")
+async def list_plot_points(session_id: Optional[int] = None, storyline_id: Optional[int] = None):
+    """List plot points."""
+    plot_points = await db.get_plot_points(session_id=session_id, storyline_id=storyline_id)
+    return {"plot_points": plot_points}
+
+
+@app.post("/api/plot-points")
+async def create_plot_point(plot_point: PlotPointCreate):
+    """Create a plot point."""
+    plot_point_id = await db.create_plot_point(**plot_point.dict())
+    return {"id": plot_point_id, "message": "Plot point created"}
+
+
+@app.post("/api/plot-clues/{clue_id}/discover")
+async def discover_plot_clue(clue_id: int, character_id: Optional[int] = Query(None)):
+    """Mark a plot clue as discovered."""
+    result = await db.discover_clue(clue_id, discovered_by=character_id)
+    if result.get('error'):
+        raise HTTPException(status_code=404, detail=result['error'])
+    return result
+
+
+# ============================================================================
 # CAMPAIGN CREATION / WORLDBUILDING ENDPOINTS
 # ============================================================================
 
@@ -1600,6 +2261,7 @@ class CampaignSettings(BaseModel):
     
     # World settings
     world_theme: str = "fantasy"  # fantasy, sci-fi, horror, modern, steampunk
+    content_pack_id: Optional[str] = None
     world_scale: str = "regional"  # local, regional, continental, world
     magic_level: str = "high"  # none, low, medium, high
     technology_level: str = "medieval"  # primitive, medieval, renaissance, industrial, modern, futuristic
@@ -1781,12 +2443,14 @@ class CampaignFinalize(BaseModel):
     dm_user_id: int
     name: str
     description: Optional[str] = None
+    content_pack_id: Optional[str] = None
     world_setting: Dict[str, Any]
     locations: List[Dict[str, Any]]
     npcs: List[Dict[str, Any]]
     factions: List[Dict[str, Any]]
     quest_hooks: List[Dict[str, Any]]
     starting_scenario: str
+    generation_settings: Dict[str, Any] = {}
 
 
 @app.post("/api/campaign/finalize")
@@ -1800,39 +2464,156 @@ async def finalize_campaign(data: CampaignFinalize):
     
     async with aiosqlite.connect(db.db_path) as conn:
         conn.row_factory = aiosqlite.Row
+        now = datetime.utcnow().isoformat()
+        themes_manifest = get_themes_manifest()
+        world_state = {
+            "world_setting": data.world_setting,
+            "factions": data.factions,
+            "generation_settings": data.generation_settings,
+        }
         
+        world_theme = data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'fantasy'
+        theme_manifest = themes_manifest.get('themes', {}).get(world_theme) or themes_manifest.get('themes', {}).get(themes_manifest.get('default_theme', 'fantasy')) or {}
+        content_pack_id = (
+            data.content_pack_id
+            or data.world_setting.get('content_pack_id')
+            or data.generation_settings.get('content_pack_id')
+            or theme_manifest.get('default_content_pack_id', DEFAULT_CONTENT_PACK_ID)
+        )
+        rules_profile_id = theme_manifest.get('default_rules_profile_id', 'd20_fantasy')
+        genre_family = theme_manifest.get('genre_family', world_theme or 'fantasy')
+        theme_config = {
+            'magic_level': data.generation_settings.get('magic_level'),
+            'technology_level': data.generation_settings.get('technology_level'),
+            'tone': data.generation_settings.get('tone'),
+        }
+
         # Create the session (set to 'active' so it's immediately playable)
         cursor = await conn.execute("""
-            INSERT INTO sessions (guild_id, name, description, dm_user_id, status, created_at)
-            VALUES (?, ?, ?, ?, 'active', ?)
-        """, (data.guild_id, data.name, data.description or data.starting_scenario[:200], 
-              data.dm_user_id, datetime.utcnow().isoformat()))
+            INSERT INTO sessions (
+                guild_id, name, description, dm_user_id, status, setting, world_state,
+                world_theme, content_pack_id, genre_family, rules_profile_id, theme_config, created_at
+            )
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.guild_id,
+            data.name,
+            data.description or data.starting_scenario[:200],
+            data.dm_user_id,
+            data.world_setting.get('name') or data.name,
+            json.dumps(world_state),
+            world_theme,
+            content_pack_id,
+            genre_family,
+            rules_profile_id,
+            json.dumps(theme_config),
+            now,
+        ))
         session_id = cursor.lastrowid
+
+        preview_connections = _normalize_preview_connections(data.locations)
+        starting_location_id = None
+        first_location_id = None
         
         # Create game state
         await conn.execute("""
-            INSERT INTO game_state (session_id, current_scene, dm_notes)
-            VALUES (?, ?, ?)
-        """, (session_id, data.starting_scenario, json.dumps(data.world_setting)))
+            INSERT INTO game_state (
+                session_id, current_scene, current_location, current_location_id, dm_notes,
+                active_content_pack_id, theme_state, allowed_content_packs
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            session_id,
+            data.starting_scenario,
+            data.locations[0]['name'] if data.locations else None,
+            None,
+            json.dumps({
+                "world_setting": data.world_setting,
+                "factions": data.factions,
+                "generation_settings": data.generation_settings,
+                "campaign_description": data.description,
+                "active_content_pack_id": content_pack_id,
+            }),
+            content_pack_id,
+            json.dumps(theme_config),
+            json.dumps([content_pack_id]),
+        ))
         
         location_id_map = {}  # Map preview IDs to real IDs
-        now = datetime.utcnow().isoformat()
         
         # Create locations
-        for loc in data.locations:
+        for index, loc in enumerate(data.locations):
+            preview_location_id = loc.get('id') or f"loc_{len(location_id_map) + 1}"
             cursor = await conn.execute("""
-                INSERT INTO locations (session_id, guild_id, name, description, location_type, 
-                                       danger_level, created_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, data.guild_id, loc['name'], loc.get('description', ''),
-                  loc.get('type', 'generic'), loc.get('danger_level', 1),
-                  data.dm_user_id, now, now))
-            location_id_map[loc['id']] = cursor.lastrowid
+                INSERT INTO locations (
+                    session_id, guild_id, name, slug, description, location_type, hierarchy_kind,
+                    tags, dm_notes, is_hidden, discoverability, danger_level,
+                    hidden_secrets, points_of_interest, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                data.guild_id,
+                loc['name'],
+                loc.get('slug'),
+                loc.get('description', ''),
+                loc.get('type', 'generic'),
+                loc.get('hierarchy_kind', 'location'),
+                json.dumps(loc.get('tags', [])),
+                loc.get('dm_notes'),
+                int(bool(loc.get('is_hidden', False))),
+                loc.get('discoverability', 'visible'),
+                loc.get('danger_level', 1),
+                json.dumps({}),
+                json.dumps(loc.get('points_of_interest', [])),
+                now,
+                    now,
+                ))
+            location_id_map[preview_location_id] = cursor.lastrowid
+            if first_location_id is None:
+                first_location_id = cursor.lastrowid
+            if index == 0:
+                starting_location_id = cursor.lastrowid
+
+        if starting_location_id is None:
+            starting_location_id = first_location_id
+
+        if starting_location_id is not None:
+            await conn.execute(
+                "UPDATE game_state SET current_location_id = ? WHERE session_id = ?",
+                (starting_location_id, session_id),
+            )
+
+        for connection in preview_connections:
+            from_location_id = location_id_map.get(connection['from_preview_id'])
+            to_location_id = location_id_map.get(connection['to_preview_id'])
+            if not from_location_id or not to_location_id:
+                continue
+
+            await conn.execute("""
+                INSERT OR IGNORE INTO location_connections (
+                    from_location_id, to_location_id, direction, connection_type, distance_text,
+                    travel_time, travel_mode, lock_state, hidden, bidirectional
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                from_location_id,
+                to_location_id,
+                connection['direction'],
+                connection.get('connection_type', 'path'),
+                connection.get('distance_text'),
+                connection['travel_time'],
+                connection.get('travel_mode', 'walk'),
+                connection.get('lock_state', 'open'),
+                int(connection['hidden']),
+                int(connection['bidirectional']),
+            ))
         
         npc_id_map = {}  # Map preview IDs to real IDs
         
         # Create NPCs
         for npc in data.npcs:
+            preview_npc_id = npc.get('id') or f"npc_{len(npc_id_map) + 1}"
             # Find location name if assigned (npcs uses 'location' TEXT, not location_id)
             location_name = None
             if npc.get('location_id') and npc['location_id'] in location_id_map:
@@ -1844,13 +2625,25 @@ async def finalize_campaign(data: CampaignFinalize):
             
             cursor = await conn.execute("""
                 INSERT INTO npcs (session_id, guild_id, name, description, personality, 
-                                  npc_type, location, is_party_member, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, data.guild_id, npc['name'], npc.get('description', ''),
-                  npc.get('personality', ''), npc.get('type', 'neutral'), location_name,
-                  1 if npc.get('is_party_member_candidate') else 0,
-                  data.dm_user_id, now))
-            npc_id_map[npc['id']] = cursor.lastrowid
+                                  npc_type, location, location_id, created_by, created_at, dialogue_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                data.guild_id,
+                npc['name'],
+                npc.get('description', ''),
+                npc.get('personality', ''),
+                npc.get('type', 'neutral'),
+                location_name,
+                location_id_map.get(npc.get('location_id')),
+                data.dm_user_id,
+                now,
+                json.dumps({
+                    "goals": npc.get('goals'),
+                    "is_party_member_candidate": npc.get('is_party_member_candidate', False),
+                }),
+            ))
+            npc_id_map[preview_npc_id] = cursor.lastrowid
         
         # Create quests
         for quest in data.quest_hooks:
@@ -1862,7 +2655,7 @@ async def finalize_campaign(data: CampaignFinalize):
                 INSERT INTO quests (session_id, guild_id, title, description, objectives, 
                                     rewards, status, difficulty, quest_giver_npc_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?)
-            """, (session_id, data.guild_id, quest['title'], quest.get('description', ''),
+            """, (session_id, data.guild_id, quest.get('title') or quest.get('name') or 'Untitled Quest', quest.get('description', ''),
                   json.dumps(quest.get('objectives', [])), json.dumps(quest.get('rewards', {})),
                   quest.get('difficulty', 'medium'), quest_giver_id, data.dm_user_id, now))
         
@@ -1873,9 +2666,10 @@ async def finalize_campaign(data: CampaignFinalize):
         "session_id": session_id,
         "message": f"Campaign '{data.name}' created successfully!",
         "stats": {
-            "locations_created": len(data.locations),
-            "npcs_created": len(data.npcs),
-            "quests_created": len(data.quest_hooks)
+            "locations": len(data.locations),
+            "npcs": len(data.npcs),
+            "factions": len(data.factions),
+            "quests": len(data.quest_hooks)
         }
     }
 

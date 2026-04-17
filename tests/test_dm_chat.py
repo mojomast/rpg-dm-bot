@@ -1,11 +1,13 @@
 """Focused tests for DM chat helpers."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from src.chat_handler import ChatHandler
 from src.cogs.dm_chat import DMChat
+from src.utils import resolve_runtime_session
 
 
 class DummyTarget:
@@ -59,6 +61,55 @@ class TestDMChatHelpers:
         assert target.messages[0][1] == {}
         assert target.messages[1][1] == {}
         assert target.messages[2][1] == {"view": view}
+
+    @pytest.mark.asyncio
+    async def test_hydrate_history_from_db_populates_cold_cache(self):
+        bot = make_dm_chat_bot_stub()
+        bot.db = SimpleNamespace(
+            get_recent_messages_by_session=AsyncMock(return_value=[
+                {"role": "user", "content": "Hello there"},
+                {"role": "assistant", "content": "Welcome back"},
+            ])
+        )
+        cog = DMChat(bot)
+
+        history = await cog.hydrate_history_from_db(67890, 11111, 7, 12345)
+
+        assert history == [
+            {"role": "user", "content": "Hello there"},
+            {"role": "assistant", "content": "Welcome back"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_process_dm_input_persists_messages_to_db(self):
+        bot = make_dm_chat_bot_stub()
+        bot.db = SimpleNamespace(
+            bind_session_channel=AsyncMock(),
+            get_session_by_channel=AsyncMock(return_value={"id": 7}),
+            get_active_character=AsyncMock(return_value={"id": 101, "name": "Aria"}),
+            save_message=AsyncMock(),
+            get_recent_messages_by_session=AsyncMock(return_value=[]),
+        )
+        cog = DMChat(bot)
+        cog.chat_handler = SimpleNamespace(
+            process_single_message=AsyncMock(return_value={
+                "response": "The DM responds.",
+                "mechanics_text": "",
+                "session_id": 7,
+                "user_message": {"role": "user", "content": "hello"},
+                "assistant_message": {"role": "assistant", "content": "The DM responds."},
+            }),
+        )
+
+        guild = SimpleNamespace(id=67890)
+        channel = SimpleNamespace(id=11111)
+        author = SimpleNamespace(id=12345, display_name="Alice")
+
+        response, mechanics = await cog.process_dm_input(channel, guild, author, "hello")
+
+        assert response == "The DM responds."
+        assert mechanics == ""
+        assert bot.db.save_message.await_count == 2
 
 
 class StubChatContextDb:
@@ -148,3 +199,142 @@ class TestChatHandlerContext:
         system_prompt = llm_messages["messages"][0]["content"]
         assert "Alice is playing Aria" in system_prompt
         assert "Bob is playing Borin" in system_prompt
+        assert "character_id=1" in system_prompt
+        assert "character_id=2" in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_process_batched_messages_routes_tools_to_character_id_actor(self):
+        class StubBatchDb(StubChatContextDb):
+            async def get_character(self, character_id):
+                characters = {
+                    1: {"id": 1, "user_id": 10, "name": "Aria", "level": 3, "race": "Elf", "char_class": "Rogue", "hp": 18, "max_hp": 22, "gold": 10, "strength": 10, "dexterity": 16, "constitution": 12, "intelligence": 11, "wisdom": 13, "charisma": 14},
+                    2: {"id": 2, "user_id": 20, "name": "Borin", "level": 3, "race": "Dwarf", "char_class": "Cleric", "hp": 24, "max_hp": 24, "gold": 8, "strength": 14, "dexterity": 9, "constitution": 16, "intelligence": 10, "wisdom": 15, "charisma": 11},
+                }
+                return characters.get(character_id)
+
+            async def get_active_combat_by_session(self, session_id):
+                return None
+
+        seen_contexts = []
+
+        class StubTools:
+            async def execute_tool(self, tool_name, tool_args, context):
+                seen_contexts.append((tool_name, tool_args, dict(context)))
+                return "ok"
+
+        class StubLlm:
+            def __init__(self):
+                self.calls = 0
+
+            async def chat_with_tools(self, messages, tools):
+                self.calls += 1
+                if self.calls == 1:
+                    return {
+                        "content": "Resolving actions.",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {"name": "get_character_info", "arguments": '{"character_id": 2}'},
+                        }],
+                    }
+                return {"content": "Done.", "tool_calls": []}
+
+        handler = ChatHandler(
+            StubBatchDb(),
+            llm=StubLlm(),
+            prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+            tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+            tools=StubTools(),
+        )
+
+        await handler.process_batched_messages(
+            guild_id=123,
+            channel_id=456,
+            messages=[
+                {"user_id": 10, "display_name": "Alice", "character_name": "Aria", "character_id": 1, "content": "I scout ahead."},
+                {"user_id": 20, "display_name": "Bob", "character_name": "Borin", "character_id": 2, "content": "I cast a prayer."},
+            ],
+            session_id=10,
+        )
+
+        assert seen_contexts[0][2]["character_id"] == 2
+        assert seen_contexts[0][2]["user_id"] == 20
+
+
+class TestRuntimeSessionHelpers:
+    @pytest.mark.asyncio
+    async def test_resolve_runtime_session_prefers_character_session_id(self):
+        db = SimpleNamespace(
+            get_session=AsyncMock(return_value={"id": 12, "content_pack_id": "fantasy_core"}),
+            get_session_by_channel=AsyncMock(),
+            get_user_active_session=AsyncMock(),
+            get_active_session=AsyncMock(),
+        )
+
+        session = await resolve_runtime_session(
+            db,
+            guild_id=67890,
+            user_id=12345,
+            channel_id=11111,
+            character={"id": 77, "session_id": 12},
+        )
+
+        assert session["id"] == 12
+        db.get_session.assert_awaited_once_with(12)
+        db.get_session_by_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_batched_messages_routes_tools_by_actor_name_fallback(self):
+        class StubBatchDb(StubChatContextDb):
+            async def get_character(self, character_id):
+                characters = {
+                    1: {"id": 1, "user_id": 10, "name": "Aria", "level": 3, "race": "Elf", "char_class": "Rogue", "hp": 18, "max_hp": 22, "gold": 10, "strength": 10, "dexterity": 16, "constitution": 12, "intelligence": 11, "wisdom": 13, "charisma": 14},
+                    2: {"id": 2, "user_id": 20, "name": "Borin", "level": 3, "race": "Dwarf", "char_class": "Cleric", "hp": 24, "max_hp": 24, "gold": 8, "strength": 14, "dexterity": 9, "constitution": 16, "intelligence": 10, "wisdom": 15, "charisma": 11},
+                }
+                return characters.get(character_id)
+
+            async def get_active_combat_by_session(self, session_id):
+                return None
+
+        seen_contexts = []
+
+        class StubTools:
+            async def execute_tool(self, tool_name, tool_args, context):
+                seen_contexts.append((tool_name, tool_args, dict(context)))
+                return "ok"
+
+        class StubLlm:
+            def __init__(self):
+                self.calls = 0
+
+            async def chat_with_tools(self, messages, tools):
+                self.calls += 1
+                if self.calls == 1:
+                    return {
+                        "content": "Resolving actions.",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {"name": "get_character_info", "arguments": '{"actor_name": "Borin"}'},
+                        }],
+                    }
+                return {"content": "Done.", "tool_calls": []}
+
+        handler = ChatHandler(
+            StubBatchDb(),
+            llm=StubLlm(),
+            prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+            tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+            tools=StubTools(),
+        )
+
+        await handler.process_batched_messages(
+            guild_id=123,
+            channel_id=456,
+            messages=[
+                {"user_id": 10, "display_name": "Alice", "character_name": "Aria", "character_id": 1, "content": "I scout ahead."},
+                {"user_id": 20, "display_name": "Bob", "character_name": "Borin", "character_id": 2, "content": "I cast a prayer."},
+            ],
+            session_id=10,
+        )
+
+        assert seen_contexts[0][2]["character_id"] == 2
+        assert seen_contexts[0][2]["user_id"] == 20

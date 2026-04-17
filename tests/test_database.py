@@ -173,6 +173,268 @@ class TestCharacters:
         assert char['hp'] == 0
 
 
+class TestSessionChannelBinding:
+    async def test_bind_session_channel_sets_last_active_and_primary(self, db):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Bound Session",
+            dm_user_id=12345,
+        )
+
+        ok = await db.bind_session_channel(session_id, 555, set_primary=True)
+        assert ok is True
+
+        session = await db.get_session(session_id)
+        assert session['last_active_channel_id'] == 555
+        assert session['primary_channel_id'] == 555
+
+    async def test_get_session_by_channel_prefers_bound_session(self, db):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Lookup Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        await db.bind_session_channel(session_id, 777, set_primary=True)
+
+        session = await db.get_session_by_channel(67890, 777, statuses=['active'])
+        assert session is not None
+        assert session['id'] == session_id
+
+
+class TestFactions:
+    async def test_create_faction_and_get_members(self, db):
+        session_id = await db.create_session(guild_id=67890, name="Faction Test", dm_user_id=12345)
+        faction_id = await db.create_faction(
+            guild_id=67890,
+            session_id=session_id,
+            name="Verdant Circle",
+            description="Wardens of the old forest.",
+            created_by=12345,
+        )
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            session_id=session_id,
+            name="Ilyra",
+            description="Forest scout",
+            personality="Quiet",
+            created_by=12345,
+        )
+
+        membership_id = await db.add_faction_member(faction_id=faction_id, actor_id=npc_id, role="scout")
+        members = await db.get_faction_members(faction_id)
+
+        assert membership_id > 0
+        assert len(members) == 1
+        assert members[0]['actor_id'] == npc_id
+        assert members[0]['role'] == 'scout'
+        assert members[0]['actor_name'] == 'Ilyra'
+
+    async def test_update_character_faction_reputation_clamps(self, db, sample_character_stats):
+        session_id = await db.create_session(guild_id=67890, name="Rep Test", dm_user_id=12345)
+        character_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Kara",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        faction_id = await db.create_faction(guild_id=67890, session_id=session_id, name="Iron Compact", created_by=12345)
+
+        reputation = await db.update_character_faction_reputation(character_id, faction_id, 250)
+        lowered = await db.update_character_faction_reputation(character_id, faction_id, -500)
+
+        assert reputation == 100
+        assert lowered == -100
+
+
+class TestStorylines:
+    async def test_create_storyline_and_advance_node(self, db):
+        session_id = await db.create_session(guild_id=67890, name="Storyline Test", dm_user_id=12345)
+        storyline_id = await db.create_storyline(
+            guild_id=67890,
+            session_id=session_id,
+            title="Ashes of Blackglass",
+            description="Investigate the burning ruins.",
+            created_by=12345,
+        )
+        start_node_id = await db.create_storyline_node(storyline_id, title="Arrival", is_start=True)
+        clue_node_id = await db.create_storyline_node(storyline_id, title="Hidden Vault")
+        await db.create_storyline_edge(storyline_id, start_node_id, clue_node_id)
+
+        result = await db.advance_storyline_node(storyline_id=storyline_id, to_node_id=clue_node_id, session_id=session_id)
+        storyline = await db.get_storyline(storyline_id)
+
+        assert result['success'] is True
+        assert result['current_node_id'] == clue_node_id
+        assert storyline['current_node_id'] == clue_node_id
+
+
+class TestPlotClues:
+    async def test_discover_clue_auto_reveals_plot_point_when_threshold_met(self, db):
+        session_id = await db.create_session(guild_id=67890, name="Clue Test", dm_user_id=12345)
+        plot_point_id = await db.create_plot_point(
+            title="The Duke Is Compromised",
+            session_id=session_id,
+            reveal_threshold=2,
+        )
+        first_clue_id = await db.create_plot_clue(plot_point_id, "A sealed letter", session_id=session_id)
+        second_clue_id = await db.create_plot_clue(plot_point_id, "A witness testimony", session_id=session_id)
+
+        first_result = await db.discover_clue(first_clue_id)
+        second_result = await db.discover_clue(second_clue_id)
+        plot_point = await db.get_plot_point(plot_point_id)
+
+        assert first_result['plot_point_revealed'] is False
+        assert second_result['plot_point_revealed'] is True
+        assert plot_point['is_revealed'] == 1
+
+
+class TestSnapshots:
+    async def test_load_session_snapshot_restores_runtime_state(self, db, sample_character_stats):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Snapshot Session",
+            dm_user_id=12345,
+            description="Snapshot restore test",
+        )
+        await db.update_session(session_id, status='active', world_theme='fantasy', content_pack_id='fantasy_core')
+
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+            description="Town square",
+            location_type="town",
+            points_of_interest=["Square"],
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Whisperwood",
+            description="Ancient forest",
+            location_type="wilderness",
+        )
+        await db.connect_locations(town_id, forest_id, direction='north', travel_time=2)
+
+        char_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Aria",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        await db.join_session(session_id, user_id=12345, character_id=char_id)
+        await db.add_item(char_id, 'rope', 'Rope', 'gear', 1)
+
+        quest_id = await db.create_quest(
+            guild_id=67890,
+            title="Lost Relic",
+            description="Recover the relic.",
+            objectives=[{"description": "Find the shrine", "completed": False}],
+            rewards={"gold": 100},
+            created_by=12345,
+            session_id=session_id,
+        )
+        await db.accept_quest(quest_id, char_id)
+
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            name="Wren",
+            description="A worried scout.",
+            personality="Alert",
+            created_by=12345,
+            session_id=session_id,
+            location="Oakheart",
+        )
+        await db.update_npc(npc_id, location_id=town_id, loyalty=75, party_role='guide')
+
+        await db.save_game_state(
+            session_id,
+            current_scene='At the gates',
+            current_location='Oakheart',
+            current_location_id=town_id,
+            dm_notes='Original state',
+            turn_count=3,
+            game_data={'active_content_pack_id': 'fantasy_core'},
+        )
+        await db.save_message(12345, 67890, 555, 'assistant', 'Original message', session_id=session_id)
+
+        snapshot_id = await db.save_session_snapshot(
+            session_id=session_id,
+            name='Before divergence',
+            created_by=12345,
+            description='Reference restore point',
+        )
+
+        await db.update_session(session_id, name='Mutated Session', current_quest_id=None)
+        await db.save_game_state(
+            session_id,
+            current_scene='Changed scene',
+            current_location='Nowhere',
+            current_location_id=None,
+            dm_notes='Mutated',
+            turn_count=0,
+            game_data={},
+        )
+        await db.delete_npc(npc_id)
+        await db.delete_quest(quest_id)
+
+        mutated_char = await db.get_character(char_id)
+        await db.update_character(mutated_char['id'], name='Mutated Hero', current_location_id=None)
+        inventory = await db.get_inventory(mutated_char['id'])
+        if inventory:
+            await db.remove_item(inventory[0]['id'])
+
+        await db.load_session_snapshot(snapshot_id)
+
+        restored_session = await db.get_session(session_id)
+        assert restored_session['name'] == 'Snapshot Session'
+        assert restored_session['content_pack_id'] == 'fantasy_core'
+
+        restored_state = await db.get_game_state(session_id)
+        assert restored_state['current_scene'] == 'At the gates'
+        assert restored_state['current_location'] == 'Oakheart'
+        assert restored_state['turn_count'] == 3
+
+        restored_characters = await db.get_session_characters(session_id)
+        assert len(restored_characters) == 1
+        restored_char = restored_characters[0]
+        assert restored_char['name'] == 'Aria'
+
+        restored_inventory = await db.get_inventory(restored_char['id'])
+        assert len(restored_inventory) == 1
+        assert restored_inventory[0]['item_name'] == 'Rope'
+
+        restored_quests = await db.get_quests(session_id=session_id)
+        assert len(restored_quests) == 1
+        restored_quest = restored_quests[0]
+        assert restored_quest['title'] == 'Lost Relic'
+
+        quest_stage = await db.get_quest_current_stage(restored_quest['id'], restored_char['id'])
+        assert quest_stage['total'] == 1
+
+        restored_npcs = await db.get_npcs_by_session(session_id)
+        assert len(restored_npcs) == 1
+        assert restored_npcs[0]['name'] == 'Wren'
+
+        restored_locations = await db.get_locations(session_id=session_id)
+        assert len(restored_locations) == 2
+        restored_town = next(location for location in restored_locations if location['name'] == 'Oakheart')
+        connections = await db.get_nearby_locations(restored_town['id'])
+        assert len(connections) == 1
+        assert connections[0]['name'] == 'Whisperwood'
+
+        messages = await db.get_recent_messages_by_session(12345, session_id, limit=10)
+        assert any(message['content'] == 'Original message' for message in messages)
+
+
 # =============================================================================
 # INVENTORY TESTS
 # =============================================================================
@@ -354,6 +616,10 @@ class TestQuests:
         assert len(quests) == 1
         assert quests[0]['title'] == "The Missing Merchant"
 
+        progress = await data['db'].get_quest_progress(data['quest_id'], data['character_id'])
+        assert progress['current_node_id'] == 0
+        assert progress['last_advanced_at'] is not None
+
     async def test_accept_quest_already_accepted(self, db_with_full_setup):
         """Test accepting a quest that's already accepted"""
         data = db_with_full_setup
@@ -382,6 +648,22 @@ class TestQuests:
         assert 0 in result['completed_objectives']
         assert result['quest_complete'] is False
 
+        progress = await data['db'].get_quest_progress(data['quest_id'], data['character_id'])
+        assert progress['last_advanced_at'] is not None
+
+    async def test_abandon_quest_records_failure_details(self, db_with_full_setup):
+        """Test abandoning a quest records failure metadata."""
+        data = db_with_full_setup
+
+        await data['db'].accept_quest(data['quest_id'], data['character_id'])
+        result = await data['db'].abandon_quest(data['quest_id'], data['character_id'])
+
+        assert result['success'] is True
+        progress = await data['db'].get_quest_progress(data['quest_id'], data['character_id'])
+        assert progress['status'] == 'failed'
+        assert progress['failed_at'] is not None
+        assert progress['failure_reason'] == 'abandoned by player'
+
     async def test_complete_quest(self, db_with_full_setup):
         """Test completing a quest and receiving rewards"""
         data = db_with_full_setup
@@ -400,6 +682,22 @@ class TestQuests:
         assert result['rewards']['xp'] == 50
         
         # Verify character received rewards
+        char = await data['db'].get_character(data['character_id'])
+        assert char['gold'] == 100
+        assert char['experience'] == 50
+
+    async def test_complete_quest_blocks_duplicate_rewards(self, db_with_full_setup):
+        """Test quest rewards are only granted once."""
+        data = db_with_full_setup
+
+        await data['db'].accept_quest(data['quest_id'], data['character_id'])
+        first = await data['db'].complete_quest(data['quest_id'], data['character_id'])
+        second = await data['db'].complete_quest(data['quest_id'], data['character_id'])
+
+        assert first['success'] is True
+        assert second['error'] == 'Quest already completed'
+        assert second['already_completed'] is True
+
         char = await data['db'].get_character(data['character_id'])
         assert char['gold'] == 100
         assert char['experience'] == 50
@@ -480,6 +778,59 @@ class TestNPCs:
         
         merchants = await db.get_npcs_by_location(67890, "Market Square")
         assert len(merchants) == 1
+
+    async def test_create_npc_with_location_id_syncs_location_text(self, db_with_session):
+        db, session_id = db_with_session
+        location_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="East Gate",
+        )
+
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            session_id=session_id,
+            name="Gate Warden",
+            description="Keeps watch.",
+            personality="Suspicious",
+            created_by=12345,
+            location_id=location_id,
+        )
+
+        npc = await db.get_npc(npc_id)
+        assert npc['location_id'] == location_id
+        assert npc['location'] == 'East Gate'
+
+    async def test_update_npc_location_id_syncs_location_text(self, db_with_session):
+        db, session_id = db_with_session
+        old_location_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Docks",
+        )
+        new_location_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Watchtower",
+        )
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            session_id=session_id,
+            name="Harbor Scout",
+            description="Reports ship traffic.",
+            personality="Alert",
+            created_by=12345,
+            location_id=old_location_id,
+        )
+
+        await db.update_npc(npc_id, location_id=new_location_id)
+
+        npc = await db.get_npc(npc_id)
+        assert npc['location_id'] == new_location_id
+        assert npc['location'] == 'Watchtower'
 
     async def test_update_npc_relationship(self, db_with_full_setup):
         """Test updating NPC-character relationship"""
@@ -587,6 +938,38 @@ class TestCombat:
         # Should be ordered by initiative (descending)
         assert combatants[0]['name'] == "Test Hero"
         assert combatants[1]['name'] == "Goblin"
+
+    async def test_add_character_combatant_snapshots_equipped_armor_class(self, db_with_character):
+        """Character combatants should snapshot authoritative AC from equipped gear."""
+        db, char_id = db_with_character
+        await db.add_item(
+            character_id=char_id,
+            item_id="armor_chain",
+            item_name="Chain Mail",
+            item_type="armor",
+            is_equipped=True,
+            slot="body",
+            properties={"ac_base": 16, "max_dex_bonus": 0},
+        )
+        await db.add_item(
+            character_id=char_id,
+            item_id="shield_wooden",
+            item_name="Wooden Shield",
+            item_type="armor",
+            is_equipped=True,
+            slot="off_hand",
+            properties={"ac_bonus": 2},
+        )
+
+        combat_id = await db.create_combat(67890, 11111)
+        await db.add_combatant(
+            combat_id, "character", char_id, "Test Hero", 20, 20, 2, is_player=True
+        )
+
+        combatant = (await db.get_combatants(combat_id))[0]
+        assert combatant['armor_class'] == 18
+        assert combatant['combat_stats']['ac'] == 18
+        assert combatant['combat_stats']['armor_class'] == 18
 
     async def test_update_combatant_hp(self, db):
         """Test updating combatant HP (damage/healing)"""
@@ -840,6 +1223,112 @@ class TestLocations:
         assert nearby[0]['id'] == forest_id
         assert nearby[0]['name'] == "Forest"
         assert nearby[0]['location_type'] == "wilderness"
+
+    async def test_location_connection_crud_round_trip(self, db_with_session):
+        db, session_id = db_with_session
+
+        town_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Town")
+        cave_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Cave")
+
+        connection_id = await db.create_location_connection(
+            from_location_id=town_id,
+            to_location_id=cave_id,
+            direction='north',
+            travel_time=2,
+            hidden=False,
+            bidirectional=True,
+        )
+
+        connection = await db.get_location_connection(connection_id)
+        assert connection['from_location_name'] == 'Town'
+        assert connection['to_location_name'] == 'Cave'
+        assert connection['direction'] == 'north'
+
+        all_connections = await db.list_location_connections(location_id=town_id)
+        assert len(all_connections) == 1
+        assert all_connections[0]['id'] == connection_id
+
+        await db.update_location_connection(connection_id, direction='east', hidden=True)
+        updated = await db.get_location_connection(connection_id)
+        assert updated['direction'] == 'east'
+        assert updated['hidden'] == 1
+
+        deleted = await db.delete_location_connection(connection_id)
+        assert deleted is True
+        assert await db.get_location_connection(connection_id) is None
+
+    async def test_get_adjacent_locations_uses_session_current_location(self, db_with_session):
+        db, session_id = db_with_session
+
+        town_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Town")
+        cave_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Cave")
+        await db.create_location_connection(from_location_id=town_id, to_location_id=cave_id, direction='east')
+        await db.save_game_state(session_id, current_location='Town', current_location_id=town_id)
+
+        adjacent = await db.get_adjacent_locations(session_id)
+
+        assert len(adjacent) == 1
+        assert adjacent[0]['id'] == cave_id
+        assert adjacent[0]['direction'] == 'east'
+
+
+class TestStoryContent:
+    async def test_update_story_item_normalizes_discovered_alias(self, db_with_session):
+        db, session_id = db_with_session
+
+        item_id = await db.create_story_item(
+            guild_id=67890,
+            session_id=session_id,
+            name="Ancient Seal",
+            created_by=12345,
+        )
+
+        await db.update_story_item(item_id, discovered=True, location="Legacy Name")
+
+        item = await db.get_story_item(item_id)
+        assert item['is_discovered'] == 1
+        assert item['location_id'] is None
+
+    async def test_update_story_event_normalizes_legacy_statuses(self, db_with_session):
+        db, session_id = db_with_session
+
+        event_id = await db.create_story_event(
+            guild_id=67890,
+            session_id=session_id,
+            name="Bridge Ambush",
+            created_by=12345,
+        )
+
+        await db.update_story_event(event_id, status='active')
+        event = await db.get_story_event(event_id)
+        assert event['status'] == 'triggered'
+
+        await db.update_story_event(event_id, status='completed')
+        event = await db.get_story_event(event_id)
+        assert event['status'] == 'resolved'
+
+    async def test_get_active_events_returns_triggered_events(self, db_with_session):
+        db, session_id = db_with_session
+
+        triggered_id = await db.create_story_event(
+            guild_id=67890,
+            session_id=session_id,
+            name="Rising Tension",
+            created_by=12345,
+        )
+        resolved_id = await db.create_story_event(
+            guild_id=67890,
+            session_id=session_id,
+            name="Spent Lead",
+            created_by=12345,
+        )
+
+        await db.trigger_event(triggered_id)
+        await db.resolve_event(resolved_id, outcome='success')
+
+        active_events = await db.get_active_events(session_id)
+
+        assert [event['id'] for event in active_events] == [triggered_id]
 
 
 # =============================================================================

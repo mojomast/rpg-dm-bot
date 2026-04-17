@@ -406,6 +406,43 @@ class Quests(commands.Cog):
             )
         
         await interaction.response.send_message(embed=embed)
+
+    @quest_group.command(name="abandon", description="Abandon one of your active quests")
+    @app_commands.describe(quest_id="The ID of the quest to abandon")
+    async def abandon_quest(self, interaction: discord.Interaction, quest_id: int):
+        """Abandon an accepted quest for your active character."""
+        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+
+        if not char:
+            await interaction.response.send_message(
+                "❌ You need an active character!",
+                ephemeral=True
+            )
+            return
+
+        quest = await self.db.get_quest(quest_id)
+        if not quest:
+            await interaction.response.send_message(
+                "❌ Quest not found!",
+                ephemeral=True
+            )
+            return
+
+        result = await self.db.abandon_quest(quest_id, char['id'])
+        if 'error' in result:
+            await interaction.response.send_message(
+                f"❌ {result['error']}",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"🚪 Quest Abandoned: {quest['title']}",
+            description=f"**{char['name']}** abandoned this quest.",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Failure Reason", value=result['failure_reason'], inline=False)
+        await interaction.response.send_message(embed=embed)
     
     @quest_group.command(name="complete", description="Mark a quest as completed (DM only)")
     @app_commands.describe(quest_id="The ID of the quest to complete")
@@ -419,14 +456,43 @@ class Quests(commands.Cog):
                 ephemeral=True
             )
             return
-        
-        await self.db.update_quest(quest_id, status='completed')
-        
+
+        if quest.get('status') == 'completed':
+            await interaction.response.send_message(
+                f"ℹ️ Quest **{quest['title']}** is already completed. Rewards were already distributed.",
+                ephemeral=True
+            )
+            return
+
+        participants = await self.db.get_session_participants(quest.get('session_id')) if quest.get('session_id') else []
+        rewarded = []
+        errors = []
+
+        for participant in participants:
+            character_id = participant.get('character_id')
+            if not character_id:
+                continue
+
+            result = await self.db.complete_quest(character_id=character_id, quest_id=quest_id)
+            if result.get('success'):
+                character = await self.db.get_character(character_id)
+                rewarded.append({
+                    'character_name': character['name'] if character else f'Character {character_id}',
+                    'rewards': result.get('rewards', {}),
+                })
+            elif result.get('already_completed'):
+                errors.append(f'Character {character_id} already received rewards')
+            else:
+                errors.append(result.get('error', f'Character {character_id} could not complete quest'))
+
+        if rewarded and quest.get('status') != 'completed':
+            await self.db.update_quest(quest_id, status='completed', completed_at=datetime.utcnow().isoformat())
+
         rewards = quest.get('rewards', {})
         
         embed = discord.Embed(
             title=f"🎉 Quest Complete: {quest['title']}",
-            description="The quest has been successfully completed!",
+            description="The quest has been successfully completed and rewards were distributed.",
             color=discord.Color.gold()
         )
         
@@ -437,12 +503,23 @@ class Quests(commands.Cog):
             if rewards.get('gold'):
                 reward_text.append(f"💰 {rewards['gold']} Gold")
             embed.add_field(name="Rewards (each)", value="\n".join(reward_text) or "None", inline=False)
-        
-        embed.add_field(
-            name="Note",
-            value="Use `/character reward` to distribute rewards to participants!",
-            inline=False
-        )
+
+        if rewarded:
+            embed.add_field(
+                name="Rewarded Characters",
+                value="\n".join(
+                    f"• {entry['character_name']}"
+                    for entry in rewarded
+                )[:1024],
+                inline=False
+            )
+
+        if errors:
+            embed.add_field(
+                name="Skipped",
+                value="\n".join(f"• {error}" for error in errors)[:1024],
+                inline=False
+            )
         
         await interaction.response.send_message(embed=embed)
     

@@ -6,7 +6,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 
 ## Current State
 
-The repo already has substantial working systems for Discord play, browser chat, persistence, combat, quests, NPCs, and dashboard administration. It does not yet have one fully unified campaign architecture across Discord, browser, DB, tools, and worldbuilding content.
+The repo already has substantial working systems for Discord play, browser chat, persistence, combat, quests, NPCs, and dashboard administration. The main runtime path is now session-based across Discord and browser, with shared session state, theme/content-pack persistence, and browser-chat continuity.
 
 Implementation planning and remaining gap details live in:
 
@@ -69,7 +69,7 @@ Implementation planning and remaining gap details live in:
 - **Campaign Management**: Create and join campaigns
 - **Session Tracking**: Track active sessions and participants
 - **Party System**: Form adventuring parties
-- **Shared Progress**: Players can share one session, though the canonical campaign lifecycle is still being consolidated
+- **Shared Progress**: Players share one session state across Discord and browser play
 - **Session Isolation**: Multiple games can run simultaneously without context bleed - the AI DM correctly tracks which characters belong to which session
 - **Guild-Scoped Session Commands**: Session/game resume, join, pause, end, and quest actions now reject session IDs from other servers
 - **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
@@ -97,13 +97,13 @@ Implementation planning and remaining gap details live in:
 - **REST API**: Full API access for custom integrations (~76 endpoints)
 - **Browser Chat**: Talk to the AI Dungeon Master from the web UI with persisted history and live session panels
 - **Play Panels**: Browser chat includes combat viewer, spell management, location connections, and status effects panels
-- **Basic Web Hardening**: Browser chat uses server-issued identities and per-IP rate limiting on `/api/chat`
+- **Basic Web Hardening**: Browser chat uses server-issued identities, per-IP rate limiting on `/api/chat`, active-session validation, and browser-character ownership checks
 
 ## Content Packs
 
-The long-term content direction is theme-separated content packs under `data/game_data/packs/<theme>/<pack>/`.
+Theme-separated content packs live under `data/game_data/packs/<theme>/<pack>/`.
 
-Planned pack structure:
+Current pack structure in active use:
 
 - `archetypes.json`
 - `origins.json`
@@ -116,11 +116,12 @@ Planned pack structure:
 - `world_templates.json`
 - `factions.json`
 
-Runtime target:
+Current runtime behavior:
 
 - sessions persist `world_theme` and `content_pack_id`
-- v1 runtime target is `fantasy_core`
-- legacy flat files under `data/game_data/` are expected to migrate into `fantasy_core`
+- game state persists `active_content_pack_id`
+- default v1 runtime target is `fantasy_core`
+- legacy flat files under `data/game_data/` still back some editor flows, but active content-pack data lives in `data/game_data/packs/fantasy/core/`
 
 
 ## 🚀 Quick Start
@@ -128,7 +129,7 @@ Runtime target:
 ### Prerequisites
 - Python 3.10+
 - Discord Bot Token
-- Requesty.ai API Key (for AI features)
+- One LLM API key: `OPENROUTER_API_KEY` or `REQUESTY_API_KEY`
 
 ### Installation
 
@@ -146,8 +147,22 @@ pip install -r requirements.txt
 3. Create `.env` file:
 ```bash
 cp .env.example .env
-# Edit .env with your tokens
+# Set `DISCORD_TOKEN` and one LLM API key
 ```
+
+Common environment variables:
+
+- `DISCORD_TOKEN`
+- `DATABASE_PATH` or `DATABASE_URL`
+- `OPENROUTER_API_KEY` or `REQUESTY_API_KEY`
+
+Optional but commonly used:
+
+- `DISCORD_GUILD_ID` for faster guild-scoped slash-command sync during development
+- `LLM_MODEL`
+- `LLM_BASE_URL`
+- `OPENROUTER_SITE_URL`
+- `OPENROUTER_APP_NAME`
 
 4. Run the bot:
 ```bash
@@ -180,9 +195,10 @@ The web dashboard provides a browser-based interface for game management:
 - **Skill Trees**: Browse and edit class skill trees and branches
 - **Items/Spells**: Browse and search the item and spell databases with filtering
 
-Current limitation:
+Current limitations:
 
-- Browser play exists, but some dashboard management/editor flows are still incomplete or placeholder-backed.
+- Snapshot/save-point backend routes exist, but save-point UI is intentionally hidden in the web dashboard.
+- Some editor detail views still use compact modal/edit flows instead of dedicated detail panels.
 
 ### REST API
 The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api.py` for the complete API reference. Key endpoints:
@@ -194,9 +210,10 @@ The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api
 - `GET/PUT /api/gamedata/classes` - Class editor (full CRUD)
 - `GET/PUT /api/gamedata/races` - Race editor (full CRUD)
 - `GET/PUT /api/gamedata/skills/trees/{class}` - Skill tree editor
-- `GET /api/gamedata/items` - Item database with filtering
-- `GET /api/gamedata/spells` - Spell database with filtering
+- `GET/PUT /api/gamedata/items` - Item database and bulk item updates
+- `GET/PUT /api/gamedata/spells` - Spell database and bulk spell updates
 - `POST /api/chat/identity` - Issue a server-generated browser chat identity
+- `GET /api/chat/bootstrap` - Load browser chat session state for the active session/character
 - `POST /api/chat` - Send a browser chat message to the DM
 
 ## 📚 Commands
@@ -295,9 +312,9 @@ The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api
 | `/help` | Show all commands |
 | `/menu` | Interactive menu |
 | `/ping` | Check bot latency |
-| `/game start` | Start a game session (interviews for missing character info) |
-| `/game stop` | End current game session |
-| `/game status` | View current game state |
+| `/session start` | Start the selected campaign session |
+| `/session end` | End the current campaign session |
+| `/session players` | View current session party state |
 | `/game quick_start` | Create random character and start immediately |
 | `/action` | Quick action buttons (Explore, Talk, Search, Rest, Continue) |
 

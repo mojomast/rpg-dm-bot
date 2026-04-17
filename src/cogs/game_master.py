@@ -14,34 +14,17 @@ import json
 import asyncio
 import os
 
+from src.content_packs import load_session_content_file
 from src.utils import ensure_interaction_owner
 
 logger = logging.getLogger('rpg.game_master')
 
 
-# Load starter kits data
-def load_starter_kits():
-    """Load starter kit definitions from JSON"""
-    kit_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'starter_kits.json')
-    try:
-        with open(kit_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load starter kits: {e}")
-        return {
-            "starting_gold": 100,
-            "class_kits": {},
-            "shop_categories": {}
-        }
-
-STARTER_KITS = load_starter_kits()
-
-
 # Required character fields for a complete character
 REQUIRED_CHARACTER_FIELDS = {
     'name': 'What is your character\'s name?',
-    'race': 'What race is your character? (Human, Elf, Dwarf, Halfling, Orc, Tiefling, Dragonborn, Gnome)',
-    'char_class': 'What class is your character? (Warrior, Mage, Rogue, Cleric, Ranger, Bard, Paladin, Warlock)',
+    'race': 'What race is your character?',
+    'char_class': 'What class is your character?',
     'backstory': 'Tell me a bit about your character\'s backstory. Where did they come from? What drives them?',
 }
 
@@ -70,12 +53,17 @@ class EquipmentChoiceView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await ensure_interaction_owner(interaction, self.user_id, "this character creation flow")
+
+    def _get_starter_kits(self) -> Dict[str, Any]:
+        interview = self.game_master.active_interviews.get(self.user_id, {})
+        return interview.get('content', {}).get('starter_kits', {})
         
     @discord.ui.button(label="⚔️ Take Standard Kit", style=discord.ButtonStyle.success, row=0)
     async def use_standard_kit(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Use the pre-made class kit"""
         await interaction.response.defer()
-        kit = STARTER_KITS.get('class_kits', {}).get(self.char_class)
+        starter_kits = self._get_starter_kits()
+        kit = starter_kits.get('class_kits', {}).get(self.char_class)
         if kit:
             await self.game_master.assign_starter_kit(self.user_id, self.guild_id, self.char_class)
             
@@ -101,8 +89,9 @@ class EquipmentChoiceView(discord.ui.View):
     async def custom_shopping(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Open the equipment shop"""
         await interaction.response.defer()
-        
-        starting_gold = STARTER_KITS.get('starting_gold', 100)
+
+        starter_kits = self._get_starter_kits()
+        starting_gold = starter_kits.get('starting_gold', 100)
         
         # Initialize shopping state
         self.game_master.active_interviews[self.user_id]['shopping'] = {
@@ -122,7 +111,8 @@ class EquipmentChoiceView(discord.ui.View):
     @discord.ui.button(label="📋 Preview Standard Kit", style=discord.ButtonStyle.secondary, row=1)
     async def preview_kit(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Preview what's in the standard kit"""
-        kit = STARTER_KITS.get('class_kits', {}).get(self.char_class)
+        starter_kits = self._get_starter_kits()
+        kit = starter_kits.get('class_kits', {}).get(self.char_class)
         if kit:
             items_text = "\n".join([
                 f"• **{item['name']}**" + (f" x{item.get('quantity', 1)}" if item.get('quantity', 1) > 1 else "") + 
@@ -248,8 +238,9 @@ class ShopCategorySelect(discord.ui.Select):
         self.game_master = game_master_cog
         self.user_id = user_id
         self.guild_id = guild_id
-        
-        categories = STARTER_KITS.get('shop_categories', {})
+
+        interview = self.game_master.active_interviews.get(self.user_id, {})
+        categories = interview.get('content', {}).get('starter_kits', {}).get('shop_categories', {})
         options = []
         for cat_id, cat_data in categories.items():
             options.append(discord.SelectOption(
@@ -455,9 +446,14 @@ class CharacterInterviewView(discord.ui.View):
             self.add_race_buttons()
         elif field == 'char_class':
             self.add_class_buttons()
+
+    def _get_content(self) -> Dict[str, Any]:
+        interview = self.game_master.active_interviews.get(self.user_id, {})
+        return interview.get('content', {})
     
     def add_race_buttons(self):
-        races = ['Human', 'Elf', 'Dwarf', 'Halfling', 'Orc', 'Tiefling', 'Dragonborn', 'Gnome']
+        races_data = self._get_content().get('races', {}).get('races', {})
+        races = [race['name'] for race in races_data.values() if not race.get('parent_race')][:8]
         for i, race in enumerate(races[:4]):
             btn = discord.ui.Button(label=race, style=discord.ButtonStyle.primary, row=0)
             btn.callback = self.make_race_callback(race)
@@ -468,7 +464,8 @@ class CharacterInterviewView(discord.ui.View):
             self.add_item(btn)
     
     def add_class_buttons(self):
-        classes = ['Warrior', 'Mage', 'Rogue', 'Cleric', 'Ranger', 'Bard', 'Paladin', 'Warlock']
+        classes_data = self._get_content().get('classes', {}).get('classes', {})
+        classes = [char_class['name'] for char_class in classes_data.values()][:8]
         for i, char_class in enumerate(classes[:4]):
             btn = discord.ui.Button(label=char_class, style=discord.ButtonStyle.success, row=0)
             btn.callback = self.make_class_callback(char_class)
@@ -581,7 +578,7 @@ class QuickStartView(discord.ui.View):
         
         embed.add_field(
             name="2️⃣ Join or Start a Game",
-            value="Start a new game with `/game start` or join an existing one with `/game join`",
+            value="Create a new session with `/session create`, start it with `/session start`, or join an existing one with `/game join`",
             inline=False
         )
         
@@ -629,15 +626,28 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
     
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        
-        # Create the session
-        session_id = await self.game_master.bot.db.create_session(
-            guild_id=interaction.guild.id,
-            name=str(self.game_name),
-            description=str(self.description) if self.description.value else "A new adventure awaits!",
-            dm_user_id=interaction.user.id,
-            max_players=6
-        )
+
+        sessions_cog = self.game_master.bot.get_cog('Sessions')
+        session = None
+        if sessions_cog and hasattr(sessions_cog, 'create_session_record'):
+            session = await sessions_cog.create_session_record(
+                guild_id=interaction.guild.id,
+                name=str(self.game_name),
+                description=str(self.description) if self.description.value else None,
+                dm_user_id=interaction.user.id,
+                max_players=6,
+            )
+        else:
+            session_id = await self.game_master.bot.db.create_session(
+                guild_id=interaction.guild.id,
+                name=str(self.game_name),
+                description=str(self.description) if self.description.value else "A new adventure awaits!",
+                dm_user_id=interaction.user.id,
+                max_players=6
+            )
+            session = await self.game_master.bot.db.get_session(session_id)
+
+        session_id = session['id']
         
         # Get or create character for the game creator
         char = await self.game_master.bot.db.get_active_character(
@@ -658,8 +668,8 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
             admin_embed.add_field(
                 name="🎮 Game Commands",
                 value=(
-                    f"`/game begin {session_id}` - Start the adventure\n"
-                    f"`/game pause {session_id}` - Pause the game\n"
+                    f"`/session start {session_id}` - Start the adventure\n"
+                    f"`/session pause {session_id}` - Pause the game\n"
                     f"`/game end {session_id}` - End the session\n"
                     f"`/game status {session_id}` - Check game status"
                 ),
@@ -698,11 +708,14 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
             embed.add_field(name="Players", value="Waiting for characters...", inline=True)
             
             await interaction.followup.send(embed=embed)
-            await self.game_master.start_character_interview(interaction.user, interaction.guild)
+            await self.game_master.start_character_interview_for_session(interaction.user, interaction.guild, session_id=session_id)
             
         else:
             # Has character - add to session and offer to start
-            await self.game_master.bot.db.add_session_player(session_id, char['id'])
+            if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+                await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+            else:
+                await self.game_master.bot.db.add_session_player(session_id, char['id'])
             
             embed = discord.Embed(
                 title=f"🎲 Game Created: {self.game_name}",
@@ -713,7 +726,7 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
             embed.add_field(name="Your Character", value=f"{char['name']} the {char['race']} {char['char_class']}", inline=True)
             embed.add_field(
                 name="Next Steps",
-                value=f"• Share the session ID for others to join\n• Use `/game begin {session_id}` when ready to start!",
+                value=f"• Share the session ID for others to join\n• Use `/session start {session_id}` when ready to start!",
                 inline=False
             )
             
@@ -739,7 +752,7 @@ class BeginGameView(discord.ui.View):
     async def wait_players(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Just acknowledge waiting"""
         await interaction.response.send_message(
-            f"👍 Take your time! Use `/game begin {self.session_id}` when everyone's ready.",
+            f"👍 Take your time! Use `/session start {self.session_id}` when everyone's ready.",
             ephemeral=True
         )
 
@@ -871,27 +884,25 @@ class SessionManageView(discord.ui.View):
     @discord.ui.button(label="🚪 Join Game", style=discord.ButtonStyle.primary, row=0)
     async def join_game(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Join this game session"""
-        char = await self.game_master.bot.db.get_active_character(
-            interaction.user.id, interaction.guild.id
-        )
-        
-        if not char:
-            await interaction.response.send_message(
-                "❌ You need a character first! Use `/character create`",
-                ephemeral=True
+        sessions_cog = self.game_master.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+            result = await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, self.session['id'])
+            if result.get('error'):
+                await interaction.response.send_message(result['error'], ephemeral=result.get('code') != 'already_joined')
+                return
+            char = result['character']
+        else:
+            char = await self.game_master.bot.db.get_active_character(
+                interaction.user.id, interaction.guild.id
             )
-            return
-        
-        # Check if already in session
-        players = await self.game_master.bot.db.get_session_players(self.session['id'])
-        if any(p.get('character_id') == char['id'] for p in players if p.get('character_id')):
-            await interaction.response.send_message(
-                f"✅ **{char['name']}** is already in this game!",
-                ephemeral=True
-            )
-            return
-        
-        await self.game_master.bot.db.add_session_player(self.session['id'], char['id'])
+            if not char:
+                await interaction.response.send_message(
+                    "❌ You need a character first! Use `/character create`",
+                    ephemeral=True
+                )
+                return
+            await self.game_master.bot.db.add_session_player(self.session['id'], char['id'])
+
         await interaction.response.send_message(
             f"✅ **{char['name']}** has joined **{self.session['name']}**! 🎉"
         )
@@ -922,8 +933,17 @@ class SessionManageView(discord.ui.View):
                 ephemeral=True
             )
             return
-        
-        await self.game_master.bot.db.update_session(self.session['id'], status='paused')
+
+        sessions_cog = self.game_master.bot.get_cog('Sessions')
+        if sessions_cog:
+            return await sessions_cog.pause_session.callback(sessions_cog, interaction, self.session['id'])
+
+        await self.game_master.bot.db.update_session(
+            self.session['id'],
+            status='paused',
+            last_active_channel_id=interaction.channel.id,
+            last_played=discord.utils.utcnow().isoformat(),
+        )
         await interaction.response.send_message(
             f"⏸️ **{self.session['name']}** has been paused."
         )
@@ -933,7 +953,12 @@ class SessionManageView(discord.ui.View):
         """Reset the DM's conversation history for this game"""
         dm_chat_cog = self.game_master.bot.get_cog('DMChat')
         if dm_chat_cog:
-            dm_chat_cog.start_new_session(interaction.channel.id, self.session['id'], interaction.guild.id)
+            await dm_chat_cog.bind_session_channel(
+                interaction.guild.id,
+                interaction.channel.id,
+                self.session['id'],
+                set_primary=False,
+            )
         
         await interaction.response.send_message(
             f"🔄 Conversation history cleared for **{self.session['name']}**!\n"
@@ -962,19 +987,27 @@ class GameListView(discord.ui.View):
     
     def make_join_callback(self, session_id: int, session_name: str):
         async def callback(interaction: discord.Interaction):
-            char = await self.game_master.bot.db.get_active_character(
-                interaction.user.id,
-                interaction.guild.id
-            )
-            
-            if not char:
-                await interaction.response.send_message(
-                    "❌ You need a character first! Click 'Create Character' or use `/character create`",
-                    ephemeral=True
+            sessions_cog = self.game_master.bot.get_cog('Sessions')
+            if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+                result = await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+                if result.get('error'):
+                    await interaction.response.send_message(result['error'], ephemeral=result.get('code') != 'already_joined')
+                    return
+                char = result['character']
+            else:
+                char = await self.game_master.bot.db.get_active_character(
+                    interaction.user.id,
+                    interaction.guild.id
                 )
-                return
-            
-            await self.game_master.bot.db.add_session_player(session_id, char['id'])
+                
+                if not char:
+                    await interaction.response.send_message(
+                        "❌ You need a character first! Click 'Create Character' or use `/character create`",
+                        ephemeral=True
+                    )
+                    return
+                
+                await self.game_master.bot.db.add_session_player(session_id, char['id'])
             
             await interaction.response.send_message(
                 f"✅ **{char['name']}** has joined **{session_name}**! 🎉",
@@ -1105,14 +1138,27 @@ class GameMaster(commands.Cog):
         
         await interaction.response.defer()
         
-        # Create session
-        session_id = await self.db.create_session(
-            guild_id=interaction.guild.id,
-            name=name,
-            description=description or "A new adventure awaits!",
-            dm_user_id=interaction.user.id,
-            max_players=6
-        )
+        sessions_cog = self.bot.get_cog('Sessions')
+        session = None
+        if sessions_cog and hasattr(sessions_cog, 'create_session_record'):
+            session = await sessions_cog.create_session_record(
+                guild_id=interaction.guild.id,
+                name=name,
+                description=description,
+                dm_user_id=interaction.user.id,
+                max_players=6,
+            )
+        else:
+            session_id = await self.db.create_session(
+                guild_id=interaction.guild.id,
+                name=name,
+                description=description or "A new adventure awaits!",
+                dm_user_id=interaction.user.id,
+                max_players=6
+            )
+            session = await self.db.get_session(session_id)
+
+        session_id = session['id']
         
         # Get user's character
         char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
@@ -1128,9 +1174,9 @@ class GameMaster(commands.Cog):
             admin_embed.add_field(
                 name="Commands",
                 value=(
-                    f"`/game begin {session_id}` - Start the adventure\n"
+                    f"`/session start {session_id}` - Start the adventure\n"
                     f"`/game status {session_id}` - View game status\n"
-                    f"`/game pause {session_id}` - Pause game\n"
+                    f"`/session pause {session_id}` - Pause game\n"
                     f"`/game end {session_id}` - End session"
                 ),
                 inline=False
@@ -1147,9 +1193,12 @@ class GameMaster(commands.Cog):
             )
             embed.add_field(name="Session ID", value=str(session_id), inline=True)
             await interaction.followup.send(embed=embed)
-            await self.start_character_interview(interaction.user, interaction.guild)
+            await self.start_character_interview_for_session(interaction.user, interaction.guild, session_id=session_id)
         else:
-            await self.db.add_session_player(session_id, char['id'])
+            if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+                await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+            else:
+                await self.db.add_session_player(session_id, char['id'])
             embed = discord.Embed(
                 title=f"🎲 Game Created: {name}",
                 description=f"**{char['name']}** is ready to adventure!",
@@ -1158,7 +1207,7 @@ class GameMaster(commands.Cog):
             embed.add_field(name="Session ID", value=str(session_id), inline=True)
             embed.add_field(
                 name="Next Steps",
-                value=f"• Others join with `/game join {session_id}`\n• Begin with `/game begin {session_id}`",
+                value=f"• Others join with `/game join {session_id}`\n• Begin with `/session start {session_id}`",
                 inline=False
             )
             view = BeginGameView(self, session_id)
@@ -1175,40 +1224,38 @@ class GameMaster(commands.Cog):
             )
             return
         
-        session = await self._get_guild_session(interaction.guild.id, session_id)
-        
-        if not session:
-            await interaction.response.send_message("❌ Game not found!", ephemeral=True)
-            return
-        
-        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
-        
-        if not char:
-            await interaction.response.send_message(
-                "❌ You need a character first! Use `/game menu` to create one.",
-                ephemeral=True
-            )
-            return
-        
-        # Check if already in session
-        players = await self.db.get_session_players(session_id)
-        if any(p.get('character_id') == char['id'] for p in players if p.get('character_id')):
-            await interaction.response.send_message(
-                f"You're already in **{session['name']}**!",
-                ephemeral=True
-            )
-            return
-        
-        # Check capacity
-        if len(players) >= session['max_players']:
-            await interaction.response.send_message("❌ This game is full!", ephemeral=True)
-            return
-        
-        await self.db.add_session_player(session_id, char['id'])
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+            result = await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+            if result.get('error'):
+                await interaction.response.send_message(result['error'], ephemeral=result.get('code') != 'already_joined')
+                return
+            session = result['session']
+            char = result['character']
+            party_size = result['party_size']
+        else:
+            session = await self._get_guild_session(interaction.guild.id, session_id)
+            
+            if not session:
+                await interaction.response.send_message("❌ Game not found!", ephemeral=True)
+                return
+            
+            char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+            
+            if not char:
+                await interaction.response.send_message(
+                    "❌ You need a character first! Use `/game menu` to create one.",
+                    ephemeral=True
+                )
+                return
+            
+            players = await self.db.get_session_players(session_id)
+            await self.db.add_session_player(session_id, char['id'])
+            party_size = len(players) + 1
         
         await interaction.response.send_message(
             f"✅ **{char['name']}** has joined **{session['name']}**! 🎉\n"
-            f"Party size: {len(players) + 1}/{session['max_players']}"
+            f"Party size: {party_size}/{session['max_players']}"
         )
         
         # Notify the DM
@@ -1265,10 +1312,14 @@ class GameMaster(commands.Cog):
                 ephemeral=True
             )
             return
-        
+
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog:
+            return await sessions_cog.start_session.callback(sessions_cog, interaction, session_id)
+
         await self.begin_game(interaction, session_id)
     
-    async def begin_game(self, interaction: discord.Interaction, session_id: int):
+    async def begin_game(self, interaction: discord.Interaction, session_id: int, resume: bool = False):
         """Actually begin the game with DM narration"""
         session = await self._get_guild_session(interaction.guild.id, session_id)
         
@@ -1294,13 +1345,18 @@ class GameMaster(commands.Cog):
         
         await interaction.response.defer()
         
-        # Mark session as active
-        await self.db.update_session(session_id, status='active')
+        # Mark session as active and bind this channel
+        await self.db.update_session(
+            session_id,
+            status='active',
+            last_active_channel_id=interaction.channel.id,
+            last_played=datetime.utcnow().isoformat(),
+        )
         
         # Clear chat history for this channel to start fresh with new game
         dm_chat_cog = self.bot.get_cog('DMChat')
         if dm_chat_cog:
-            dm_chat_cog.start_new_session(interaction.channel.id, session_id, interaction.guild.id)
+            await dm_chat_cog.bind_session_channel(interaction.guild.id, interaction.channel.id, session_id, set_primary=not resume)
         
         # Build detailed party info for the DM including backstories
         party_info = []
@@ -1383,18 +1439,35 @@ class GameMaster(commands.Cog):
         }
         
         # Save game state to database for persistence
-        await self.db.save_game_state(
-            session_id=session_id,
-            current_scene="Opening Scene",
-            current_location="Starting Location",
-            dm_notes=f"Adventure '{session['name']}' has begun. {session['description']}",
-            game_data={
+        existing_game_state = await self.db.get_game_state(session_id)
+        state_updates = {
+            'dm_notes': f"Adventure '{session['name']}' has begun. {session['description']}",
+            'game_data': {
                 'party_info': [{'name': c['name'], 'race': c['race'], 'char_class': c['char_class'], 
                                'level': c['level'], 'backstory': c.get('backstory')} for c in party_info],
                 'session_name': session['name'],
                 'session_description': session['description']
             }
-        )
+        }
+        if not resume:
+            state_updates['current_scene'] = 'Opening Scene'
+        else:
+            if existing_game_state:
+                if existing_game_state.get('current_scene'):
+                    state_updates['current_scene'] = existing_game_state['current_scene']
+                if existing_game_state.get('current_location_id'):
+                    state_updates['current_location_id'] = existing_game_state['current_location_id']
+                    if existing_game_state.get('current_location'):
+                        state_updates['current_location'] = existing_game_state['current_location']
+                    get_location = getattr(self.db, 'get_location', None)
+                    if get_location:
+                        location = await get_location(existing_game_state['current_location_id'])
+                        if location:
+                            state_updates['current_location'] = location['name']
+                elif existing_game_state.get('current_location'):
+                    state_updates['current_location'] = existing_game_state['current_location']
+
+        await self.db.save_game_state(session_id=session_id, **state_updates)
         
         # DM the session creator
         try:
@@ -1404,7 +1477,7 @@ class GameMaster(commands.Cog):
                 await dm_channel.send(
                     f"🎮 **{session['name']}** is now live!\n\n"
                     f"The AI DM will keep things moving. Use `/dm` or `/narrate` to guide the story.\n"
-                    f"Use `/game pause {session_id}` if you need a break!"
+                    f"Use `/session pause {session_id}` if you need a break!"
                 )
         except discord.Forbidden:
             pass
@@ -1419,6 +1492,10 @@ class GameMaster(commands.Cog):
                 ephemeral=True
             )
             return
+
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'send_session_status'):
+            return await sessions_cog.send_session_status(interaction, session_id)
         
         if session_id:
             session = await self._get_guild_session(interaction.guild.id, session_id)
@@ -1476,6 +1553,10 @@ class GameMaster(commands.Cog):
     @app_commands.describe(session_id="The session ID to pause")
     async def pause_game(self, interaction: discord.Interaction, session_id: int):
         """Pause a game"""
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog:
+            return await sessions_cog.pause_session.callback(sessions_cog, interaction, session_id)
+
         session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
@@ -1489,17 +1570,26 @@ class GameMaster(commands.Cog):
             )
             return
         
-        await self.db.update_session(session_id, status='paused')
+        await self.db.update_session(
+            session_id,
+            status='paused',
+            last_active_channel_id=interaction.channel.id,
+            last_played=datetime.utcnow().isoformat(),
+        )
         
         await interaction.response.send_message(
             f"⏸️ **{session['name']}** has been paused.\n"
-            f"Use `/game begin {session_id}` to resume!"
+            f"Use `/session resume {session_id}` to resume!"
         )
     
     @game_group.command(name="end", description="End the current game (creator only)")
     @app_commands.describe(session_id="The session ID to end")
     async def end_game(self, interaction: discord.Interaction, session_id: int):
         """End a game"""
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'end_session_lifecycle'):
+            return await sessions_cog.end_session_lifecycle(interaction, session_id)
+
         session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
@@ -1539,19 +1629,46 @@ class GameMaster(commands.Cog):
     
     async def start_character_interview(self, user: discord.User, guild: discord.Guild):
         """Start the character creation interview via DM"""
+        await self.start_character_interview_for_session(user, guild)
+
+    async def start_character_interview_for_session(
+        self,
+        user: discord.User,
+        guild: discord.Guild,
+        session_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+    ):
+        """Start the character creation interview via DM, scoped to the best available session."""
         try:
             dm_channel = await user.create_dm()
         except discord.Forbidden:
             logger.warning(f"Cannot DM user {user.id}")
             return
+
+        session = None
+        if session_id:
+            session = await self.db.get_session(session_id)
+            if session and session.get('guild_id') != guild.id:
+                session = None
+        if not session and channel_id:
+            session = await self.db.get_session_by_channel(guild.id, channel_id, statuses=['active', 'paused', 'inactive'])
+        if not session:
+            session = await self.db.get_user_active_session(guild.id, user.id)
+        if not session:
+            session = await self.db.get_active_session(guild.id)
+
+        content = self._load_interview_content(session)
         
         # Initialize interview state
         self.active_interviews[user.id] = {
             'guild_id': guild.id,
+            'session_id': session.get('id') if session else None,
+            'content_pack_id': (session or {}).get('content_pack_id'),
             'dm_channel': dm_channel,
             'current_field': None,
             'responses': {},
-            'stage': 'greeting'
+            'stage': 'greeting',
+            'content': content,
         }
         
         # Send greeting
@@ -1571,6 +1688,32 @@ class GameMaster(commands.Cog):
         # Ask first question
         await asyncio.sleep(1)  # Brief pause for readability
         await self.ask_next_interview_question(user.id)
+
+    def _load_interview_content(self, session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Load the pack-aware static content needed for interview creation."""
+        try:
+            races = load_session_content_file(session, 'races.json')
+        except Exception:
+            races = {'races': {}}
+        try:
+            classes = load_session_content_file(session, 'classes.json')
+        except Exception:
+            classes = {'classes': {}}
+        try:
+            starter_kits = load_session_content_file(session, 'starter_kits.json')
+        except Exception:
+            starter_kits = {'starting_gold': 100, 'class_kits': {}, 'shop_categories': {}}
+        try:
+            spells = load_session_content_file(session, 'spells.json')
+        except Exception:
+            spells = {'spells': {}, 'class_spell_lists': {}}
+
+        return {
+            'races': races,
+            'classes': classes,
+            'starter_kits': starter_kits,
+            'spells': spells,
+        }
     
     async def ask_next_interview_question(self, user_id: int):
         """Ask the next question in the interview"""
@@ -1634,14 +1777,15 @@ class GameMaster(commands.Cog):
         dm_channel = interview['dm_channel']
         responses = interview['responses']
         char_class = responses.get('char_class', 'warrior').lower()
+        starter_kits = interview.get('content', {}).get('starter_kits', {})
         
         # Mark that we're now in equipment phase
         interview['current_field'] = 'equipment'
         interview['stage'] = 'equipment'
         
         # Get class kit info
-        kit = STARTER_KITS.get('class_kits', {}).get(char_class)
-        starting_gold = STARTER_KITS.get('starting_gold', 100)
+        kit = starter_kits.get('class_kits', {}).get(char_class)
+        starting_gold = starter_kits.get('starting_gold', 100)
         
         kit_preview = ""
         if kit:
@@ -1669,7 +1813,8 @@ class GameMaster(commands.Cog):
             return
         
         interview = self.active_interviews[user_id]
-        shopping = interview.get('shopping', {'gold': 100, 'cart': [], 'purchased': []})
+        starter_kits = interview.get('content', {}).get('starter_kits', {})
+        shopping = interview.get('shopping', {'gold': starter_kits.get('starting_gold', 100), 'cart': [], 'purchased': []})
         gold = shopping.get('gold', 100)
         
         embed = discord.Embed(
@@ -1684,7 +1829,7 @@ class GameMaster(commands.Cog):
         )
         
         # Add category previews
-        categories = STARTER_KITS.get('shop_categories', {})
+        categories = starter_kits.get('shop_categories', {})
         for cat_id, cat_data in list(categories.items())[:4]:
             items = cat_data.get('items', [])
             item_range = f"{min(i['price'] for i in items)}g - {max(i['price'] for i in items)}g" if items else "N/A"
@@ -1703,7 +1848,8 @@ class GameMaster(commands.Cog):
     
     async def show_category_items(self, interaction: discord.Interaction, user_id: int, guild_id: int, category: str):
         """Show items in a specific category"""
-        categories = STARTER_KITS.get('shop_categories', {})
+        interview = self.active_interviews.get(user_id, {})
+        categories = interview.get('content', {}).get('starter_kits', {}).get('shop_categories', {})
         cat_data = categories.get(category, {})
         items = cat_data.get('items', [])
         
@@ -1737,7 +1883,8 @@ class GameMaster(commands.Cog):
             return
         
         interview = self.active_interviews[user_id]
-        kit = STARTER_KITS.get('class_kits', {}).get(char_class.lower())
+        starter_kits = interview.get('content', {}).get('starter_kits', {})
+        kit = starter_kits.get('class_kits', {}).get(char_class.lower())
         
         if not kit:
             return
@@ -1803,6 +1950,7 @@ class GameMaster(commands.Cog):
         responses = interview['responses']
         dm_channel = interview['dm_channel']
         guild_id = interview['guild_id']
+        session_id = interview.get('session_id')
         equipment_data = interview.get('equipment', {})
         
         # Generate stats (use standard array with some randomness)
@@ -1823,6 +1971,7 @@ class GameMaster(commands.Cog):
         char_id = await self.db.create_character(
             user_id=user_id,
             guild_id=guild_id,
+            session_id=session_id,
             name=responses['name'],
             race=responses['race'],
             char_class=responses['char_class'],
@@ -1858,17 +2007,13 @@ class GameMaster(commands.Cog):
                 slot=item.get('slot')
             )
         
-        # Add starting gold
-        await self.db.add_item(
-            character_id=char_id,
-            item_id='gold',
-            item_name='Gold',
-            item_type='currency',
-            quantity=starting_gold
-        )
-        
+        await self.db.update_gold(char_id, starting_gold)
+
         # Initialize spells and abilities for spellcasting classes
-        await self._initialize_character_spells(char_id, char['char_class'], char['level'])
+        await self._initialize_character_spells(char_id, char['char_class'], char['level'], interview.get('content', {}))
+
+        if session_id:
+            await self.db.add_session_player(session_id, char_id)
         
         # Build inventory text - get from database since items are now stored
         equipped_items = await self.db.get_equipped_items(char_id)
@@ -1962,7 +2107,7 @@ class GameMaster(commands.Cog):
             value=(
                 "Return to the server and:\n"
                 "• Join a game with `/game join [id]`\n"
-                "• Start your own with `/game start`\n"
+                "• Start your own with `/session create`\n"
                 "• View your sheet with `/character sheet`\n"
                 "• Check inventory with `/inventory`"
             ),
@@ -1974,17 +2119,11 @@ class GameMaster(commands.Cog):
         # Clean up interview state
         del self.active_interviews[user_id]
     
-    async def _initialize_character_spells(self, char_id: int, char_class: str, level: int):
+    async def _initialize_character_spells(self, char_id: int, char_class: str, level: int, content: Optional[Dict[str, Any]] = None):
         """Initialize starting spells and spell slots for a character"""
-        import json
-        import os
-        
-        # Load spells data
-        spells_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'spells.json')
-        try:
-            with open(spells_file, 'r', encoding='utf-8') as f:
-                spells_data = json.load(f)
-        except FileNotFoundError:
+        content = content or {}
+        spells_data = content.get('spells', {})
+        if not spells_data:
             return
         
         char_class_lower = char_class.lower()
@@ -2027,12 +2166,8 @@ class GameMaster(commands.Cog):
                     source='class'
                 )
         
-        # Load class data for spell slots
-        classes_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'classes.json')
-        try:
-            with open(classes_file, 'r', encoding='utf-8') as f:
-                classes_data = json.load(f)
-        except FileNotFoundError:
+        classes_data = content.get('classes', {})
+        if not classes_data:
             return
         
         class_info = classes_data.get('classes', {}).get(char_class_lower, {})

@@ -686,6 +686,62 @@ Canonical v1 Discord lifecycle:
 - `last_played` update semantics are inconsistent.
 - Auto story logging can target the wrong active session in multi-session guilds.
 
+### Implementation Status
+
+- ✅ COMPLETE: `sessions.world_theme` implemented in `src/database.py`
+- ✅ COMPLETE: `sessions.content_pack_id` implemented in `src/database.py`
+- ✅ COMPLETE: `sessions.primary_channel_id` implemented in `src/database.py`
+- ✅ COMPLETE: `sessions.last_active_channel_id` implemented in `src/database.py`
+- ✅ COMPLETE: `game_state.current_location_id` implemented in `src/database.py`
+- ✅ COMPLETE: `quest_progress.current_node_id` implemented in `src/database.py`
+- ✅ COMPLETE: `quest_progress.session_id` and `last_advanced_at` implemented in `src/database.py`
+- ✅ COMPLETE: `story_items` helper/schema drift repaired in `src/database.py`
+- ✅ COMPLETE: `story_events` helper/schema drift repaired in `src/database.py`
+- ✅ COMPLETE: snapshot DB methods implemented in `src/database.py`
+- ✅ COMPLETE: broken API routes for session characters, NPC listing, event resolve, and location connect repaired in `web/api.py`
+- ✅ COMPLETE: quest stage consumers switched off direct `quest['current_stage']` reads in `src/chat_handler.py` and `src/cogs/dm_chat.py`
+- ✅ COMPLETE: additive `fantasy_core` content-pack scaffold created under `data/game_data/packs/fantasy/core`
+- ✅ COMPLETE: content-pack manifest and loader added in `data/game_data/manifests/content_packs.json` and `src/content_packs.py`
+- ✅ COMPLETE: pack-aware read paths added for core game data in `web/api.py` and `src/tools.py`
+- ✅ COMPLETE: canonical `/session resume` command added in `src/cogs/sessions.py`
+- ✅ COMPLETE: DB-backed session channel binding helpers added in `src/database.py`
+- ✅ COMPLETE: `DMChat` now prefers DB-backed session-channel binding over in-memory history
+- ✅ COMPLETE: campaign finalization now persists canonical `world_theme`, `content_pack_id`, starting `current_location_id`, normalized `locations.points_of_interest`, and `location_connections` in `web/api.py`
+- ✅ COMPLETE: browser chat bootstrap endpoint now returns session continuity state for messages, participants, combat, and location context in `web/api.py`
+- ✅ COMPLETE: browser chat frontend now hydrates from `/api/chat/bootstrap` in `web/frontend/src/main.ts`
+- ✅ COMPLETE: browser chat now supports minimal fresh-session onboarding by creating and attaching a session-bound browser character in `web/api.py` and `web/frontend/src/main.ts`
+- ✅ COMPLETE: `/resume` now resolves the target session and delegates through canonical `/session resume` lifecycle handling in `src/cogs/game_persistence.py`
+- ✅ COMPLETE: resumed `/game begin` now preserves saved `current_scene`, `current_location`, and `current_location_id` instead of overwriting them in `src/cogs/game_master.py`
+- ✅ COMPLETE: `/game begin` and `/game pause` now act as compatibility wrappers over canonical `/session start` and `/session pause` in `src/cogs/game_master.py`
+- ✅ COMPLETE: canonical `/session status` and `/session end` lifecycle helpers added in `src/cogs/sessions.py`
+- ✅ COMPLETE: `/game status` and `/game end` now act as compatibility wrappers over canonical session lifecycle handling in `src/cogs/game_master.py`
+- ✅ COMPLETE: legacy Discord session-management buttons now route through persisted pause/channel-binding paths so continuity survives in `src/cogs/game_master.py`
+- ✅ COMPLETE: API continuity regressions added for campaign finalize and browser chat bootstrap/validation in `tests/test_web_phase7.py`
+- ✅ COMPLETE: snapshot save/load/delete now restore session-scoped v1 runtime continuity beyond `game_state`, including participants, characters, locations, quests, story state, combat, and session history in `src/database.py`
+- ✅ COMPLETE: regression coverage added for snapshot create/load/delete and restore semantics in `tests/test_database.py` and `tests/test_web_phase7.py`
+- ✅ COMPLETE: quest completion and reward distribution now follow one canonical DB-backed path for Discord command and tool flows in `src/database.py` and `src/cogs/quests.py`
+- ✅ COMPLETE: connected-location travel now validates `location_connections` and updates canonical `current_location_id` for session and party runtime state in `src/tools.py`
+- ✅ COMPLETE: v1 combat participants now persist authoritative `armor_class` and `combat_stats` snapshots, and Discord/tool attack resolution reads those values instead of hardcoded AC defaults in `src/database.py`, `src/tools.py`, and `src/cogs/combat.py`
+- ✅ COMPLETE: persistence, story recap/logging, resume, and combat start flows now resolve the channel-bound session before guild-global fallbacks, preventing wrong-session drift in multi-session guilds across `src/cogs/game_persistence.py`, `src/cogs/combat.py`, and `src/cogs/dm_chat.py`
+- ✅ COMPLETE: the Discord GM character interview flow now resolves the session/content pack, loads pack-aware race/class/starter-kit/spell data, creates the character bound to that session, auto-joins the session, and provisions gold/spells through the canonical character model in `src/cogs/game_master.py`
+- ✅ COMPLETE: batched multiplayer DM chat now routes tool execution using the acting player's character/user context instead of defaulting all player-scoped tool calls to the first batched actor in `src/chat_handler.py`
+- ✅ COMPLETE: Discord spell runtime reads now resolve `spells.json` through the active session content pack for cast/learn/info/quickcast flows via shared runtime content helpers in `src/cogs/spells.py` and `src/utils.py`
+- ✅ COMPLETE: Discord skills runtime reads now resolve `skills.json` through the active session content pack for tree rendering, learn/use/info flows, and autocomplete in `src/cogs/skills.py`
+- ✅ COMPLETE: Discord inventory/item runtime reads now resolve `items.json` through the active session content pack for inventory views, item details, shop flows, quick-use, and combat consumable item selection in `src/cogs/inventory.py` and `src/cogs/combat.py`
+- ✅ COMPLETE: `/character create` now delegates to the canonical session-bound GM interview flow instead of maintaining a separate hardcoded race/class/stat allocation runtime in `src/cogs/characters.py`
+- ✅ COMPLETE: slash-command combat setup, party joining, and enemy spawn now delegate through the same canonical encounter/participant creation path used by tool-driven combat in `src/cogs/combat.py` and `src/tools.py`
+- ✅ COMPLETE: browser campaign creator review/edit actions in `web/frontend/src/main.ts` are real pre-finalize editing flows backed by editable client-side preview state and compatible finalize persistence in `web/api.py`
+- ✅ COMPLETE: web location admin now supports creating normalized location connections through the session detail UI using the canonical location connection API in `web/frontend/src/main.ts`, `web/frontend/index.html`, and `web/api.py`
+- ✅ COMPLETE: story item and story event web/API contracts now accept canonical editor payloads and normalize legacy status/discovery aliases across `web/frontend/src/main.ts`, `web/frontend/index.html`, `web/api.py`, and `src/database.py`
+- ✅ COMPLETE: canonical `GET/POST/PATCH/DELETE /api/location-connections` now exists in `web/api.py` with DB-backed CRUD and compatibility wrappers preserved for the legacy location-scoped connect routes
+- ✅ COMPLETE: NPC admin now uses canonical `location_id` assignment with synced display names and location occupant visibility across `src/database.py`, `web/api.py`, `web/frontend/src/main.ts`, and `web/frontend/index.html`
+- ✅ COMPLETE: web location admin now supports editing existing canonical location connections through the shared connection modal and canonical PATCH flow in `web/frontend/src/main.ts`, `web/frontend/index.html`, and `web/api.py`
+- ✅ COMPLETE: web/admin combat now supports template-backed monster spawning from content-pack `enemies.json` using shared canonical combatant normalization in `src/tools.py`, `web/api.py`, and `web/frontend/src/main.ts`
+- ✅ COMPLETE: Discord runtime pack-awareness is complete for GM interview creation, spell reads, skill reads, inventory/item flows, and core tool/web reads for the current v1 slice set
+- ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
+- ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics
+- ✅ COMPLETE: persistent Discord channel/session rebinding is implemented at the v1 lifecycle level via DB-backed bindings and legacy UI path delegation
+
 ## Missing DB Schema and Migrations
 
 ### New tables required

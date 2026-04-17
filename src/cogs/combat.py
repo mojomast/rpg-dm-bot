@@ -10,7 +10,8 @@ import random
 import logging
 
 from src.cogs.inventory import get_item_data
-from src.tools import DiceRoller
+from src.tools import DiceRoller, ToolExecutor
+from src.utils import load_runtime_content
 
 logger = logging.getLogger('rpg.combat')
 
@@ -20,7 +21,8 @@ async def resolve_attack(db, attacker_char: dict, target_combatant: dict) -> dic
     str_mod = (attacker_char['strength'] - 10) // 2
     attack_roll = random.randint(1, 20)
     total = attack_roll + str_mod
-    target_ac = 10 + sum(2 for effect in target_combatant.get('status_effects', []) if effect.get('effect') == 'defending')
+    target_ac = target_combatant.get('armor_class') or target_combatant.get('combat_stats', {}).get('ac') or 10
+    target_ac += sum(2 for effect in target_combatant.get('status_effects', []) if effect.get('effect') == 'defending')
 
     is_crit = attack_roll == 20
     is_fumble = attack_roll == 1
@@ -57,6 +59,16 @@ class CombatView(discord.ui.View):
         self.bot = bot
         self.encounter_id = encounter_id
         self.user_id = user_id
+
+    async def _get_item_content(self, interaction: discord.Interaction, character: dict) -> dict:
+        return await load_runtime_content(
+            self.bot.db,
+            'items.json',
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=character,
+        )
     
     @discord.ui.button(label="Attack", emoji="⚔️", style=discord.ButtonStyle.danger)
     async def attack_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -114,11 +126,12 @@ class CombatView(discord.ui.View):
             return
 
         inventory = await self.bot.db.get_inventory(char['id'])
+        item_content = await self._get_item_content(interaction, char)
         usable_items = []
         for item in inventory:
             if item['item_type'] != 'consumable':
                 continue
-            item_data = get_item_data(item['item_id'])
+            item_data = get_item_data(item_content, item['item_id'])
             effect = (item_data or {}).get('effect', {})
             if effect.get('type') in {'heal', 'restore_mana'}:
                 usable_items.append(item)
@@ -129,7 +142,7 @@ class CombatView(discord.ui.View):
 
         await interaction.response.send_message(
             "Choose an item to use:",
-            view=CombatItemView(self.bot, self.encounter_id, char, usable_items),
+            view=CombatItemView(self.bot, self.encounter_id, char, usable_items, item_content),
             ephemeral=True,
         )
     
@@ -223,11 +236,12 @@ class TargetSelectView(discord.ui.View):
 class CombatItemView(discord.ui.View):
     """View for selecting and using simple combat consumables."""
 
-    def __init__(self, bot, encounter_id: int, character: dict, items: list):
+    def __init__(self, bot, encounter_id: int, character: dict, items: list, item_content: dict):
         super().__init__(timeout=60)
         self.bot = bot
         self.encounter_id = encounter_id
         self.character = character
+        self.item_content = item_content
 
         options = [
             discord.SelectOption(
@@ -249,7 +263,7 @@ class CombatItemView(discord.ui.View):
             await interaction.response.send_message("Item not found.", ephemeral=True)
             return
 
-        item_data = get_item_data(item['item_id']) or {}
+        item_data = get_item_data(self.item_content, item['item_id']) or {}
         effect = item_data.get('effect', {})
         effect_type = effect.get('type')
         lines = [f"🧪 **{self.character['name']}** uses **{item['item_name']}**!"]
@@ -292,6 +306,7 @@ class Combat(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.tool_executor = ToolExecutor(bot.db)
     
     @property
     def db(self):
@@ -317,22 +332,31 @@ class Combat(commands.Cog):
         
         # Create combat
         guild_id = interaction.guild.id
-        session = await self.db.get_active_session(guild_id)
+        session = await self.db.get_session_by_channel(
+            guild_id,
+            interaction.channel.id,
+            statuses=['active', 'paused', 'inactive'],
+        )
+        if not session:
+            session = await self.db.get_user_active_session(guild_id, interaction.user.id)
+        if not session:
+            session = await self.db.get_active_session(guild_id)
         
         encounter_id = await self.db.create_combat(
             guild_id=guild_id,
             channel_id=interaction.channel.id,
             session_id=session['id'] if session else None
         )
-        
-        # Add the initiator's character
-        char = await self.db.get_active_character(interaction.user.id, guild_id)
-        if char:
-            dex_mod = (char['dexterity'] - 10) // 2
-            await self.db.add_combatant(
-                encounter_id, 'character', char['id'], char['name'],
-                char['hp'], char['max_hp'], dex_mod, is_player=True
-            )
+
+        if session:
+            participants = await self.db.get_session_participants(session['id'])
+            for participant in participants:
+                if participant.get('character_id'):
+                    await self.tool_executor.add_character_combatant(encounter_id, participant['character_id'])
+        else:
+            char = await self.db.get_active_character(interaction.user.id, guild_id)
+            if char:
+                await self.tool_executor.add_character_combatant(encounter_id, char['id'])
         
         embed = discord.Embed(
             title="⚔️ Combat Started!",
@@ -376,11 +400,7 @@ class Combat(commands.Cog):
             )
             return
         
-        dex_mod = (char['dexterity'] - 10) // 2
-        await self.db.add_combatant(
-            combat['id'], 'character', char['id'], char['name'],
-            char['hp'], char['max_hp'], dex_mod, is_player=True
-        )
+        await self.tool_executor.add_character_combatant(combat['id'], char['id'])
         
         await interaction.response.send_message(
             f"⚔️ **{char['name']}** joins the battle!"
@@ -412,11 +432,13 @@ class Combat(commands.Cog):
         for i in range(count):
             name = f"{enemy_name}" if count == 1 else f"{enemy_name} {i+1}"
             init_bonus = random.randint(-1, 3)  # Random initiative bonus
-            
-            combatant_id = await self.db.add_combatant(
-                combat['id'], 'enemy', 0, name, hp, hp, init_bonus, is_player=False
+            await self.tool_executor.add_enemy_combatant(
+                combat['id'],
+                name,
+                hp,
+                initiative_bonus=init_bonus,
             )
-            spawned.append(f"👹 {name} (HP: {hp})")
+            spawned.append(f"👹 {name} (HP: {hp}, AC: 10)")
         
         embed = discord.Embed(
             title="👹 Enemies Appear!",

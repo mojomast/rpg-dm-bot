@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 import json
 import logging
 
+from src.content_loader import DEFAULT_CONTENT_PACK_ID, get_pack_data
 from src.tool_schemas import TOOLS_SCHEMA, get_tool_names
 from src.mechanics_tracker import get_tracker, MechanicType
 
@@ -97,6 +98,12 @@ class ToolExecutor:
     def __init__(self, db):
         self.db = db
         self.dice = DiceRoller()
+
+    async def _load_theme_content(self, context: Dict[str, Any], filename: str) -> Dict[str, Any]:
+        """Load static content from the active session's content pack, defaulting to fantasy_core."""
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        return get_pack_data(content_pack_id, filename)
 
     async def _get_context_character(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Prefer an explicit character in context before active-character lookup."""
@@ -227,6 +234,18 @@ class ToolExecutor:
                 return await self._update_npc_relationship(tool_args)
             elif tool_name == "get_npcs":
                 return await self._get_npcs(context, tool_args)
+            elif tool_name == "get_factions":
+                return await self._get_factions(context, tool_args)
+            elif tool_name == "create_faction":
+                return await self._create_faction(context, tool_args)
+            elif tool_name == "update_faction_reputation":
+                return await self._update_faction_reputation(tool_args)
+            elif tool_name == "get_character_faction_reputation":
+                return await self._get_character_faction_reputation(tool_args)
+            elif tool_name == "spawn_monster":
+                return await self._spawn_monster(context, tool_args)
+            elif tool_name == "get_stat_block":
+                return await self._get_stat_block(context, tool_args)
             
             # NPC Party Member tools
             elif tool_name == "add_npc_to_party":
@@ -273,6 +292,8 @@ class ToolExecutor:
                 return await self._get_location(tool_args)
             elif tool_name == "get_nearby_locations":
                 return await self._get_nearby_locations(tool_args)
+            elif tool_name == "get_adjacent_locations":
+                return await self._get_adjacent_locations(context)
             elif tool_name == "update_location":
                 return await self._update_location(tool_args)
             elif tool_name == "move_party_to_location":
@@ -297,6 +318,16 @@ class ToolExecutor:
                 return await self._resolve_event(tool_args)
             elif tool_name == "get_active_events":
                 return await self._get_active_events(context)
+            elif tool_name == "get_storyline_state":
+                return await self._get_storyline_state(context, tool_args)
+            elif tool_name == "advance_storyline_node":
+                return await self._advance_storyline_node(context, tool_args)
+            elif tool_name == "create_plot_point":
+                return await self._create_plot_point(context, tool_args)
+            elif tool_name == "record_clue_discovery":
+                return await self._record_clue_discovery(tool_args)
+            elif tool_name == "reveal_plot_point":
+                return await self._reveal_plot_point(tool_args)
             
             # Enhanced NPC tools  
             elif tool_name == "generate_npc":
@@ -506,6 +537,171 @@ Backstory: {char['backstory'] or 'Unknown'}"""
     # =========================================================================
     # COMBAT TOOL IMPLEMENTATIONS
     # =========================================================================
+
+    async def add_character_combatant(self, encounter_id: int, character_id: int) -> Optional[int]:
+        """Insert a character into combat using the canonical DB snapshot path."""
+        char = await self.db.get_character(character_id)
+        if not char:
+            return None
+
+        dex_mod = (char['dexterity'] - 10) // 2
+        return await self.db.add_combatant(
+            encounter_id,
+            'character',
+            char['id'],
+            char['name'],
+            char['hp'],
+            char['max_hp'],
+            dex_mod,
+            is_player=True,
+        )
+
+    async def add_enemy_combatant(
+        self,
+        encounter_id: int,
+        name: str,
+        hp: int,
+        initiative_bonus: int = 0,
+        stats: Optional[Dict[str, Any]] = None,
+        armor_class: Optional[int] = None,
+        template_id: Optional[str] = None,
+        encounter_tier: str = 'standard',
+        is_boss: bool = False,
+    ) -> int:
+        """Insert an enemy into combat using canonical stat normalization."""
+        stats = dict(stats or {})
+        if armor_class is None:
+            armor_class = stats.get('ac') or stats.get('armor_class')
+        if armor_class is None:
+            armor_class = 10
+
+        stats.setdefault('ac', armor_class)
+        stats.setdefault('armor_class', armor_class)
+        stats.setdefault('max_hp', max(hp or 0, 0))
+
+        return await self.db.add_combatant(
+            encounter_id,
+            'enemy',
+            0,
+            name,
+            hp,
+            hp,
+            initiative_bonus,
+            is_player=False,
+            armor_class=armor_class,
+            combat_stats=stats,
+            template_id=template_id,
+            encounter_tier=encounter_tier,
+            is_boss=is_boss,
+        )
+
+    async def load_enemy_template(self, template_id: str, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Load a monster template, preferring relational storage and falling back to pack JSON."""
+        context = context or {}
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or context.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        session_id = (session or {}).get('id') or context.get('session_id')
+
+        template = await self.db.get_monster_template(
+            template_id=template_id,
+            content_pack_id=content_pack_id,
+            session_id=session_id,
+        )
+        if template:
+            return template
+
+        enemies_payload = await self._load_theme_content(context, 'enemies.json')
+        enemies = enemies_payload.get('enemies', {}) if isinstance(enemies_payload, dict) else {}
+        raw_template = enemies.get(template_id)
+        if not raw_template:
+            return None
+        return self.db._enemy_template_to_monster_template(template_id, raw_template, content_pack_id, session_id=session_id)
+
+    async def get_stat_block(
+        self,
+        template_id: str = None,
+        template_name: str = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve a monster stat block by ID or name."""
+        context = context or {}
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or context.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        session_id = (session or {}).get('id') or context.get('session_id')
+
+        template = await self.db.get_monster_template(
+            template_id=template_id,
+            template_name=template_name,
+            content_pack_id=content_pack_id,
+            session_id=session_id,
+        )
+        if template:
+            return template
+        if template_id:
+            return await self.load_enemy_template(template_id, context)
+        return None
+
+    async def list_enemy_templates(self, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """List available monster templates from relational storage, with pack fallback."""
+        context = context or {}
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or context.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        session_id = (session or {}).get('id') or context.get('session_id')
+
+        templates = await self.db.get_monster_templates(content_pack_id=content_pack_id, session_id=session_id)
+        if templates:
+            return templates
+
+        enemies_payload = await self._load_theme_content(context, 'enemies.json')
+        enemies = enemies_payload.get('enemies', {}) if isinstance(enemies_payload, dict) else {}
+        fallback = []
+        for template_id, template in enemies.items():
+            fallback.append(self.db._enemy_template_to_monster_template(template_id, template, content_pack_id, session_id=session_id))
+        return sorted(fallback, key=lambda item: item.get('name') or item.get('id') or '')
+
+    async def spawn_enemy_template_combatants(
+        self,
+        encounter_id: int,
+        template_id: str,
+        count: int = 1,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> List[int]:
+        """Spawn one or more combatants from a content-pack enemy template."""
+        template = await self.load_enemy_template(template_id, context)
+        if not template:
+            raise ValueError('Enemy template not found')
+
+        count = max(1, int(count or 1))
+        hp = int(template.get('max_hp') or template.get('hp') or 1)
+        armor_class = int(template.get('armor_class') or template.get('ac') or 10)
+        stats = dict(template.get('stats') or {})
+        stats.setdefault('template_id', template.get('id') or template_id)
+        stats.setdefault('description', template.get('description'))
+        stats.setdefault('actions', template.get('actions', template.get('attacks', [])))
+        stats.setdefault('challenge_rating', template.get('challenge_rating'))
+        stats.setdefault('loot_table', template.get('loot_table', []))
+        stats.setdefault('traits', template.get('traits', []))
+        stats.setdefault('encounter_tier', template.get('encounter_tier', 'standard'))
+        stats.setdefault('is_boss', bool(template.get('is_boss')))
+
+        created_ids = []
+        base_name = template.get('name') or template_id.replace('_', ' ').title()
+        for index in range(count):
+            name = base_name if count == 1 else f"{base_name} {index + 1}"
+            combatant_id = await self.add_enemy_combatant(
+                encounter_id,
+                name,
+                hp,
+                initiative_bonus=0,
+                stats=stats,
+                armor_class=armor_class,
+                template_id=template.get('id') or template_id,
+                encounter_tier=template.get('encounter_tier', 'standard'),
+                is_boss=bool(template.get('is_boss')),
+            )
+            created_ids.append(combatant_id)
+
+        return created_ids
     
     async def _start_combat(self, context: Dict, args: Dict) -> str:
         """Start a combat encounter"""
@@ -529,13 +725,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             participants = await self.db.get_session_participants(session['id'])
             for p in participants:
                 if p.get('character_id'):
-                    char = await self.db.get_character(p['character_id'])
-                    if char:
-                        dex_mod = (char['dexterity'] - 10) // 2
-                        await self.db.add_combatant(
-                            encounter_id, 'character', char['id'], char['name'],
-                            char['hp'], char['max_hp'], dex_mod, is_player=True
-                        )
+                    await self.add_character_combatant(encounter_id, p['character_id'])
         
         return f"⚔️ Combat started! (Encounter #{encounter_id})\n{description}\nUse add_enemy to add enemies, then roll_initiative to begin."
     
@@ -545,17 +735,51 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         name = args.get('name')
         hp = args.get('hp')
         init_bonus = args.get('initiative_bonus', 0)
-        stats = args.get('stats', {})
+        stats = dict(args.get('stats') or {})
+        armor_class = args.get('armor_class')
+        template_id = args.get('template_id')
+        template_name = args.get('template_name')
         
         combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat. Start combat first."
+
+        template = None
+        if template_id or template_name:
+            template = await self.get_stat_block(template_id=template_id, template_name=template_name, context=context)
+            if template:
+                template_id = template.get('id')
+                name = name or template.get('name')
+                hp = hp if hp is not None else template.get('max_hp') or 1
+                armor_class = armor_class if armor_class is not None else template.get('armor_class') or 10
+                merged_stats = dict(template.get('stats') or {})
+                merged_stats.setdefault('actions', template.get('actions', []))
+                merged_stats.setdefault('traits', template.get('traits', []))
+                merged_stats.setdefault('challenge_rating', template.get('challenge_rating'))
+                merged_stats.setdefault('loot_table', template.get('loot_table', []))
+                merged_stats.update(stats)
+                stats = merged_stats
+            else:
+                logger.warning("Monster template not found for add_enemy", extra={"template_id": template_id, "template_name": template_name})
+
+        if not name or hp is None:
+            return "Error: name and hp are required unless a known template is provided."
         
-        combatant_id = await self.db.add_combatant(
-            combat['id'], 'enemy', 0, name, hp, hp, init_bonus, is_player=False
+        combatant_id = await self.add_enemy_combatant(
+            combat['id'],
+            name,
+            hp,
+            initiative_bonus=init_bonus,
+            stats=stats,
+            armor_class=armor_class,
+            template_id=template_id,
+            encounter_tier=(template or {}).get('encounter_tier', stats.get('encounter_tier', 'standard')),
+            is_boss=bool((template or {}).get('is_boss', stats.get('is_boss', False))),
         )
+
+        normalized_ac = armor_class or stats.get('ac') or stats.get('armor_class') or 10
         
-        return f"Added {name} to combat (HP: {hp}, ID: {combatant_id})"
+        return f"Added {name} to combat (HP: {hp}, AC: {normalized_ac}, ID: {combatant_id})"
     
     async def _roll_initiative(self, context: Dict) -> str:
         """Roll initiative for all combatants"""
@@ -653,7 +877,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             status = " ".join([f"[{e['effect']}]" for e in c['status_effects']])
             dead = "💀" if c['current_hp'] <= 0 else ""
             marker = "🎮" if c['is_player'] else "👹"
-            lines.append(f"{dead}{marker} {c['name']}: {hp_bar} {c['current_hp']}/{c['max_hp']} {status}")
+            lines.append(f"{dead}{marker} {c['name']}: AC {c.get('armor_class', 10)} | {hp_bar} {c['current_hp']}/{c['max_hp']} {status}")
         
         return "\n".join(lines)
     
@@ -757,7 +981,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         
         # Roll to hit
         attack_roll = self.dice.roll(f"1d20+{attack_bonus}")
-        target_ac = 10  # Default AC, could be stored in stats
+        target_ac = target.get('armor_class') or target.get('combat_stats', {}).get('ac') or 10
         
         hit = attack_roll['total'] >= target_ac or attack_roll['critical']
         
@@ -1055,6 +1279,82 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             lines.append(f"[{npc['id']}] {merchant}**{npc['name']}** ({npc['npc_type']}) - {npc['location'] or 'Unknown location'}")
         
         return "\n".join(lines)
+
+    async def _get_factions(self, context: Dict, args: Dict) -> str:
+        """Get factions for the current session/guild."""
+        session = await self._get_session_for_context(context)
+        factions = await self.db.get_factions(
+            session_id=(session or {}).get('id'),
+            guild_id=context.get('guild_id'),
+        )
+        if not factions:
+            return "No factions found."
+        return "\n".join(["**Factions:**"] + [f"[{f['id']}] **{f['name']}** ({f.get('faction_type') or 'neutral'})" for f in factions])
+
+    async def _create_faction(self, context: Dict, args: Dict) -> str:
+        """Create a faction in the current session."""
+        session = await self._get_session_for_context(context)
+        faction_id = await self.db.create_faction(
+            guild_id=context.get('guild_id'),
+            session_id=(session or {}).get('id'),
+            name=args.get('name'),
+            description=args.get('description'),
+            faction_type=args.get('faction_type', 'neutral'),
+            alignment=args.get('alignment'),
+            influence=args.get('influence', 0),
+            goals=args.get('goals'),
+            resources=args.get('resources'),
+            allies=args.get('allies'),
+            enemies=args.get('enemies'),
+            created_by=context.get('user_id'),
+        )
+        return f"Created faction **{args.get('name')}** (ID: {faction_id})"
+
+    async def _update_faction_reputation(self, args: Dict) -> str:
+        """Update character faction reputation."""
+        reputation = await self.db.update_character_faction_reputation(
+            character_id=args.get('character_id'),
+            faction_id=args.get('faction_id'),
+            reputation_change=args.get('reputation_change', 0),
+            notes=args.get('notes'),
+        )
+        return f"Faction reputation updated to {reputation}."
+
+    async def _get_character_faction_reputation(self, args: Dict) -> str:
+        """Get character faction reputation."""
+        records = await self.db.get_character_faction_reputation(
+            character_id=args.get('character_id'),
+            faction_id=args.get('faction_id'),
+        )
+        if isinstance(records, dict):
+            return f"Faction reputation: {records.get('reputation', 0)}"
+        if not records:
+            return "No faction reputation found."
+        return "\n".join(["**Faction Reputation:**"] + [f"- {row['faction_name']}: {row['reputation']}" for row in records])
+
+    async def _spawn_monster(self, context: Dict, args: Dict) -> str:
+        """Spawn one or more template-backed monsters into the active combat."""
+        combat = await self.db.get_active_combat(channel_id=context.get('channel_id'))
+        if not combat:
+            return "Error: No active combat."
+        template_id = args.get('template_id')
+        count = int(args.get('count') or 1)
+        try:
+            created_ids = await self.spawn_enemy_template_combatants(combat['id'], template_id, count=count, context=context)
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return f"Spawned {len(created_ids)} monster(s) from template {template_id}: {', '.join(str(item) for item in created_ids)}"
+
+    async def _get_stat_block(self, context: Dict, args: Dict) -> str:
+        """Get a JSON stat block for a monster template."""
+        template = await self.get_stat_block(
+            template_id=args.get('template_id'),
+            template_name=args.get('template_name'),
+            context=context,
+        )
+        if not template:
+            return "Error: Monster template not found"
+        return json.dumps(template, indent=2, sort_keys=True)
     
     # =========================================================================
     # SESSION/STORY TOOL IMPLEMENTATIONS
@@ -1116,7 +1416,59 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             lines.append(f"{type_emoji} {preview}")
         
         return "\n".join(lines)
-    
+
+    async def _get_storyline_state(self, context: Dict, args: Dict) -> str:
+        """Get storyline graph state for the current session."""
+        session = await self._get_session_for_context(context)
+        session_id = args.get('session_id') or (session or {}).get('id')
+        if not session_id:
+            return "Error: No active session."
+        state = await self.db.get_storyline_state(session_id)
+        return json.dumps(state, indent=2, sort_keys=True)
+
+    async def _advance_storyline_node(self, context: Dict, args: Dict) -> str:
+        """Advance a storyline to a specific node."""
+        session = await self._get_session_for_context(context)
+        result = await self.db.advance_storyline_node(
+            storyline_id=args.get('storyline_id'),
+            to_node_id=args.get('node_id'),
+            character_id=args.get('character_id'),
+            session_id=(session or {}).get('id'),
+            branch_choice=args.get('branch_choice'),
+            variables=args.get('variables'),
+        )
+        if 'error' in result:
+            return f"Error: {result['error']}"
+        node = result['node']
+        return f"Storyline advanced to node {node['id']}: {node['title']}"
+
+    async def _create_plot_point(self, context: Dict, args: Dict) -> str:
+        """Create a plot point in the current session."""
+        session = await self._get_session_for_context(context)
+        plot_point_id = await self.db.create_plot_point(
+            title=args.get('title'),
+            description=args.get('description'),
+            session_id=(session or {}).get('id'),
+            storyline_id=args.get('storyline_id'),
+            reveal_threshold=args.get('reveal_threshold', 1),
+            metadata_json=args.get('metadata_json'),
+        )
+        return f"Created plot point **{args.get('title')}** (ID: {plot_point_id})"
+
+    async def _record_clue_discovery(self, args: Dict) -> str:
+        """Mark a clue as discovered and auto-reveal its plot point if threshold is met."""
+        result = await self.db.discover_clue(args.get('clue_id'), discovered_by=args.get('character_id'))
+        if 'error' in result:
+            return f"Error: {result['error']}"
+        if result.get('plot_point_revealed'):
+            return f"Clue discovered. Plot point revealed: {result['plot_point']['title']}"
+        return f"Clue discovered ({result['discovered_count']}/{result['threshold']})."
+
+    async def _reveal_plot_point(self, args: Dict) -> str:
+        """Force-reveal a plot point."""
+        await self.db.reveal_plot_point(args.get('plot_point_id'))
+        return f"Plot point {args.get('plot_point_id')} revealed."
+     
     # =========================================================================
     # MEMORY TOOL IMPLEMENTATIONS
     # =========================================================================
@@ -1195,9 +1547,6 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _cast_spell(self, context: Dict, args: Dict) -> str:
         """Cast a spell for a character"""
-        import json
-        import os
-        
         char_id = args.get('character_id')
         spell_id = args.get('spell_id')
         slot_level = args.get('slot_level')
@@ -1207,10 +1556,8 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             return "Error: character_id and spell_id required"
         
         # Load spell data
-        spells_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'game_data', 'spells.json')
         try:
-            with open(spells_file, 'r', encoding='utf-8') as f:
-                spells_data = json.load(f)
+            spells_data = await self._load_theme_content(context, 'spells.json')
         except FileNotFoundError:
             return "Error: Spell data not found"
         
@@ -1398,9 +1745,6 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _use_ability(self, args: Dict) -> str:
         """Use a class ability"""
-        import json
-        import os
-        
         char_id = args.get('character_id')
         ability_id = args.get('ability_id')
         target = args.get('target')
@@ -1425,10 +1769,15 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
         char_name = char['name'] if char else "Character"
         
         # Load ability data for effects
-        classes_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'game_data', 'classes.json')
         try:
-            with open(classes_file, 'r', encoding='utf-8') as f:
-                classes_data = json.load(f)
+            character = await self.db.get_character(char_id)
+            session = await self._get_session_for_context({
+                'session_id': character.get('session_id') if character else None,
+                'guild_id': character.get('guild_id') if character else None,
+                'user_id': character.get('user_id') if character else None,
+            })
+            content_pack_id = (session or {}).get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+            classes_data = get_pack_data(content_pack_id, 'classes.json')
         except FileNotFoundError:
             classes_data = {}
         
@@ -1556,6 +1905,12 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             session_id=session['id'] if session else None,
             description=args.get('description'),
             location_type=args.get('location_type', 'generic'),
+            slug=args.get('slug'),
+            hierarchy_kind=args.get('hierarchy_kind', 'location'),
+            tags=args.get('tags', []),
+            dm_notes=args.get('dm_notes'),
+            is_hidden=args.get('is_hidden', False),
+            discoverability=args.get('discoverability', 'visible'),
             points_of_interest=args.get('points_of_interest', []),
             current_weather=args.get('current_weather'),
             danger_level=args.get('danger_level', 0),
@@ -1594,7 +1949,21 @@ Points of Interest: {pois}"""
             lines.append(f"{danger}[{loc['id']}] **{loc['name']}** ({loc['location_type']})")
         
         return "\n".join(lines)
-    
+
+    async def _get_adjacent_locations(self, context: Dict) -> str:
+        """Get adjacent locations from the session's current location."""
+        session = await self._get_session_for_context(context)
+        if not session:
+            return json.dumps({"success": False, "reason": "no_active_session"})
+
+        locations = await self.db.get_adjacent_locations(session['id'])
+        return json.dumps({
+            "success": True,
+            "session_id": session['id'],
+            "current_location_id": (await self.db.get_game_state(session['id']) or {}).get('current_location_id'),
+            "locations": locations,
+        })
+
     async def _update_location(self, args: Dict) -> str:
         """Update location"""
         location_id = args.get('location_id')
@@ -1613,20 +1982,81 @@ Points of Interest: {pois}"""
         
         session = await self._get_session_for_context(context)
         if not session:
-            return "Error: No active session"
+            return json.dumps({"success": False, "reason": "no_active_session"})
         
         loc = await self.db.get_location(location_id)
         if not loc:
-            return "Error: Location not found"
+            return json.dumps({"success": False, "reason": "location_not_found", "location_id": location_id})
+
+        current_state = await self.db.get_game_state(session['id']) or {}
+        current_location_id = current_state.get('current_location_id')
+        connection = None
+        if current_location_id and current_location_id != location_id:
+            connection = await self.db.get_location_connection_between(current_location_id, location_id)
+            if not connection:
+                current_location = await self.db.get_location(current_location_id)
+                current_name = current_location.get('name', 'Unknown') if current_location else 'Unknown'
+                return json.dumps({
+                    "success": False,
+                    "reason": "not_adjacent",
+                    "from_location_id": current_location_id,
+                    "from_location_name": current_name,
+                    "to_location_id": location_id,
+                    "to_location_name": loc['name'],
+                })
+            if (connection.get('lock_state') or 'open') != 'open':
+                return json.dumps({
+                    "success": False,
+                    "reason": "locked",
+                    "from_location_id": current_location_id,
+                    "to_location_id": location_id,
+                    "to_location_name": loc['name'],
+                    "lock_state": connection.get('lock_state'),
+                })
+
+        participants = await self.db.get_session_participants(session['id'])
+        moved_characters = []
+        for participant in participants:
+            character_id = participant.get('character_id')
+            if not character_id:
+                continue
+            result = await self.db.move_character_to_location(character_id, location_id)
+            if not result.get('error'):
+                moved_characters.append(character_id)
         
         # Update game state with new location
-        await self.db.save_game_state(session['id'], current_location=loc['name'])
+        await self.db.save_game_state(
+            session['id'],
+            current_location=loc['name'],
+            current_location_id=location_id,
+            active_content_pack_id=session.get('content_pack_id'),
+        )
         
         # Log the travel
-        await self.db.add_story_log_entry(session['id'], 'travel', 
-            f"Party traveled to {loc['name']}. {travel_desc}")
-        
-        return f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}"
+        await self.db.add_story_log_entry(
+            session['id'],
+            'travel',
+            f"Party traveled to {loc['name']}. {travel_desc}".strip(),
+            moved_characters,
+        )
+
+        nearby_locations = await self.db.get_nearby_locations(location_id)
+        exits = ""
+        if nearby_locations:
+            exit_lines = [f"• {nearby.get('name', 'Unknown')} ({nearby.get('direction', 'path')})" for nearby in nearby_locations[:5]]
+            exits = "\n\n🚪 Exits:\n" + "\n".join(exit_lines)
+
+        return json.dumps({
+            "success": True,
+            "reason": "moved",
+            "session_id": session['id'],
+            "location_id": location_id,
+            "location_name": loc['name'],
+            "travel_description": travel_desc,
+            "moved_character_ids": moved_characters,
+            "connection_id": connection.get('id') if connection else None,
+            "narration": f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}{exits}",
+        })
     
     # =========================================================================
     # STORY ITEM TOOL IMPLEMENTATIONS
@@ -2213,11 +2643,14 @@ Points of Interest: {pois}"""
         party = result.get('characters_full', [])
         game_state = result.get('game_state') or {}
         location = None
-        location_name = game_state.get('current_location')
-        if location_name:
+        current_location_id = game_state.get('current_location_id')
+        if current_location_id:
+            location = await self.db.get_location(current_location_id)
+        location_name = location.get('name') if location else game_state.get('current_location')
+        if not location and location_name:
             locations = await self.db.get_locations(session_id=session_id)
             location = next((loc for loc in locations if loc.get('name') == location_name), None)
-        npcs = await self.db.get_npcs_by_location(session.get('guild_id'), location_name) if location_name else []
+        npcs = await self.db.get_npcs_at_location(location['id']) if location else []
         active_quest = await self.db.get_quest(session.get('current_quest_id')) if session.get('current_quest_id') else None
         events = result.get('story_events', [])
         recent_story = result.get('story_log', [])
@@ -2478,9 +2911,9 @@ Points of Interest: {pois}"""
         
         # Load NPC templates
         try:
-            with open('data/game_data/npc_templates.json', 'r') as f:
-                templates = json.load(f)
-        except:
+            templates_data = await self._load_theme_content(context, 'npc_templates.json')
+            templates = templates_data.get('templates', templates_data)
+        except Exception:
             templates = {}
         
         created_npcs = []
@@ -2804,9 +3237,9 @@ Points of Interest: {pois}"""
         party_size = party_size or 4
         
         try:
-            with open('data/game_data/enemies.json', 'r') as f:
-                enemies_data = json.load(f)
-        except:
+            enemies_payload = await self._load_theme_content(context, 'enemies.json')
+            enemies_data = enemies_payload.get('enemies', enemies_payload)
+        except Exception:
             enemies_data = {}
         
         lines = [f"⚔️ **Generated Encounter**"]
@@ -2962,9 +3395,8 @@ Points of Interest: {pois}"""
         party_level = party_level or 1
         
         try:
-            with open('data/game_data/items.json', 'r') as f:
-                items_data = json.load(f)
-        except:
+            items_data = await self._load_theme_content(context, 'items.json')
+        except Exception:
             items_data = {}
         
         gold_ranges = {

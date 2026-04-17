@@ -2,7 +2,7 @@
 
 **Date:** April 17, 2026  
 **Project:** RPG Dungeon Master Discord Bot  
-**Status:** Recent hardening complete, but campaign architecture still partial
+**Status:** Recent hardening complete, with location-connection editing and template-backed monster spawning landed; larger campaign architecture still partial
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
@@ -19,8 +19,8 @@ What is not yet coherent end to end:
 - There is not yet one canonical campaign lifecycle across Discord and browser.
 - `/game`, `/session`, and `/resume` still split lifecycle responsibility.
 - Character creation, combat, and quest progression still have duplicate or drifting implementations.
-- Theme/content-pack support is still mostly generation flavor, not first-class runtime content selection.
-- Storyline graph, faction runtime, map/discovery systems, and full snapshot continuity are not implemented end to end.
+- Theme/content-pack foundation is in place (`world_theme`, `content_pack_id`, `fantasy_core`, loader, pack-aware web/tool reads), but Discord runtime parity is still incomplete.
+- Faction runtime and storyline graph foundations are now landed, but quest lifecycle wiring, map/discovery systems, and full snapshot continuity are still not implemented end to end.
 
 Reference spec for the next implementation wave:
 
@@ -30,17 +30,238 @@ Reference spec for the next implementation wave:
 
 The highest-priority architectural gaps are:
 
-1. broken schema/runtime/API drift in story items, story events, quest stage reads, and location state
+1. remaining larger canonicalization and roadmap work beyond the landed Discord runtime parity slices
 2. duplicate lifecycle flows across `/game`, `/session`, and `/resume`
-3. missing persistent channel binding and incomplete pause/resume continuity
-4. fantasy-only flat game data with no first-class content-pack runtime
-5. incomplete browser/dashboard contracts for snapshots, campaign editing, and onboarding
+3. remaining character creation/combat canonicalization beyond the landed slices
+4. incomplete browser/dashboard contracts for campaign editing/admin parity
+5. larger roadmap features: map/discovery systems and deeper campaign canonicalization
 
 The implementation-ready source of truth for these gaps is `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`.
 
 ---
 
 ## Latest Changes (April 17, 2026 - Session 13)
+
+### Additional Runtime Hardening (same day follow-up)
+
+This follow-up pass continued the worldbuilding/campaign gap-spec implementation beyond browser continuity and into Discord runtime coherence.
+
+#### Changes Made
+
+**`src/cogs/game_persistence.py`:**
+- Added context-aware session resolution so story log, recap, summary, save, resume, quest views, and auto-logging prefer the channel-bound session over guild-global fallbacks
+
+**`src/cogs/combat.py`:**
+- Updated `/combat start` to bind encounters to the channel/session context instead of the first active guild session
+
+**`src/cogs/dm_chat.py`:**
+- Persisted channel binding on final active-session fallback so later runtime flows converge on the same session
+
+**`src/cogs/game_master.py`:**
+- Made the Discord GM character interview session-bound and content-pack aware
+- Loaded pack-aware races/classes/starter kits/spells for interview creation
+- Created interview characters with `session_id`, auto-joined them to the session, and provisioned real gold/spells through canonical character tables
+
+**`src/chat_handler.py`:**
+- Added actor-scoped tool routing for batched multiplayer DM turns so player-specific tool calls no longer default to the first actor in the batch
+
+**`src/utils.py`:**
+- Added shared runtime session/content resolution helpers for live Discord command surfaces
+
+**`src/cogs/spells.py`:**
+- Made cast/learn/info/quickcast/autocomplete resolve `spells.json` through the active session content pack instead of legacy flat files
+
+**`src/cogs/skills.py`:**
+- Made skill tree rendering, learn/use/info flows, and skill autocomplete resolve `skills.json` through the active session content pack instead of legacy flat files
+
+**`src/cogs/inventory.py`:**
+- Made inventory views, item details, shop flows, slash-command use, and quick-use resolve `items.json` through the active session content pack instead of legacy flat files
+
+**`src/cogs/combat.py`:**
+- Updated combat consumable item selection to use the same session-scoped pack item metadata as inventory
+
+**`src/cogs/characters.py`:**
+- Replaced the standalone `/character create` race/class/stat allocation flow with a thin compatibility wrapper that delegates to the canonical session-bound GM interview flow
+
+**`src/tools.py` + `src/cogs/combat.py`:**
+- Unified slash-command combat setup/join/spawn with the canonical combat encounter and participant creation helpers used by tool-driven combat
+
+**`web/frontend/src/main.ts` + `web/api.py`:**
+- Replaced campaign creator review/edit placeholder actions with real pre-finalize editing flows and finalize-time persistence hardening for edited/client-added preview data
+
+**Tests:**
+- Added regression coverage for channel-bound session selection, GM interview session/pack binding, batched actor-context tool routing, runtime session helper preference, and pack-aware spell runtime lookups
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/python -m compileall src/utils.py src/chat_handler.py src/cogs/game_persistence.py src/cogs/combat.py src/cogs/dm_chat.py src/cogs/game_master.py src/cogs/spells.py
+.venv/bin/pytest tests/test_lifecycle_resume.py tests/test_dm_chat.py tests/test_combat_cog.py -q
+```
+
+Results:
+- compile checks passed
+- focused lifecycle/DM chat/combat regressions passed
+
+#### Remaining Limitation
+
+- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; `/character create` also now routes into the same canonical character creation path. Combat setup/spawn drift, campaign creator review/edit placeholders, web location connection admin, and story item/event editor contract drift are closed. Remaining work is now the larger roadmap/admin systems and deeper canonicalization gaps.
+
+### Additional Admin/Contract Cleanup (same day follow-up)
+
+This pass finished the next two in-progress web/admin slices after combat and preview-edit unification.
+
+#### Changes Made
+
+**`web/frontend/src/main.ts` + `web/frontend/index.html`:**
+- Completed the location connection modal flow so location detail panels can create canonical connections through the existing API
+- Expanded story item cards/editor submission to include canonical `item_type`, `discovery_conditions`, and `dm_notes`
+- Expanded story event cards/editor submission to include canonical `event_type` and `dm_notes`
+- Updated story event UI to treat `triggered` as the canonical active/resolvable status and display resolution outcomes
+
+**`src/database.py`:**
+- Hardened story event normalization so legacy editor statuses like `active` and `completed` map into canonical `triggered` and `resolved`
+- Updated active-event reads to return canonical triggered events instead of depending on legacy `active`
+
+**Tests:**
+- Added focused regression coverage for location connection API metadata round-tripping
+- Added story item alias/canonical update tests
+- Added story event canonical status/update/resolve tests
+- Added DB-level normalization tests for story item/event alias handling and active-event reads
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_database.py tests/test_web_phase7.py -q
+npm run build
+```
+
+Results:
+- 73 focused tests passed
+- frontend TypeScript build passed
+
+### Canonical Location Connections and NPC Location Admin (same day follow-up)
+
+This pass completed the next requested slice pair: the canonical location-connections API resource, then the best bounded NPC/location foundation slice from the faction/NPC/monster area.
+
+#### Changes Made
+
+**`src/database.py`:**
+- Added canonical location-connection CRUD helpers for create/get/list/update/delete
+- Hardened location connection validation for self-links, cross-session links, and duplicate edges
+- Added migration guards for older `location_connections` columns used by canonical CRUD
+- Updated NPC create/update flows so `location_id` is canonical and `location` text is synced from the referenced location
+
+**`web/api.py`:**
+- Added canonical `GET/POST/PATCH/DELETE /api/location-connections`
+- Kept legacy location-scoped connect routes as compatibility wrappers over the canonical DB helper
+- Expanded NPC create/update API contracts to accept `location_id`
+
+**`web/frontend/src/main.ts` + `web/frontend/index.html`:**
+- Switched location connection creation to the canonical resource endpoint
+- Added location connection deletion from the location detail view
+- Switched NPC create/edit forms from free-text location input to location-backed selects
+- Added occupant visibility in location details by showing NPCs assigned to that location
+
+**Tests:**
+- Added DB tests for canonical location-connection CRUD
+- Added DB tests for NPC `location_id` to `location` text synchronization
+- Added API tests for canonical location-connections CRUD and NPC location-based create/update flows
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_database.py tests/test_web_phase7.py -q
+npm run build
+```
+
+Results:
+- 78 focused tests passed
+- frontend TypeScript build passed
+
+### Location Connection Editing and Monster Template Spawn (same day follow-up)
+
+This pass completed the next requested pair after canonical location-connections: editable connection management in the web UI, then a bounded monster foundation slice via template-backed combat spawning.
+
+#### Changes Made
+
+**`web/frontend/src/main.ts` + `web/frontend/index.html`:**
+- Reused the location connection modal for both create and edit flows against the canonical connection resource
+- Added explicit edit controls for existing location connections in the location detail view
+- Added a compact combat monster-spawn modal to the session combat viewer
+- Added monster template preview and spawn actions for active combat
+
+**`src/tools.py`:**
+- Added shared enemy-template loading/listing helpers backed by the active content pack
+- Added canonical template-to-combatant spawn normalization so web/admin monster spawns reuse the same enemy combatant path
+
+**`web/api.py`:**
+- Added `GET /api/templates/enemies`
+- Added `POST /api/combat/{combat_id}/spawn-template`
+- Kept combat template spawning bound to session/content-pack context
+
+**Tests:**
+- Added API regression coverage for location connection retarget/edit behavior
+- Added tool/API regression coverage for template-backed monster listing and combat spawning
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_web_phase7.py tests/test_tools.py -q
+npm run build
+```
+
+Results:
+- 67 focused tests passed
+- frontend TypeScript build passed
+
+### Phase 10 - Faction, Monster Template, and Storyline Foundations
+
+This session implemented the next bounded worldbuilding/campaign slices from `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`: Phase 5 (NPC/monster/faction foundation) and Phase 6 (storyline/quest graph foundation).
+
+#### Changes Made
+
+**`src/database.py`:**
+- Added faction tables (`factions`, `faction_memberships`, `character_faction_reputation`) and monster/storyline tables (`monster_templates`, `boss_phases`, `storylines`, `storyline_nodes`, `storyline_edges`, `storyline_progress`, `plot_points`, `plot_clues`)
+- Added migration-safe columns for NPC faction metadata, combat participant template/resource state, quest storyline linkage, and quest progress branch/failure tracking
+- Added CRUD/helpers for factions, faction reputation, monster templates, boss phases, storylines, plot points, and clue discovery/reveal flows
+- Seeded relational monster templates from `data/game_data/packs/fantasy/core/enemies.json`
+
+**`src/tools.py` + `src/tool_schemas.py`:**
+- Added faction tools (`get_factions`, `create_faction`, `update_faction_reputation`, `get_character_faction_reputation`)
+- Added monster tools (`spawn_monster`, `get_stat_block`) with template-backed combat spawning while preserving ad hoc fallback
+- Added storyline/clue tools (`get_storyline_state`, `advance_storyline_node`, `create_plot_point`, `record_clue_discovery`, `reveal_plot_point`)
+
+**`web/api.py`:**
+- Added faction endpoints, monster template endpoints, storyline endpoints, and plot/clue discovery endpoints
+- Fixed `GET /api/templates/npcs` to use pack-aware loading
+- Kept `GET /api/templates/enemies` working with DB-backed templates plus content-pack fallback
+
+**Tests:**
+- Added focused database and tool coverage for faction CRUD/reputation, template-backed monster spawning, storyline advancement, and clue auto-reveal thresholds
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_database.py tests/test_tools.py tests/test_web_phase7.py -q
+```
+
+Results:
+- 142 tests passed in the final focused run
+
+#### Remaining Limitation
+
+- `src/cogs/quests.py` was already dirty in the worktree, so the quest lifecycle wiring that would consume the new storyline foundation was intentionally deferred.
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion
 
@@ -692,8 +913,7 @@ The old browser-chat implementation plan is stale; browser chat already exists. 
 ### Planned-Not-Implemented Yet
 
 - full content-pack runtime switching beyond `fantasy_core`
-- relational faction runtime and faction reputation systems
-- storyline graph execution and clue/reveal systems
+- deeper faction/storyline runtime wiring into quest lifecycle and Discord/browser flows
 - maps, lore, and discovery runtime/editor systems
 - complete snapshot/save-point system behind the current UI
 
@@ -703,9 +923,10 @@ The old browser-chat implementation plan is stale; browser chat already exists. 
 
 ```bash
 # Clone and setup
-cd c:\Users\kyle\projects\rpg-dm-bot
+git clone https://github.com/mojomast/rpg-dm-bot.git
+cd rpg-dm-bot
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -714,8 +935,11 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with:
 # - DISCORD_TOKEN=your_bot_token
-# - REQUESTY_API_KEY=your_api_key
-# - REQUESTY_BASE_URL=https://router.requesty.ai/v1
+# - OPENROUTER_API_KEY=your_api_key
+#   or REQUESTY_API_KEY=your_api_key
+# - LLM_MODEL=your_model
+# - LLM_BASE_URL=https://openrouter.ai/api/v1
+#   or https://router.requesty.ai/v1
 
 # Run tests
 pytest tests/ -v

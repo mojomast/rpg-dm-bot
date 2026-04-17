@@ -3,6 +3,8 @@ Unit tests for ToolExecutor class in src/tools.py
 Tests tool execution for all game mechanics.
 """
 
+import json
+
 import pytest
 
 
@@ -273,6 +275,29 @@ class TestCombatTools:
         assert "Combat started" in result
         assert "Goblins emerge" in result
 
+    async def test_start_combat_adds_session_participants_with_snapshot_ac(self, tool_executor, mock_context):
+        """Tool combat start should add all bound session participants with canonical AC snapshots."""
+        db = tool_executor.db
+        session_id = await db.create_session(67890, "Test Campaign", 12345)
+        stats_one = {"strength": 16, "dexterity": 14, "constitution": 15, "intelligence": 10, "wisdom": 12, "charisma": 8}
+        stats_two = {"strength": 12, "dexterity": 10, "constitution": 14, "intelligence": 10, "wisdom": 15, "charisma": 11}
+        char_one = await db.create_character(12345, 67890, "Aria", "human", "warrior", stats_one, session_id=session_id)
+        char_two = await db.create_character(54321, 67890, "Borin", "dwarf", "cleric", stats_two, session_id=session_id)
+        await db.add_item(char_one, "armor_chain", "Chain Mail", "armor", is_equipped=True, slot="body", properties={"ac_base": 16, "max_dex_bonus": 0})
+        await db.add_item(char_one, "shield_wooden", "Wooden Shield", "armor", is_equipped=True, slot="off_hand", properties={"ac_bonus": 2})
+        await db.add_session_player(session_id, char_one)
+        await db.add_session_player(session_id, char_two)
+        mock_context['session_id'] = session_id
+
+        result = await tool_executor.execute_tool("start_combat", {}, mock_context)
+
+        assert "Combat started" in result
+        combat = await db.get_active_combat(channel_id=11111)
+        combatants = await db.get_combatants(combat['id'])
+        assert {combatant['name'] for combatant in combatants} == {"Aria", "Borin"}
+        aria = next(c for c in combatants if c['name'] == "Aria")
+        assert aria['armor_class'] == 18
+
     async def test_start_combat_already_active(self, tool_executor, mock_context):
         """Test starting combat when one is already active"""
         # Start first combat
@@ -294,13 +319,22 @@ class TestCombatTools:
             {
                 "name": sample_enemy['name'],
                 "hp": sample_enemy['hp'],
-                "initiative_bonus": 2
+                "initiative_bonus": 2,
+                "stats": {"ac": sample_enemy['ac']}
             },
             mock_context
         )
         
         assert "Added" in result
         assert sample_enemy['name'] in result
+        assert "AC: 15" in result
+
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        combatants = await tool_executor.db.get_combatants(combat['id'])
+        enemy = next(c for c in combatants if c['participant_type'] == 'enemy')
+        assert enemy['armor_class'] == 15
+        assert enemy['combat_stats']['ac'] == 15
+        assert enemy['combat_stats']['armor_class'] == 15
 
     async def test_add_enemy_no_combat(self, tool_executor, mock_context, sample_enemy):
         """Test adding enemy when no combat active"""
@@ -312,6 +346,42 @@ class TestCombatTools:
         
         assert "Error" in result
         assert "No active combat" in result
+
+    async def test_spawn_monster_uses_template_stat_block_and_sets_armor_class(self, tool_executor, mock_context):
+        """Template-backed monster spawn should load DB template fields into the combat participant snapshot."""
+        session_id = await tool_executor.db.create_session(67890, "Monster Test", 12345)
+        await tool_executor.db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+        mock_context['session_id'] = session_id
+        await tool_executor.execute_tool("start_combat", {}, mock_context)
+        await tool_executor.db.create_monster_template(
+            template_id="ashen_wolf",
+            content_pack_id="fantasy_core",
+            session_id=session_id,
+            name="Ashen Wolf",
+            max_hp=18,
+            armor_class=14,
+            challenge_rating=2,
+            stats={"strength": 14, "dexterity": 16},
+            actions=[{"name": "Bite", "damage": "1d8+3"}],
+            traits=[{"name": "Pack Hunter", "text": "+2 near allies"}],
+        )
+
+        result = await tool_executor.execute_tool(
+            "spawn_monster",
+            {"template_id": "ashen_wolf", "count": 1},
+            mock_context,
+        )
+
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        combatants = await tool_executor.db.get_combatants(combat['id'])
+        enemy = next(c for c in combatants if c['participant_type'] == 'enemy')
+
+        assert "Spawned 1 monster" in result
+        assert enemy['name'] == 'Ashen Wolf'
+        assert enemy['armor_class'] == 14
+        assert enemy['template_id'] == 'ashen_wolf'
+        assert enemy['combat_stats']['actions'][0]['name'] == 'Bite'
+        assert enemy['combat_stats']['traits'][0]['name'] == 'Pack Hunter'
 
     async def test_roll_initiative(self, tool_executor, mock_context):
         """Test rolling initiative"""
@@ -483,6 +553,61 @@ class TestCombatTools:
         result = await tool_executor.execute_tool("end_combat", {}, mock_context)
         
         assert "No active combat" in result
+
+    async def test_roll_attack_uses_target_armor_class(self, tool_executor, mock_context):
+        """Tool attack resolution should use persisted target AC instead of a default."""
+        await tool_executor.execute_tool("start_combat", {}, mock_context)
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        attacker_id = await tool_executor.db.add_combatant(
+            combat['id'], "character", 12345, "Test Hero", 20, 20, 2, is_player=True
+        )
+        await tool_executor.execute_tool(
+            "add_enemy",
+            {"name": "Goblin", "hp": 7, "stats": {"ac": 15}},
+            mock_context,
+        )
+
+        combatants = await tool_executor.db.get_combatants(combat['id'])
+        target = next(c for c in combatants if not c['is_player'])
+
+        original_roll = tool_executor.dice.roll
+        rolls = iter([
+            {"total": 14, "rolls": [10], "kept": [10], "modifier": 4, "critical": False, "fumble": False},
+        ])
+        tool_executor.dice.roll = lambda *args, **kwargs: next(rolls)
+        try:
+            result = await tool_executor.execute_tool(
+                "roll_attack",
+                {
+                    "attacker_id": attacker_id,
+                    "target_id": target['id'],
+                    "attack_bonus": 4,
+                    "damage_dice": "1d8+3",
+                },
+                mock_context,
+            )
+        finally:
+            tool_executor.dice.roll = original_roll
+
+        assert "vs AC 15" in result
+        assert "MISS" in result
+
+    async def test_create_faction_tool(self, tool_executor, mock_context):
+        """Faction tool should create and persist a faction."""
+        session_id = await tool_executor.db.create_session(67890, "Faction Tool Test", 12345)
+        await tool_executor.db.update_session(session_id, status='active')
+        mock_context['session_id'] = session_id
+
+        result = await tool_executor.execute_tool(
+            "create_faction",
+            {"name": "Lantern Accord", "description": "City watch allies"},
+            mock_context,
+        )
+        factions = await tool_executor.db.get_factions(session_id=session_id)
+
+        assert "Created faction" in result
+        assert len(factions) == 1
+        assert factions[0]['name'] == 'Lantern Accord'
 
 
 # =============================================================================
@@ -792,3 +917,172 @@ class TestHardeningRegressions:
 
         assert "VICTORY" in result
         assert "Error" not in result
+
+
+class TestTravelTools:
+    async def test_move_party_to_connected_location_updates_session_and_party(self, tool_executor, db, sample_character_stats, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Travel Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+            description="Town square",
+            location_type="town",
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Whisperwood",
+            description="Ancient forest",
+            location_type="wilderness",
+        )
+        await db.connect_locations(town_id, forest_id, direction='north', travel_time=2)
+        char_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Aria",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        await db.join_session(session_id, 12345, character_id=char_id)
+        await db.save_game_state(session_id, current_location='Oakheart', current_location_id=town_id)
+        await db.update_character(char_id, current_location_id=town_id)
+
+        result = await tool_executor.execute_tool(
+            "move_party_to_location",
+            {"location_id": forest_id, "travel_description": "The road bends into the pines."},
+            {**mock_context, "session_id": session_id},
+        )
+
+        assert "Whisperwood" in result
+        state = await db.get_game_state(session_id)
+        assert state['current_location_id'] == forest_id
+        char = await db.get_character(char_id)
+        assert char['current_location_id'] == forest_id
+
+    async def test_move_party_to_unconnected_location_is_rejected(self, tool_executor, db, sample_character_stats, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Travel Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+            description="Town square",
+            location_type="town",
+        )
+        mountain_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Stormpeak",
+            description="Frozen cliffs",
+            location_type="landmark",
+        )
+        char_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Aria",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        await db.join_session(session_id, 12345, character_id=char_id)
+        await db.save_game_state(session_id, current_location='Oakheart', current_location_id=town_id)
+        await db.update_character(char_id, current_location_id=town_id)
+
+        result = await tool_executor.execute_tool(
+            "move_party_to_location",
+            {"location_id": mountain_id},
+            {**mock_context, "session_id": session_id},
+        )
+
+        payload = json.loads(result)
+        assert payload["success"] is False
+        assert payload["reason"] == "not_adjacent"
+        state = await db.get_game_state(session_id)
+        assert state['current_location_id'] == town_id
+
+    async def test_get_adjacent_locations_returns_session_neighbors(self, tool_executor, db, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Travel Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Whisperwood",
+        )
+        await db.create_location_connection(from_location_id=town_id, to_location_id=forest_id, direction='north')
+        await db.save_game_state(session_id, current_location='Oakheart', current_location_id=town_id)
+
+        result = await tool_executor.execute_tool(
+            "get_adjacent_locations",
+            {},
+            {**mock_context, "session_id": session_id},
+        )
+
+        payload = json.loads(result)
+        assert payload["success"] is True
+        assert payload["locations"][0]["id"] == forest_id
+
+
+class TestMonsterTemplateTools:
+    async def test_spawn_enemy_template_combatants_uses_pack_stats(self, tool_executor, db, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name='Template Combat',
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+        encounter_id = await db.create_combat(guild_id=67890, channel_id=999, session_id=session_id)
+
+        created_ids = await tool_executor.spawn_enemy_template_combatants(
+            encounter_id,
+            'goblin',
+            count=2,
+            context={'session_id': session_id, 'guild_id': 67890},
+        )
+
+        assert len(created_ids) == 2
+        participants = await db.get_combatants(encounter_id)
+        enemies = [participant for participant in participants if participant['participant_type'] == 'enemy']
+        assert len(enemies) == 2
+        assert enemies[0]['armor_class'] == 12
+        assert enemies[0]['combat_stats']['template_id'] == 'goblin'
+
+    async def test_list_enemy_templates_returns_sorted_templates(self, tool_executor, db):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name='Template Listing',
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+
+        templates = await tool_executor.list_enemy_templates({'session_id': session_id, 'guild_id': 67890})
+
+        assert templates
+        assert any(template['id'] == 'goblin' for template in templates)

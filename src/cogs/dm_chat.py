@@ -165,7 +165,9 @@ class InfoButton(ui.Button):
             return
         
         stages = await cog.db.get_quest_stages(quest['id'])
-        current_stage = stages[quest['current_stage']] if quest['current_stage'] < len(stages) else None
+        character = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
+        stage_info = await cog.db.get_quest_current_stage(quest['id'], character['id'] if character else None)
+        current_stage = stage_info.get('stage')
         
         embed = discord.Embed(
             title=f"📜 {quest['title']}",
@@ -179,7 +181,7 @@ class InfoButton(ui.Button):
         )
         embed.add_field(
             name="📊 Progress",
-            value=f"Stage {quest['current_stage'] + 1}/{len(stages)}",
+            value=f"Stage {stage_info['index'] + 1}/{stage_info['total']}",
             inline=True
         )
         
@@ -211,16 +213,15 @@ class InfoButton(ui.Button):
             return
         
         game_state = await cog.db.get_game_state(session['id'])
-        if not game_state or not game_state.get('current_location_id'):
+        location = None
+        if game_state and game_state.get('current_location_id'):
+            location = await cog.db.get_location(game_state['current_location_id'])
+
+        if not location:
             loc_name = game_state.get('current_location', 'Unknown') if game_state else 'Unknown'
             await interaction.response.send_message(f"🗺️ Current location: **{loc_name}**", ephemeral=True)
             return
-        
-        location = await cog.db.get_location(game_state['current_location_id'])
-        if not location:
-            await interaction.response.send_message("🗺️ Location not found!", ephemeral=True)
-            return
-        
+
         embed = discord.Embed(
             title=f"🗺️ {location['name']}",
             description=location.get('description', '*No description*'),
@@ -420,6 +421,23 @@ class DMChat(commands.Cog):
             self.histories[key] = {'session_id': session_id, 'messages': []}
         
         return self.histories[key]['messages']
+
+    async def hydrate_history_from_db(self, guild_id: int, channel_id: int, session_id: int, user_id: int) -> list:
+        """Populate in-memory history from persisted session history when cache is cold."""
+        history = self.get_history(guild_id, channel_id, session_id)
+        if history or not session_id or not user_id:
+            return history
+
+        persisted = await self.db.get_recent_messages_by_session(user_id, session_id, limit=self.max_history)
+        if persisted:
+            self.histories[self._history_key(guild_id, channel_id)] = {
+                'session_id': session_id,
+                'messages': [
+                    {'role': message['role'], 'content': message['content']}
+                    for message in persisted
+                ],
+            }
+        return self.get_history(guild_id, channel_id, session_id)
     
     def add_to_history(self, guild_id: int, channel_id: int, message: dict, session_id: int = None):
         """Add a message to channel history"""
@@ -452,6 +470,11 @@ class DMChat(commands.Cog):
             guild_id = matching_keys[0][0] if matching_keys else 0
         self.histories[self._history_key(guild_id, channel_id)] = {'session_id': session_id, 'messages': []}
         logger.info(f"Started new session {session_id} for channel {channel_id}, cleared history")
+
+    async def bind_session_channel(self, guild_id: int, channel_id: int, session_id: int, set_primary: bool = False):
+        """Persist and cache the active channel binding for a session."""
+        await self.db.bind_session_channel(session_id, channel_id, set_primary=set_primary)
+        self.histories[self._history_key(guild_id, channel_id)] = {'session_id': session_id, 'messages': []}
 
     async def resolve_session(self, guild_id: int, user_id: int = None, channel_id: int = None):
         """Resolve the active session for this channel/user context."""
@@ -498,14 +521,21 @@ class DMChat(commands.Cog):
         2. User's active session from database
         3. First active session for the guild (fallback)
         """
-        # FIRST: Check if this channel has a session set (most reliable for new games)
+        # FIRST: Check persisted DB-backed channel binding
+        if channel_id:
+            channel_session = await self.db.get_session_by_channel(guild_id, channel_id, statuses=['active', 'paused', 'inactive'])
+            if channel_session:
+                logger.debug(f"Using DB channel-bound session {channel_session['id']} for channel {channel_id}")
+                return channel_session['id']
+
+        # SECOND: Check in-memory channel history cache
         if channel_id:
             channel_session = self.get_channel_session_id(guild_id, channel_id)
             if channel_session:
                 logger.debug(f"Using channel's stored session {channel_session} for channel {channel_id}")
                 return channel_session
         
-        # SECOND: Try to get the session the user is actually in
+        # THIRD: Try to get the session the user is actually in
         if user_id:
             user_session = await self.db.get_user_active_session(guild_id, user_id)
             if user_session:
@@ -516,6 +546,8 @@ class DMChat(commands.Cog):
         sessions = await self.db.get_sessions(guild_id, status='active')
         if sessions:
             logger.debug(f"Falling back to first active session {sessions[0]['id']} for guild {guild_id}")
+            if channel_id:
+                await self.db.bind_session_channel(sessions[0]['id'], channel_id)
             return sessions[0]['id']
         
         logger.warning(f"No active session found for guild {guild_id}")
@@ -538,9 +570,11 @@ class DMChat(commands.Cog):
         channel_id = channel.id
         first_user_id = messages[0]['user_id']
         session_id = await self.get_active_session_id(guild_id, first_user_id, channel_id)
+        if session_id:
+            await self.db.bind_session_channel(session_id, channel_id)
         self.last_activity[channel_id] = datetime.utcnow()
 
-        history = self.get_history(guild_id, channel_id, session_id)
+        history = await self.hydrate_history_from_db(guild_id, channel_id, session_id, first_user_id)
         result = await self.chat_handler.process_batched_messages(
             guild_id=guild_id,
             channel_id=channel_id,
@@ -548,6 +582,25 @@ class DMChat(commands.Cog):
             history=history,
             session_id=session_id,
         )
+
+        if result.get('session_id'):
+            for message in messages:
+                await self.db.save_message(
+                    message['user_id'],
+                    guild_id,
+                    channel_id,
+                    'user',
+                    message['content'],
+                    session_id=result['session_id'],
+                )
+            await self.db.save_message(
+                first_user_id,
+                guild_id,
+                channel_id,
+                'assistant',
+                result['assistant_message']['content'],
+                session_id=result['session_id'],
+            )
 
         self.add_to_history(guild_id, channel_id, result['user_message'], result['session_id'])
         self.add_to_history(guild_id, channel_id, result['assistant_message'], result['session_id'])
@@ -569,9 +622,11 @@ class DMChat(commands.Cog):
         guild_id = guild.id
         user_id = author.id
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
+        if session_id:
+            await self.db.bind_session_channel(session_id, channel_id)
         self.last_activity[channel_id] = datetime.utcnow()
 
-        history = self.get_history(guild_id, channel_id, session_id)
+        history = await self.hydrate_history_from_db(guild_id, channel_id, session_id, user_id)
         char = await self.db.get_active_character(user_id, guild_id)
         actor = ChatActor(
             user_id=user_id,
@@ -587,6 +642,17 @@ class DMChat(commands.Cog):
             history=history,
             session_id=session_id,
         )
+
+        if result.get('session_id'):
+            await self.db.save_message(user_id, guild_id, channel_id, 'user', user_message, session_id=result['session_id'])
+            await self.db.save_message(
+                user_id,
+                guild_id,
+                channel_id,
+                'assistant',
+                result['assistant_message']['content'],
+                session_id=result['session_id'],
+            )
 
         self.add_to_history(guild_id, channel_id, result['user_message'], result['session_id'])
         self.add_to_history(guild_id, channel_id, result['assistant_message'], result['session_id'])

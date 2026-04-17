@@ -1,0 +1,13 @@
+{
+  "default_theme": "fantasy",
+  "themes": {
+    "fantasy": {
+      "id": "fantasy",
+      "label": "Fantasy",
+      "genre_family": "fantasy",
+      "default_content_pack_id": "fantasy_core",
+      "default_rules_profile_id": "d20_fantasy",
+      "prompt_style": "fantasy"
+    }
+  }
+}

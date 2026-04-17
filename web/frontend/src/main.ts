@@ -10,6 +10,7 @@
 const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:8000/api'
     : '/api';
+const DEFAULT_GUILD_ID = '1444142672548986994';
 
 interface ApiResponse<T> {
     [key: string]: T;
@@ -33,6 +34,21 @@ interface ChatApiResponse {
     updated_state: any;
     options: string[];
     session_id: number;
+}
+
+interface ChatBootstrapResponse {
+    session: any;
+    participants: any[];
+    available_characters: any[];
+    game_state: any;
+    recent_messages: ChatHistoryMessage[];
+    active_combat: any | null;
+    location: any | null;
+    connections: any[];
+}
+
+interface BrowserCharacterResponse {
+    character: any;
 }
 
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -66,6 +82,22 @@ const api = {
     createSession: (data: any) => apiCall<{ id: number }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
     updateSession: (id: number, data: any) => apiCall<any>(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     createChatIdentity: () => apiCall<{ user_id: string }>('/chat/identity', { method: 'POST' }),
+    getChatBootstrap: (sessionId: number, webIdentity: string, characterId?: number) => {
+        const params = new URLSearchParams({ session_id: sessionId.toString() });
+        if (characterId) params.append('character_id', characterId.toString());
+        return apiCall<ChatBootstrapResponse>(`/chat/bootstrap?${params.toString()}`, {
+            headers: {
+                'X-Web-Identity': webIdentity,
+            },
+        });
+    },
+    createBrowserCharacter: (data: any, webIdentity: string) => apiCall<BrowserCharacterResponse>('/characters/browser', {
+        method: 'POST',
+        headers: {
+            'X-Web-Identity': webIdentity,
+        },
+        body: JSON.stringify(data),
+    }),
     chatWithDM: (data: any, webIdentity: string) => apiCall<ChatApiResponse>('/chat', {
         method: 'POST',
         headers: {
@@ -148,11 +180,24 @@ const api = {
 
     // Location Connections
     getLocationConnections: (locationId: number) => apiCall<{ connections: any[] }>(`/locations/${locationId}/connections`),
-    connectLocations: (fromId: number, toId: number, direction?: string, bidirectional?: boolean) => {
+    listLocationConnections: (locationId?: number, sessionId?: number) => {
+        const params = new URLSearchParams();
+        if (locationId !== undefined) params.append('location_id', locationId.toString());
+        if (sessionId !== undefined) params.append('session_id', sessionId.toString());
+        const query = params.toString();
+        return apiCall<{ connections: any[] }>(`/location-connections${query ? `?${query}` : ''}`);
+    },
+    createLocationConnection: (data: any) => apiCall<{ id: number }>('/location-connections', { method: 'POST', body: JSON.stringify(data) }),
+    updateLocationConnection: (id: number, data: any) => apiCall<any>(`/location-connections/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteLocationConnection: (id: number) => apiCall<any>(`/location-connections/${id}`, { method: 'DELETE' }),
+    getMonsterTemplates: (contentPackId?: string) => apiCall<any>(`/templates/enemies${contentPackId ? `?content_pack_id=${encodeURIComponent(contentPackId)}` : ''}`),
+    spawnMonsterTemplate: (combatId: number, data: any) => apiCall<any>(`/combat/${combatId}/spawn-template`, { method: 'POST', body: JSON.stringify(data) }),
+    connectLocations: (fromId: number, toId: number, direction?: string, travelTime?: number, hidden?: boolean) => {
         let url = `/locations/${fromId}/connect/${toId}`;
         const params = new URLSearchParams();
         if (direction) params.append('direction', direction);
-        if (bidirectional !== undefined) params.append('bidirectional', bidirectional.toString());
+        if (travelTime !== undefined) params.append('travel_time', travelTime.toString());
+        if (hidden !== undefined) params.append('hidden', hidden.toString());
         if (params.toString()) url += '?' + params.toString();
         return apiCall<any>(url, { method: 'POST' });
     },
@@ -255,7 +300,6 @@ async function loadPageData(pageId: string): Promise<void> {
                 await loadEvents();
                 break;
             case 'saves':
-                await loadSavesPage();
                 break;
             case 'characters':
                 await loadCharacters();
@@ -349,7 +393,6 @@ async function loadSessions(): Promise<void> {
                 </div>
                 <div class="entity-actions">
                     <button class="btn btn-small btn-secondary" onclick="viewSession(${session.id})">View</button>
-                    <button class="btn btn-small btn-primary" onclick="createSavepoint(${session.id})">💾 Save</button>
                 </div>
             </div>
         `).join('');
@@ -548,6 +591,9 @@ async function loadNPCs(): Promise<void> {
     container.innerHTML = '<div class="loading-spinner">Loading NPCs...</div>';
 
     try {
+        if (!npcLocationOptionsLoaded) {
+            await populateNPCLocationOptions();
+        }
         const data = await api.getNPCs();
         const npcs = data.npcs || [];
 
@@ -581,12 +627,14 @@ async function loadNPCs(): Promise<void> {
 async function createNPC(event: Event): Promise<void> {
     event.preventDefault();
 
+    const locationIdValue = (document.getElementById('npc-location') as HTMLSelectElement).value;
+
     const data = {
         name: (document.getElementById('npc-name') as HTMLInputElement).value,
         description: (document.getElementById('npc-desc') as HTMLTextAreaElement).value,
         personality: (document.getElementById('npc-personality') as HTMLTextAreaElement).value,
         npc_type: (document.getElementById('npc-type') as HTMLSelectElement).value,
-        location: (document.getElementById('npc-location') as HTMLInputElement).value,
+        location_id: locationIdValue ? parseInt(locationIdValue) : undefined,
         is_merchant: (document.getElementById('npc-merchant') as HTMLInputElement).checked,
         guild_id: 1,
         created_by: 1
@@ -597,6 +645,7 @@ async function createNPC(event: Event): Promise<void> {
         showToast('NPC created!', 'success');
         closeModal('npc-modal');
         (document.getElementById('npc-form') as HTMLFormElement).reset();
+        await populateNPCLocationOptions();
         loadNPCs();
     } catch (error) {
         showToast('Failed to create NPC', 'error');
@@ -632,7 +681,15 @@ async function loadItems(): Promise<void> {
             return;
         }
 
-        container.innerHTML = items.map((item: any) => `
+        container.innerHTML = items.map((item: any) => {
+            const meta: string[] = [
+                `📦 ${escapeHtml(item.item_type || 'misc')}`,
+            ];
+            if (item.discovery_conditions) {
+                meta.push(`🔎 ${escapeHtml(item.discovery_conditions)}`);
+            }
+
+            return `
             <div class="entity-card" data-id="${item.id}">
                 <div class="entity-header">
                     <span class="entity-title">${escapeHtml(item.name)}</span>
@@ -640,7 +697,7 @@ async function loadItems(): Promise<void> {
                 </div>
                 <p class="entity-desc">${escapeHtml(item.description || 'No description')}</p>
                 <div class="entity-meta">
-                    <span>📦 ${item.item_type}</span>
+                    ${meta.map((entry: string) => `<span>${entry}</span>`).join('')}
                 </div>
                 <div class="entity-actions">
                     ${!item.is_discovered ? `<button class="btn btn-small btn-primary" onclick="revealItem(${item.id})">👁️ Reveal</button>` : ''}
@@ -648,7 +705,8 @@ async function loadItems(): Promise<void> {
                     <button class="btn btn-small btn-danger" onclick="deleteItem(${item.id})">Delete</button>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     } catch (error) {
         container.innerHTML = '<div class="empty-state">Failed to load items</div>';
     }
@@ -706,7 +764,14 @@ async function loadEvents(): Promise<void> {
             return;
         }
 
-        container.innerHTML = events.map((ev: any) => `
+        container.innerHTML = events.map((ev: any) => {
+            const isTriggered = ev.status === 'triggered' || ev.status === 'active';
+            const meta: string[] = [`📋 ${escapeHtml(ev.event_type || 'story')}`];
+            if (ev.resolution_outcome) {
+                meta.push(`🏁 ${escapeHtml(ev.resolution_outcome)}`);
+            }
+
+            return `
             <div class="entity-card" data-id="${ev.id}">
                 <div class="entity-header">
                     <span class="entity-title">${escapeHtml(ev.name)}</span>
@@ -714,16 +779,17 @@ async function loadEvents(): Promise<void> {
                 </div>
                 <p class="entity-desc">${escapeHtml(ev.description || 'No description')}</p>
                 <div class="entity-meta">
-                    <span>📋 ${ev.event_type}</span>
+                    ${meta.map((entry: string) => `<span>${entry}</span>`).join('')}
                 </div>
                 <div class="entity-actions">
                     ${ev.status === 'pending' ? `<button class="btn btn-small btn-primary" onclick="triggerEvent(${ev.id})">⚡ Trigger</button>` : ''}
-                    ${ev.status === 'active' ? `<button class="btn btn-small btn-success" onclick="resolveEvent(${ev.id})">✅ Resolve</button>` : ''}
+                    ${isTriggered ? `<button class="btn btn-small btn-success" onclick="resolveEvent(${ev.id})">✅ Resolve</button>` : ''}
                     <button class="btn btn-small btn-secondary" onclick="editEvent(${ev.id})">Edit</button>
                     <button class="btn btn-small btn-danger" onclick="deleteEvent(${ev.id})">Delete</button>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     } catch (error) {
         container.innerHTML = '<div class="empty-state">Failed to load events</div>';
     }
@@ -777,109 +843,6 @@ async function resolveEvent(id: number): Promise<void> {
 // ============================================================================
 // SAVE POINTS
 // ============================================================================
-
-async function loadSavesPage(): Promise<void> {
-    const select = document.getElementById('save-session-select') as HTMLSelectElement;
-
-    try {
-        const data = await api.getSessions();
-        const sessions = data.sessions || [];
-
-        select.innerHTML = '<option value="">-- Select Session --</option>' +
-            sessions.map((s: any) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    } catch (error) {
-        select.innerHTML = '<option value="">Failed to load sessions</option>';
-    }
-}
-
-async function loadSnapshots(): Promise<void> {
-    const select = document.getElementById('save-session-select') as HTMLSelectElement;
-    const container = document.getElementById('saves-list')!;
-
-    const sessionId = parseInt(select.value);
-    if (!sessionId) {
-        container.innerHTML = '<div class="empty-state">Select a session to view save points</div>';
-        return;
-    }
-
-    container.innerHTML = '<div class="loading-spinner">Loading save points...</div>';
-
-    try {
-        const data = await api.getSnapshots(sessionId);
-        const snapshots = data.snapshots || [];
-
-        if (snapshots.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    No save points yet.
-                    <button class="btn btn-primary" onclick="createSavepoint(${sessionId})" style="margin-top: 1rem;">
-                        💾 Create Save Point
-                    </button>
-                </div>
-            `;
-            return;
-        }
-
-        container.innerHTML = snapshots.map((snap: any) => `
-            <div class="entity-card" data-id="${snap.id}">
-                <div class="entity-header">
-                    <span class="entity-title">💾 ${escapeHtml(snap.name)}</span>
-                    <span class="entity-badge">${snap.snapshot_type}</span>
-                </div>
-                <p class="entity-desc">${escapeHtml(snap.description || 'No description')}</p>
-                <div class="entity-meta">
-                    <span>📅 ${formatDate(snap.created_at)}</span>
-                </div>
-                <div class="entity-actions">
-                    <button class="btn btn-small btn-primary" onclick="loadSavepoint(${snap.id})">⏪ Load</button>
-                    <button class="btn btn-small btn-danger" onclick="deleteSavepoint(${snap.id})">Delete</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        container.innerHTML = '<div class="empty-state">Failed to load save points</div>';
-    }
-}
-
-async function createSavepoint(sessionId: number): Promise<void> {
-    const name = prompt('Save point name:') || `Save ${new Date().toLocaleString()}`;
-
-    try {
-        await api.createSnapshot({
-            session_id: sessionId,
-            name: name,
-            created_by: 1,
-            description: 'Manual save point'
-        });
-        showToast('Save point created!', 'success');
-        loadSnapshots();
-    } catch (error) {
-        showToast('Failed to create save point', 'error');
-    }
-}
-
-async function loadSavepoint(id: number): Promise<void> {
-    if (!confirm('Load this save point? Current progress will be overwritten.')) return;
-
-    try {
-        await api.loadSnapshot(id);
-        showToast('Save point loaded!', 'success');
-    } catch (error) {
-        showToast('Failed to load save point', 'error');
-    }
-}
-
-async function deleteSavepoint(id: number): Promise<void> {
-    if (!confirm('Delete this save point?')) return;
-
-    try {
-        await api.deleteSnapshot(id);
-        showToast('Save point deleted', 'success');
-        loadSnapshots();
-    } catch (error) {
-        showToast('Failed to delete save point', 'error');
-    }
-}
 
 // ============================================================================
 // CHARACTERS
@@ -976,6 +939,31 @@ async function updateCharacter(event: Event): Promise<void> {
 // ============================================================================
 
 let currentCharacterIdForInventory: number | null = null;
+let npcLocationOptionsLoaded = false;
+let currentLocationConnectionMode: 'create' | 'edit' = 'create';
+let currentCombatSessionId: number | null = null;
+let currentMonsterTemplates: any[] = [];
+
+async function populateNPCLocationOptions(selectedLocationId?: number | null): Promise<void> {
+    const data = await api.getLocations();
+    const locations = data.locations || [];
+    const optionMarkup = ['<option value="">No assigned location</option>']
+        .concat(locations.map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`))
+        .join('');
+
+    const createSelect = document.getElementById('npc-location') as HTMLSelectElement | null;
+    if (createSelect) {
+        createSelect.innerHTML = optionMarkup;
+    }
+
+    const editSelect = document.getElementById('edit-npc-location') as HTMLSelectElement | null;
+    if (editSelect) {
+        editSelect.innerHTML = optionMarkup;
+        editSelect.value = selectedLocationId ? String(selectedLocationId) : '';
+    }
+
+    npcLocationOptionsLoaded = true;
+}
 
 async function showCharacterInventory(charId: number): Promise<void> {
     currentCharacterIdForInventory = charId;
@@ -1090,8 +1078,12 @@ async function loadItemDbCache(): Promise<void> {
     if (itemDbLoaded) return;
     
     try {
-        const data = await api.getItems();
-        itemDbCache = data.items || [];
+        const data = await api.getGameItems();
+        itemDbCache = Object.entries(data.items || {}).flatMap(([category, categoryItems]: [string, any]) => (
+            Array.isArray(categoryItems)
+                ? categoryItems.map((item: any) => ({ ...item, category }))
+                : []
+        ));
         itemDbLoaded = true;
     } catch (error) {
         console.error('Failed to load item database:', error);
@@ -1395,13 +1387,14 @@ async function updateLocation(event: Event): Promise<void> {
 async function editNPC(id: number): Promise<void> {
     try {
         const npc = await api.getNPC(id);
+        await populateNPCLocationOptions(npc.location_id ?? null);
         
         (document.getElementById('edit-npc-id') as HTMLInputElement).value = npc.id;
         (document.getElementById('edit-npc-name') as HTMLInputElement).value = npc.name || '';
         (document.getElementById('edit-npc-desc') as HTMLTextAreaElement).value = npc.description || '';
         (document.getElementById('edit-npc-personality') as HTMLTextAreaElement).value = npc.personality || '';
         (document.getElementById('edit-npc-type') as HTMLSelectElement).value = npc.npc_type || 'neutral';
-        (document.getElementById('edit-npc-location') as HTMLInputElement).value = npc.location || '';
+        (document.getElementById('edit-npc-location') as HTMLSelectElement).value = npc.location_id ? String(npc.location_id) : '';
         (document.getElementById('edit-npc-merchant') as HTMLInputElement).checked = npc.is_merchant || false;
         
         openModal('edit-npc-modal');
@@ -1412,6 +1405,7 @@ async function editNPC(id: number): Promise<void> {
 
 async function updateNPC(event: Event): Promise<void> {
     event.preventDefault();
+    const locationIdValue = (document.getElementById('edit-npc-location') as HTMLSelectElement).value;
     
     const id = parseInt((document.getElementById('edit-npc-id') as HTMLInputElement).value);
     const data = {
@@ -1419,7 +1413,7 @@ async function updateNPC(event: Event): Promise<void> {
         description: (document.getElementById('edit-npc-desc') as HTMLTextAreaElement).value,
         personality: (document.getElementById('edit-npc-personality') as HTMLTextAreaElement).value,
         npc_type: (document.getElementById('edit-npc-type') as HTMLSelectElement).value,
-        location: (document.getElementById('edit-npc-location') as HTMLInputElement).value,
+        location_id: locationIdValue ? parseInt(locationIdValue) : undefined,
         is_merchant: (document.getElementById('edit-npc-merchant') as HTMLInputElement).checked
     };
     
@@ -1427,6 +1421,7 @@ async function updateNPC(event: Event): Promise<void> {
         await api.updateNPC(id, data);
         showToast('NPC updated!', 'success');
         closeModal('edit-npc-modal');
+        await populateNPCLocationOptions();
         loadNPCs();
     } catch (error) {
         showToast('Failed to update NPC', 'error');
@@ -1458,7 +1453,10 @@ async function updateItem(event: Event): Promise<void> {
     const data = {
         name: (document.getElementById('edit-item-name') as HTMLInputElement).value,
         description: (document.getElementById('edit-item-desc') as HTMLTextAreaElement).value,
-        lore: (document.getElementById('edit-item-lore') as HTMLTextAreaElement).value
+        item_type: (document.getElementById('edit-item-type') as HTMLSelectElement).value,
+        lore: (document.getElementById('edit-item-lore') as HTMLTextAreaElement).value,
+        discovery_conditions: (document.getElementById('edit-item-discovery') as HTMLInputElement).value,
+        dm_notes: (document.getElementById('edit-item-notes') as HTMLTextAreaElement).value
     };
     
     try {
@@ -1493,7 +1491,9 @@ async function editEvent(id: number): Promise<void> {
         (document.getElementById('edit-event-type') as HTMLSelectElement).value = event.event_type || 'side_event';
         (document.getElementById('edit-event-trigger') as HTMLInputElement).value = event.trigger_conditions || '';
         (document.getElementById('edit-event-notes') as HTMLTextAreaElement).value = event.dm_notes || '';
-        (document.getElementById('edit-event-status') as HTMLSelectElement).value = event.status || 'pending';
+        (document.getElementById('edit-event-status') as HTMLSelectElement).value = event.status === 'active'
+            ? 'triggered'
+            : (event.status || 'pending');
         
         openModal('edit-event-modal');
     } catch (error) {
@@ -1508,7 +1508,9 @@ async function updateEvent(event: Event): Promise<void> {
     const data = {
         name: (document.getElementById('edit-event-name') as HTMLInputElement).value,
         description: (document.getElementById('edit-event-desc') as HTMLTextAreaElement).value,
+        event_type: (document.getElementById('edit-event-type') as HTMLSelectElement).value,
         trigger_conditions: (document.getElementById('edit-event-trigger') as HTMLInputElement).value,
+        dm_notes: (document.getElementById('edit-event-notes') as HTMLTextAreaElement).value,
         status: (document.getElementById('edit-event-status') as HTMLSelectElement).value
     };
     
@@ -1595,51 +1597,54 @@ function viewClass(name: string): void {
     if (!cls) return;
 
     const details = document.getElementById('class-details');
-    if (details) {
-        // Handle abilities as either object (keyed by level) or array
-        const abilities = cls.abilities || {};
-        const abilitiesList = Array.isArray(abilities) 
-            ? abilities 
-            : Object.entries(abilities).flatMap(([level, abs]: [string, any]) => 
-                (Array.isArray(abs) ? abs : [abs]).map(a => ({ name: a, level }))
-            );
-        const primaryStat = cls.primary_ability || cls.primary_stat || 'Unknown';
-        
-        details.innerHTML = `
-            <div class="detail-card">
-                <h3>${escapeHtml(cls.name || name)}</h3>
-                <p>${escapeHtml(cls.description || 'No description')}</p>
-                <div class="detail-section">
-                    <h4>Base Stats</h4>
-                    <ul>
-                        <li><strong>Hit Die:</strong> ${cls.hit_die || 'd8'}</li>
-                        <li><strong>Primary Stat:</strong> ${primaryStat}</li>
-                        <li><strong>Saving Throws:</strong> ${(cls.saving_throws || []).join(', ')}</li>
-                        <li><strong>Starting HP:</strong> ${cls.starting_hp || 'N/A'}</li>
-                        <li><strong>HP per Level:</strong> ${cls.hp_per_level || 'N/A'}</li>
-                    </ul>
-                </div>
-                <div class="detail-section">
-                    <h4>Starting Equipment</h4>
-                    <ul>
-                        ${(cls.starting_equipment || []).map((e: string) => `<li>${escapeHtml(e)}</li>`).join('') || '<li>None</li>'}
-                    </ul>
-                </div>
-                <div class="detail-section">
-                    <h4>Abilities by Level</h4>
-                    <div class="abilities-list">
-                        ${abilitiesList.map((a: any) => `
-                            <div class="ability-item">
-                                <strong>${escapeHtml(typeof a === 'string' ? a : a.name)}</strong>
-                                ${a.level ? `<span class="level-badge">Level ${a.level}</span>` : ''}
-                            </div>
-                        `).join('') || '<div class="empty-state">No abilities defined</div>'}
-                    </div>
+    if (!details) {
+        // The current layout has no dedicated class detail panel.
+        return;
+    }
+
+    // Handle abilities as either object (keyed by level) or array
+    const abilities = cls.abilities || {};
+    const abilitiesList = Array.isArray(abilities) 
+        ? abilities 
+        : Object.entries(abilities).flatMap(([level, abs]: [string, any]) => 
+            (Array.isArray(abs) ? abs : [abs]).map(a => ({ name: a, level }))
+        );
+    const primaryStat = cls.primary_ability || cls.primary_stat || 'Unknown';
+    
+    details.innerHTML = `
+        <div class="detail-card">
+            <h3>${escapeHtml(cls.name || name)}</h3>
+            <p>${escapeHtml(cls.description || 'No description')}</p>
+            <div class="detail-section">
+                <h4>Base Stats</h4>
+                <ul>
+                    <li><strong>Hit Die:</strong> ${cls.hit_die || 'd8'}</li>
+                    <li><strong>Primary Stat:</strong> ${primaryStat}</li>
+                    <li><strong>Saving Throws:</strong> ${(cls.saving_throws || []).join(', ')}</li>
+                    <li><strong>Starting HP:</strong> ${cls.starting_hp || 'N/A'}</li>
+                    <li><strong>HP per Level:</strong> ${cls.hp_per_level || 'N/A'}</li>
+                </ul>
+            </div>
+            <div class="detail-section">
+                <h4>Starting Equipment</h4>
+                <ul>
+                    ${(cls.starting_equipment || []).map((e: string) => `<li>${escapeHtml(e)}</li>`).join('') || '<li>None</li>'}
+                </ul>
+            </div>
+            <div class="detail-section">
+                <h4>Abilities by Level</h4>
+                <div class="abilities-list">
+                    ${abilitiesList.map((a: any) => `
+                        <div class="ability-item">
+                            <strong>${escapeHtml(typeof a === 'string' ? a : a.name)}</strong>
+                            ${a.level ? `<span class="level-badge">Level ${a.level}</span>` : ''}
+                        </div>
+                    `).join('') || '<div class="empty-state">No abilities defined</div>'}
                 </div>
             </div>
-        `;
-        details.classList.add('active');
-    }
+        </div>
+    `;
+    details.classList.add('active');
 }
 
 function editClass(name: string): void {
@@ -1747,48 +1752,51 @@ function viewRace(name: string): void {
     if (!race) return;
 
     const details = document.getElementById('race-details');
-    if (details) {
-        details.innerHTML = `
-            <div class="detail-card">
-                <h3>${escapeHtml(name)}</h3>
-                <p>${escapeHtml(race.description || 'No description')}</p>
-                <div class="detail-section">
-                    <h4>Base Stats</h4>
-                    <ul>
-                        <li><strong>Size:</strong> ${race.size || 'Medium'}</li>
-                        <li><strong>Speed:</strong> ${race.speed || 30}ft</li>
-                        <li><strong>Ability Bonuses:</strong> ${Object.entries(race.ability_bonuses || {}).map(([k, v]) => `${k}+${v}`).join(', ') || 'None'}</li>
-                        <li><strong>Languages:</strong> ${(race.languages || []).join(', ')}</li>
-                    </ul>
+    if (!details) {
+        // The current layout has no dedicated race detail panel.
+        return;
+    }
+
+    details.innerHTML = `
+        <div class="detail-card">
+            <h3>${escapeHtml(name)}</h3>
+            <p>${escapeHtml(race.description || 'No description')}</p>
+            <div class="detail-section">
+                <h4>Base Stats</h4>
+                <ul>
+                    <li><strong>Size:</strong> ${race.size || 'Medium'}</li>
+                    <li><strong>Speed:</strong> ${race.speed || 30}ft</li>
+                    <li><strong>Ability Bonuses:</strong> ${Object.entries(race.ability_bonuses || {}).map(([k, v]) => `${k}+${v}`).join(', ') || 'None'}</li>
+                    <li><strong>Languages:</strong> ${(race.languages || []).join(', ')}</li>
+                </ul>
+            </div>
+            <div class="detail-section">
+                <h4>Traits (${(race.traits || []).length})</h4>
+                <div class="traits-list">
+                    ${(race.traits || []).map((t: any) => `
+                        <div class="trait-item">
+                            <strong>${escapeHtml(typeof t === 'string' ? t : t.name)}</strong>
+                            ${typeof t === 'object' ? `<p>${escapeHtml(t.description || '')}</p>` : ''}
+                        </div>
+                    `).join('')}
                 </div>
+            </div>
+            ${(race.subraces && Object.keys(race.subraces).length > 0) ? `
                 <div class="detail-section">
-                    <h4>Traits (${(race.traits || []).length})</h4>
-                    <div class="traits-list">
-                        ${(race.traits || []).map((t: any) => `
-                            <div class="trait-item">
-                                <strong>${escapeHtml(typeof t === 'string' ? t : t.name)}</strong>
-                                ${typeof t === 'object' ? `<p>${escapeHtml(t.description || '')}</p>` : ''}
+                    <h4>Subraces</h4>
+                    <div class="subraces-list">
+                        ${Object.entries(race.subraces || {}).map(([sname, sub]: [string, any]) => `
+                            <div class="subrace-item">
+                                <strong>${escapeHtml(sname)}</strong>
+                                <p>${escapeHtml(sub.description || '')}</p>
                             </div>
                         `).join('')}
                     </div>
                 </div>
-                ${(race.subraces && Object.keys(race.subraces).length > 0) ? `
-                    <div class="detail-section">
-                        <h4>Subraces</h4>
-                        <div class="subraces-list">
-                            ${Object.entries(race.subraces || {}).map(([sname, sub]: [string, any]) => `
-                                <div class="subrace-item">
-                                    <strong>${escapeHtml(sname)}</strong>
-                                    <p>${escapeHtml(sub.description || '')}</p>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-        details.classList.add('active');
-    }
+            ` : ''}
+        </div>
+    `;
+    details.classList.add('active');
 }
 
 function editRace(name: string): void {
@@ -2267,6 +2275,106 @@ interface CampaignConfig {
 let currentCampaignStep = 1;
 let generatedCampaignData: any = null;
 let selectedTemplate: string = 'custom';
+let campaignPreviewEditState: { mode: 'add' | 'edit'; type: string; index?: number } | null = null;
+
+function slugifyPreviewId(value: string, prefix: string): string {
+    const normalized = (value || prefix).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return `${prefix}_${normalized || Date.now()}`;
+}
+
+function buildDefaultPreviewItem(type: string): Record<string, any> {
+    switch (type) {
+        case 'location':
+            return { id: `loc_${Date.now()}`, name: 'New Location', type: 'town', description: '', danger_level: 1, points_of_interest: [], connections: [] };
+        case 'npc':
+            return { id: `npc_${Date.now()}`, name: 'New NPC', type: 'neutral', description: '', personality: '', goals: '', location_id: '' };
+        case 'faction':
+            return { id: `faction_${Date.now()}`, name: 'New Faction', type: 'political', alignment: 'neutral', description: '', goals: '' };
+        case 'quest':
+            return { id: `quest_${Date.now()}`, title: 'New Quest Hook', type: 'main', description: '', difficulty: 'medium', quest_giver_id: '' };
+        default:
+            return {};
+    }
+}
+
+function getCampaignPreviewCollection(type: string): any[] {
+    if (!generatedCampaignData) {
+        return [];
+    }
+    const key = `${type}s`;
+    if (!generatedCampaignData[key]) {
+        generatedCampaignData[key] = [];
+    }
+    return generatedCampaignData[key];
+}
+
+function renderPreviewFormFields(type: string, value: Record<string, any>): string {
+    const locationOptions = (generatedCampaignData?.locations || []).map((loc: any) =>
+        `<option value="${escapeHtml(loc.id)}" ${loc.id === value.location_id ? 'selected' : ''}>${escapeHtml(loc.name)}</option>`
+    ).join('');
+    const npcOptions = (generatedCampaignData?.npcs || []).map((npc: any) =>
+        `<option value="${escapeHtml(npc.id)}" ${npc.id === value.quest_giver_id ? 'selected' : ''}>${escapeHtml(npc.name)}</option>`
+    ).join('');
+
+    if (type === 'world') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">World Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}"></div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-history">History</label><textarea id="preview-edit-history" rows="3">${escapeHtml(value.history || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-current-state">Current State</label><textarea id="preview-edit-current-state" rows="3">${escapeHtml(value.current_state || '')}</textarea></div>
+        `;
+    }
+
+    if (type === 'scenario') {
+        return `<div class="form-group"><label for="preview-edit-description">Starting Scenario</label><textarea id="preview-edit-description" rows="4">${escapeHtml(value.description || '')}</textarea></div>`;
+    }
+
+    if (type === 'location') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'town')}"></div>
+                <div class="form-group"><label for="preview-edit-danger-level">Danger Level</label><input type="number" id="preview-edit-danger-level" min="0" max="10" value="${value.danger_level ?? 1}"></div>
+            </div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+        `;
+    }
+
+    if (type === 'npc') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'neutral')}"></div>
+                <div class="form-group"><label for="preview-edit-location-id">Location</label><select id="preview-edit-location-id"><option value="">Unassigned</option>${locationOptions}</select></div>
+            </div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-personality">Personality</label><textarea id="preview-edit-personality" rows="2">${escapeHtml(value.personality || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-goals">Goals</label><textarea id="preview-edit-goals" rows="2">${escapeHtml(value.goals || '')}</textarea></div>
+        `;
+    }
+
+    if (type === 'faction') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'political')}"></div>
+                <div class="form-group"><label for="preview-edit-alignment">Alignment</label><input type="text" id="preview-edit-alignment" value="${escapeHtml(value.alignment || 'neutral')}"></div>
+            </div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-goals">Goals</label><textarea id="preview-edit-goals" rows="2">${escapeHtml(value.goals || '')}</textarea></div>
+        `;
+    }
+
+    return `
+        <div class="form-group"><label for="preview-edit-title">Title</label><input type="text" id="preview-edit-title" value="${escapeHtml(value.title || value.name || '')}" required></div>
+        <div class="form-row">
+            <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'main')}"></div>
+            <div class="form-group"><label for="preview-edit-difficulty">Difficulty</label><input type="text" id="preview-edit-difficulty" value="${escapeHtml(value.difficulty || 'medium')}"></div>
+        </div>
+        <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+        <div class="form-group"><label for="preview-edit-quest-giver-id">Quest Giver</label><select id="preview-edit-quest-giver-id"><option value="">Unassigned</option>${npcOptions}</select></div>
+    `;
+}
 
 async function loadCampaignCreator(): Promise<void> {
     // Reset to step 1
@@ -2279,6 +2387,12 @@ async function loadCampaignCreator(): Promise<void> {
 
     // Show step 1
     goToStep(1);
+
+    const guildInput = document.getElementById('campaign-guild-id') as HTMLInputElement | null;
+    if (guildInput) {
+        guildInput.value = DEFAULT_GUILD_ID;
+        guildInput.readOnly = true;
+    }
 
     console.log('Campaign creator loaded');
 }
@@ -2381,7 +2495,7 @@ function getCampaignFormData(): CampaignConfig {
     return {
         name: (document.getElementById('campaign-name') as HTMLInputElement)?.value || 'New Campaign',
         description: (document.getElementById('world-description') as HTMLTextAreaElement)?.value || '',
-        guild_id: (document.getElementById('campaign-guild-id') as HTMLInputElement)?.value || '',
+        guild_id: DEFAULT_GUILD_ID,
         dm_user_id: (document.getElementById('campaign-dm-id') as HTMLInputElement)?.value || '',
         genre: selectedTemplate !== 'custom' ? selectedTemplate : (document.getElementById('world-theme') as HTMLSelectElement)?.value || 'fantasy',
         setting_tone: (document.getElementById('campaign-tone') as HTMLSelectElement)?.value || 'heroic',
@@ -2498,7 +2612,7 @@ async function generateCampaignPreview(): Promise<void> {
 
     } catch (error) {
         console.error('Campaign generation error:', error);
-        showToast('Failed to generate campaign. Check API connection.', 'error');
+        showToast((error as Error).message || 'Failed to generate campaign', 'error');
         goToStep(1);
     }
 }
@@ -2512,7 +2626,14 @@ function populatePreview(data: any): void {
     // World setting
     const worldPreview = document.getElementById('preview-world');
     if (worldPreview) {
-        worldPreview.innerHTML = `<p>${escapeHtml(data.world?.description || 'A world of adventure awaits...')}</p>`;
+        worldPreview.innerHTML = `
+            <div class="detail-stack">
+                <p><strong>${escapeHtml(data.world?.name || data.config?.name || 'World')}</strong></p>
+                <p>${escapeHtml(data.world?.description || 'A world of adventure awaits...')}</p>
+                ${data.world?.history ? `<p><strong>History:</strong> ${escapeHtml(data.world.history)}</p>` : ''}
+                ${data.world?.current_state ? `<p><strong>Current State:</strong> ${escapeHtml(data.world.current_state)}</p>` : ''}
+            </div>
+        `;
     }
 
     // Locations
@@ -2601,8 +2722,18 @@ function populatePreview(data: any): void {
 }
 
 function editPreviewItem(type: string, index: number): void {
-    // TODO: Open edit modal for the item
-    showToast(`Edit ${type} ${index + 1} - coming soon!`, 'info');
+    if (!generatedCampaignData) return;
+    const collection = getCampaignPreviewCollection(type);
+    const value = collection[index];
+    if (!value) return;
+
+    campaignPreviewEditState = { mode: 'edit', type, index };
+    (document.getElementById('campaign-preview-edit-type') as HTMLInputElement).value = type;
+    (document.getElementById('campaign-preview-edit-mode') as HTMLInputElement).value = 'edit';
+    (document.getElementById('campaign-preview-edit-index') as HTMLInputElement).value = String(index);
+    (document.getElementById('campaign-preview-modal-title') as HTMLElement).textContent = `✏️ Edit ${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+    (document.getElementById('campaign-preview-form-fields') as HTMLElement).innerHTML = renderPreviewFormFields(type, value);
+    openModal('campaign-preview-modal');
 }
 
 function removePreviewItem(type: string, index: number): void {
@@ -2617,13 +2748,97 @@ function removePreviewItem(type: string, index: number): void {
 }
 
 function addItem(type: string): void {
-    // TODO: Open add modal for the item type
-    showToast(`Add ${type} - coming soon!`, 'info');
+    if (!generatedCampaignData) return;
+    const value = buildDefaultPreviewItem(type);
+
+    campaignPreviewEditState = { mode: 'add', type };
+    (document.getElementById('campaign-preview-edit-type') as HTMLInputElement).value = type;
+    (document.getElementById('campaign-preview-edit-mode') as HTMLInputElement).value = 'add';
+    (document.getElementById('campaign-preview-edit-index') as HTMLInputElement).value = '';
+    (document.getElementById('campaign-preview-modal-title') as HTMLElement).textContent = `➕ Add ${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+    (document.getElementById('campaign-preview-form-fields') as HTMLElement).innerHTML = renderPreviewFormFields(type, value);
+    openModal('campaign-preview-modal');
 }
 
 function editSection(section: string): void {
-    // TODO: Open edit modal for the section
-    showToast(`Edit ${section} - coming soon!`, 'info');
+    if (!generatedCampaignData) return;
+    const value = section === 'world' ? { ...(generatedCampaignData.world || {}) } : { ...(generatedCampaignData.scenario || {}) };
+
+    campaignPreviewEditState = { mode: 'edit', type: section };
+    (document.getElementById('campaign-preview-edit-type') as HTMLInputElement).value = section;
+    (document.getElementById('campaign-preview-edit-mode') as HTMLInputElement).value = 'edit';
+    (document.getElementById('campaign-preview-edit-index') as HTMLInputElement).value = '';
+    (document.getElementById('campaign-preview-modal-title') as HTMLElement).textContent = `✏️ Edit ${section === 'world' ? 'World Setting' : 'Starting Scenario'}`;
+    (document.getElementById('campaign-preview-form-fields') as HTMLElement).innerHTML = renderPreviewFormFields(section, value);
+    openModal('campaign-preview-modal');
+}
+
+async function saveCampaignPreviewEdit(event: Event): Promise<void> {
+    event.preventDefault();
+    if (!generatedCampaignData || !campaignPreviewEditState) {
+        return;
+    }
+
+    const { mode, type, index } = campaignPreviewEditState;
+    const getValue = (id: string) => (document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value || '';
+
+    if (type === 'world') {
+        generatedCampaignData.world = {
+            ...(generatedCampaignData.world || {}),
+            name: getValue('preview-edit-name'),
+            description: getValue('preview-edit-description'),
+            history: getValue('preview-edit-history'),
+            current_state: getValue('preview-edit-current-state'),
+        };
+    } else if (type === 'scenario') {
+        generatedCampaignData.scenario = {
+            ...(generatedCampaignData.scenario || {}),
+            description: getValue('preview-edit-description'),
+        };
+    } else {
+        const collection = getCampaignPreviewCollection(type);
+        const baseValue = mode === 'edit' && typeof index === 'number' ? { ...collection[index] } : buildDefaultPreviewItem(type);
+
+        if (type === 'location') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-name'), 'loc');
+            baseValue.name = getValue('preview-edit-name');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.danger_level = parseInt(getValue('preview-edit-danger-level')) || 1;
+        } else if (type === 'npc') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-name'), 'npc');
+            baseValue.name = getValue('preview-edit-name');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.personality = getValue('preview-edit-personality');
+            baseValue.goals = getValue('preview-edit-goals');
+            baseValue.location_id = getValue('preview-edit-location-id');
+        } else if (type === 'faction') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-name'), 'faction');
+            baseValue.name = getValue('preview-edit-name');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.alignment = getValue('preview-edit-alignment');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.goals = getValue('preview-edit-goals');
+        } else if (type === 'quest') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-title'), 'quest');
+            baseValue.title = getValue('preview-edit-title');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.difficulty = getValue('preview-edit-difficulty');
+            baseValue.quest_giver_id = getValue('preview-edit-quest-giver-id');
+        }
+
+        if (mode === 'edit' && typeof index === 'number') {
+            collection[index] = baseValue;
+        } else {
+            collection.push(baseValue);
+        }
+    }
+
+    populatePreview(generatedCampaignData);
+    closeModal('campaign-preview-modal');
+    showToast('Campaign preview updated', 'success');
 }
 
 async function finalizeCampaign(): Promise<void> {
@@ -2642,12 +2857,24 @@ async function finalizeCampaign(): Promise<void> {
             dm_user_id: apiSettings.dm_user_id,
             name: config.name,
             description: config.description || generatedCampaignData.scenario?.description || '',
+            content_pack_id: generatedCampaignData.world?.content_pack_id,
             world_setting: generatedCampaignData.world || {},
             locations: generatedCampaignData.locations || [],
             npcs: generatedCampaignData.npcs || [],
             factions: generatedCampaignData.factions || [],
             quest_hooks: generatedCampaignData.quests || [],
-            starting_scenario: generatedCampaignData.scenario?.description || 'Your adventure begins...'
+            starting_scenario: generatedCampaignData.scenario?.description || 'Your adventure begins...',
+            generation_settings: {
+                world_theme: config.world_theme,
+                content_pack_id: generatedCampaignData.world?.content_pack_id,
+                world_scale: config.world_scale,
+                magic_level: config.magic_level,
+                technology_level: config.tech_level,
+                tone: config.setting_tone,
+                world_description: config.world_description,
+                key_events: config.key_events,
+                special_rules: config.special_rules,
+            }
         };
 
         // Call the finalize endpoint
@@ -2690,7 +2917,7 @@ async function finalizeCampaign(): Promise<void> {
 
     } catch (error) {
         console.error('Campaign creation error:', error);
-        showToast('Failed to create campaign', 'error');
+        showToast((error as Error).message || 'Failed to create campaign', 'error');
     }
 }
 
@@ -2721,6 +2948,9 @@ function renderCombatPanel(combat: any): string {
     return `
         <div class="detail-stack">
             <div class="detail-list-item"><strong>Status</strong><span>Round ${combat.round_number || 1}, Turn ${combat.current_turn || 0}</span></div>
+            <div class="detail-actions">
+                <button class="btn btn-small btn-primary" onclick="openMonsterSpawnEditor(${combat.id}, ${combat.session_id || 0})">👹 Spawn Monster</button>
+            </div>
             <div class="detail-list">
                 ${(combat.participants || []).map((participant: any, index: number) => {
                     const hpPercent = Math.max(0, Math.min(100, Math.round(((participant.current_hp || 0) / Math.max(1, participant.max_hp || 1)) * 100)));
@@ -2787,21 +3017,205 @@ function renderStatusEffectsPanel(statusEffects: any[]): string {
 }
 
 function renderLocationConnectionsPanel(connections: any[]): string {
-    if (connections.length === 0) {
-        return '<p class="empty-hint">No visible connections from this location.</p>';
-    }
-
     return `
-        <div class="location-connection-map">
+        <div class="detail-stack">
+            ${connections.length === 0 ? '<p class="empty-hint">No visible connections from this location.</p>' : ''}
+            <div class="location-connection-map">
             ${connections.map((connection: any) => `
                 <div class="connection-card">
                     <div class="direction">${escapeHtml(connection.direction || 'path')}</div>
                     <div class="target">${escapeHtml(connection.to_name || connection.name || 'Unknown')}</div>
                     <div class="meta">${escapeHtml(connection.location_type || 'unknown')} • ${connection.travel_time || 1} travel unit(s)</div>
+                    ${connection.connection_id ? `<div class="entity-actions"><button class="btn btn-small btn-secondary" onclick="editLocationConnection(${connection.connection_id}, ${connection.from_location_id || 0})">Edit</button><button class="btn btn-small btn-danger" onclick="deleteLocationConnection(${connection.connection_id}, ${connection.from_location_id || 0})">Delete</button></div>` : ''}
                 </div>
             `).join('')}
+            </div>
         </div>
     `;
+}
+
+async function openLocationConnectionEditor(locationId: number): Promise<void> {
+    try {
+        const [location, locationsData] = await Promise.all([
+            api.getLocation(locationId),
+            api.getLocations(),
+        ]);
+
+        const targetSelect = document.getElementById('location-connection-target') as HTMLSelectElement;
+        targetSelect.innerHTML = (locationsData.locations || [])
+            .filter((loc: any) => loc.id !== locationId)
+            .map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`)
+            .join('') || '<option value="">No destinations available</option>';
+
+        currentLocationConnectionMode = 'create';
+        (document.getElementById('location-connection-from-id') as HTMLInputElement).value = String(locationId);
+        (document.getElementById('location-connection-id') as HTMLInputElement).value = '';
+        (document.getElementById('location-connection-direction') as HTMLInputElement).value = 'path';
+        (document.getElementById('location-connection-travel-time') as HTMLInputElement).value = '1';
+        (document.getElementById('location-connection-hidden') as HTMLInputElement).checked = false;
+        document.querySelector('#location-connection-modal .modal-header h2')!.textContent = `🧭 Add Connection from ${location.name}`;
+        (document.getElementById('location-connection-submit') as HTMLButtonElement).textContent = 'Create Connection';
+        openModal('location-connection-modal');
+    } catch (error) {
+        showToast('Failed to open location connection editor', 'error');
+    }
+}
+
+async function editLocationConnection(connectionId: number, locationId: number): Promise<void> {
+    try {
+        const [connectionData, locationsData, location] = await Promise.all([
+            api.listLocationConnections(locationId),
+            api.getLocations(),
+            api.getLocation(locationId),
+        ]);
+        const connection = (connectionData.connections || []).find((item: any) => item.id === connectionId);
+        if (!connection) {
+            showToast('Connection not found', 'error');
+            return;
+        }
+
+        const targetSelect = document.getElementById('location-connection-target') as HTMLSelectElement;
+        targetSelect.innerHTML = (locationsData.locations || [])
+            .filter((loc: any) => loc.id !== locationId)
+            .map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`)
+            .join('') || '<option value="">No destinations available</option>';
+
+        currentLocationConnectionMode = 'edit';
+        (document.getElementById('location-connection-from-id') as HTMLInputElement).value = String(connection.from_location_id || locationId);
+        (document.getElementById('location-connection-id') as HTMLInputElement).value = String(connection.id);
+        targetSelect.value = String(connection.to_location_id);
+        (document.getElementById('location-connection-direction') as HTMLInputElement).value = connection.direction || 'path';
+        (document.getElementById('location-connection-travel-time') as HTMLInputElement).value = String(connection.travel_time || 1);
+        (document.getElementById('location-connection-hidden') as HTMLInputElement).checked = Boolean(connection.hidden);
+        document.querySelector('#location-connection-modal .modal-header h2')!.textContent = `🧭 Edit Connection from ${location.name}`;
+        (document.getElementById('location-connection-submit') as HTMLButtonElement).textContent = 'Save Connection';
+        openModal('location-connection-modal');
+    } catch (error) {
+        showToast('Failed to load location connection', 'error');
+    }
+}
+
+async function saveLocationConnection(event: Event): Promise<void> {
+    event.preventDefault();
+
+    const fromId = parseInt((document.getElementById('location-connection-from-id') as HTMLInputElement).value);
+    const connectionId = parseInt((document.getElementById('location-connection-id') as HTMLInputElement).value);
+    const toId = parseInt((document.getElementById('location-connection-target') as HTMLSelectElement).value);
+    const direction = (document.getElementById('location-connection-direction') as HTMLInputElement).value || 'path';
+    const travelTime = parseInt((document.getElementById('location-connection-travel-time') as HTMLInputElement).value) || 1;
+    const hidden = (document.getElementById('location-connection-hidden') as HTMLInputElement).checked;
+
+    if (!fromId || !toId) {
+        showToast('Choose a destination location', 'error');
+        return;
+    }
+
+    try {
+        if (currentLocationConnectionMode === 'edit' && connectionId) {
+            await api.updateLocationConnection(connectionId, {
+                to_location_id: toId,
+                direction,
+                travel_time: travelTime,
+                hidden,
+            });
+        } else {
+            await api.createLocationConnection({
+                from_location_id: fromId,
+                to_location_id: toId,
+                direction,
+                travel_time: travelTime,
+                hidden,
+                bidirectional: true,
+            });
+        }
+        closeModal('location-connection-modal');
+        showToast(currentLocationConnectionMode === 'edit' ? 'Location connection updated' : 'Location connection created', 'success');
+        await showLocationDetails(fromId);
+    } catch (error) {
+        showToast(currentLocationConnectionMode === 'edit' ? 'Failed to update location connection' : 'Failed to create location connection', 'error');
+    }
+}
+
+async function deleteLocationConnection(connectionId: number, locationId: number): Promise<void> {
+    if (!confirm('Delete this location connection?')) return;
+
+    try {
+        await api.deleteLocationConnection(connectionId);
+        showToast('Location connection deleted', 'success');
+        await showLocationDetails(locationId);
+    } catch (error) {
+        showToast('Failed to delete location connection', 'error');
+    }
+}
+
+function renderMonsterTemplatePreview(templateId: string): void {
+    const container = document.getElementById('combat-monster-preview');
+    if (!container) {
+        return;
+    }
+
+    const template = currentMonsterTemplates.find((item: any) => item.id === templateId);
+    if (!template) {
+        container.innerHTML = '<p class="empty-hint">Choose a monster template to preview it.</p>';
+        return;
+    }
+
+    container.innerHTML = renderSimpleList([
+        {
+            title: template.name || template.id || 'Monster',
+            meta: `HP ${template.hp || '?'} • AC ${template.ac || template.armor_class || '?'} • CR ${template.challenge_rating ?? '?'}`,
+        },
+    ]);
+}
+
+async function openMonsterSpawnEditor(combatId: number, sessionId: number): Promise<void> {
+    try {
+        currentCombatSessionId = sessionId || null;
+        const [combat, templatesData] = await Promise.all([
+            api.getCombat(combatId),
+            api.getMonsterTemplates(),
+        ]);
+
+        currentMonsterTemplates = templatesData.templates || [];
+        const select = document.getElementById('combat-monster-template') as HTMLSelectElement;
+        select.innerHTML = currentMonsterTemplates.map((template: any) => `
+            <option value="${escapeHtml(template.id)}">${escapeHtml(template.name || template.id)} (${template.challenge_rating ?? '?'})</option>
+        `).join('') || '<option value="">No monster templates available</option>';
+
+        (document.getElementById('combat-monster-combat-id') as HTMLInputElement).value = String(combat.id);
+        (document.getElementById('combat-monster-count') as HTMLInputElement).value = '1';
+        renderMonsterTemplatePreview(select.value);
+        openModal('combat-monster-modal');
+    } catch (error) {
+        showToast('Failed to load monster templates', 'error');
+    }
+}
+
+async function spawnMonsterTemplate(event: Event): Promise<void> {
+    event.preventDefault();
+
+    const combatId = parseInt((document.getElementById('combat-monster-combat-id') as HTMLInputElement).value);
+    const templateId = (document.getElementById('combat-monster-template') as HTMLSelectElement).value;
+    const count = parseInt((document.getElementById('combat-monster-count') as HTMLInputElement).value) || 1;
+
+    if (!combatId || !templateId) {
+        showToast('Choose a monster template', 'error');
+        return;
+    }
+
+    try {
+        await api.spawnMonsterTemplate(combatId, {
+            template_id: templateId,
+            count,
+        });
+        closeModal('combat-monster-modal');
+        showToast('Monster spawned into combat', 'success');
+        if (currentCombatSessionId) {
+            await viewSession(currentCombatSessionId);
+        }
+    } catch (error) {
+        showToast('Failed to spawn monster', 'error');
+    }
 }
 
 async function showCharacterDetails(charId: number): Promise<void> {
@@ -2866,10 +3280,12 @@ async function showCharacterDetails(charId: number): Promise<void> {
 
 async function showLocationDetails(locationId: number): Promise<void> {
     try {
-        const [location, connectionData] = await Promise.all([
+        const [location, connectionData, npcsData] = await Promise.all([
             api.getLocation(locationId),
             api.getLocationConnections(locationId),
+            api.getNPCs(),
         ]);
+        const occupants = (npcsData.npcs || []).filter((npc: any) => npc.location_id === locationId);
 
         const content = `
             <div class="session-detail">
@@ -2882,7 +3298,18 @@ async function showLocationDetails(locationId: number): Promise<void> {
 
                 <div class="session-section">
                     <h3>🧭 Location Connection Map</h3>
+                    <div class="detail-actions">
+                        <button class="btn btn-small btn-primary" onclick="openLocationConnectionEditor(${locationId})">➕ Add Connection</button>
+                    </div>
                     ${renderLocationConnectionsPanel(connectionData.connections || [])}
+                </div>
+
+                <div class="session-section">
+                    <h3>👥 Occupants</h3>
+                    ${renderSimpleList(occupants.map((npc: any) => ({
+                        title: npc.name || 'Unknown NPC',
+                        meta: npc.npc_type || 'neutral',
+                    })))}
                 </div>
             </div>
         `;
@@ -2927,17 +3354,20 @@ class ChatInterface {
         }
 
         const sessions = sessionsData.sessions || [];
+        const playableSessions = sessions.filter((session: any) => session.status === 'active');
         sessionSelect.innerHTML = '<option value="">Select a session...</option>' +
-            sessions.map((session: any) => `<option value="${session.id}">${escapeHtml(session.name)}</option>`).join('');
+            playableSessions.map((session: any) => `<option value="${session.id}">${escapeHtml(session.name)}</option>`).join('');
 
         sessionSelect.onchange = async () => {
             this.sessionId = sessionSelect.value ? parseInt(sessionSelect.value) : null;
+            this.characterId = null;
             this.chatHistory = [];
             this.renderMessages();
             await this.populateCharacterSelect();
             this.latestState = null;
             this.renderSessionState();
-            await this.refreshDashboardPanels();
+            this.renderToolResults([]);
+            await this.loadBootstrap();
         };
 
         form.onsubmit = async (event) => {
@@ -2961,19 +3391,102 @@ class ChatInterface {
             return;
         }
 
-        const session = await api.getSession(this.sessionId);
-        const participants = (session.participants || []).filter((participant: any) => participant.character_id);
+        const bootstrap = await api.getChatBootstrap(this.sessionId, this.userId);
+        const participants = bootstrap.available_characters || [];
         select.innerHTML = '<option value="">Select a character...</option>' +
             participants.map((participant: any) => `<option value="${participant.character_id}">${escapeHtml(participant.character_name || 'Unknown')}</option>`).join('');
         select.onchange = async () => {
             this.characterId = select.value ? parseInt(select.value) : null;
-            await this.refreshDashboardPanels();
+            await this.loadBootstrap();
         };
-        this.characterId = null;
+
+        if (participants.length === 1) {
+            this.characterId = participants[0].character_id;
+            select.value = String(participants[0].character_id);
+        } else {
+            this.characterId = null;
+        }
+    }
+
+    private async loadBootstrap(): Promise<void> {
+        if (!this.sessionId) {
+            return;
+        }
+
+        try {
+            const bootstrap = await api.getChatBootstrap(this.sessionId, this.userId, this.characterId || undefined);
+            this.chatHistory = bootstrap.recent_messages || [];
+            this.latestState = {
+                ...bootstrap.session,
+                participants: bootstrap.participants || [],
+                locations: bootstrap.location ? [bootstrap.location] : [],
+                game_state: bootstrap.game_state || {},
+            };
+            this.renderMessages();
+            this.renderSessionState();
+            this.renderCombatSidebar(bootstrap.active_combat || null);
+            this.renderLocationSidebar(bootstrap.location || null, bootstrap.connections || []);
+
+            if (!this.characterId) {
+                this.renderSpellSidebar(null, null);
+                this.renderStatusSidebar([]);
+                return;
+            }
+
+            const [spellsData, statusData] = await Promise.all([
+                api.getCharacterSpells(this.characterId),
+                api.getCharacterStatusEffects(this.characterId),
+            ]);
+
+            this.renderSpellSidebar(spellsData.spells || [], spellsData.spell_slots || {});
+            this.renderStatusSidebar(statusData.status_effects || []);
+        } catch (error) {
+            console.error('Failed to load chat bootstrap', error);
+            showToast('Failed to load chat session state', 'error');
+        }
     }
 
     async sendQuickAction(message: string): Promise<void> {
         await this.sendMessage(message);
+    }
+
+    async createBrowserCharacter(): Promise<void> {
+        if (!this.sessionId) {
+            showToast('Select a session first', 'error');
+            return;
+        }
+
+        const name = prompt('Character name?')?.trim();
+        if (!name) {
+            return;
+        }
+
+        const race = prompt('Character race?', 'human')?.trim() || 'human';
+        const charClass = prompt('Character class?', 'warrior')?.trim() || 'warrior';
+        const backstory = prompt('Short backstory? (optional)')?.trim() || '';
+
+        try {
+            const response = await api.createBrowserCharacter({
+                session_id: this.sessionId,
+                name,
+                race,
+                char_class: charClass,
+                backstory,
+            }, this.userId);
+
+            await this.populateCharacterSelect();
+            this.characterId = response.character.id;
+
+            const select = document.getElementById('chat-character-select') as HTMLSelectElement | null;
+            if (select) {
+                select.value = String(response.character.id);
+            }
+
+            await this.loadBootstrap();
+            showToast(`${response.character.name} is ready to play`, 'success');
+        } catch (error: any) {
+            showToast(error?.message || 'Failed to create browser character', 'error');
+        }
     }
 
     async runCharacterRest(characterId: number, restType: string): Promise<void> {
@@ -3048,7 +3561,9 @@ class ChatInterface {
         }
 
         if (this.chatHistory.length === 0) {
-            container.innerHTML = '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
+            container.innerHTML = this.sessionId
+                ? '<div class="empty-state">This session has no chat history yet. Pick a character or create one to start the adventure.</div>'
+                : '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
             return;
         }
 
@@ -3106,10 +3621,24 @@ class ChatInterface {
             return;
         }
 
+        const currentLocation = this.latestState.game_state?.current_location || this.latestState.locations?.[0]?.name || 'Unknown';
+
         container.innerHTML = `
             <div class="state-block">
                 <h4>Session</h4>
                 <div>${escapeHtml(this.latestState.name || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
+                <h4>Theme</h4>
+                <div>${escapeHtml(this.latestState.world_theme || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
+                <h4>Content Pack</h4>
+                <div>${escapeHtml(this.latestState.game_state?.active_content_pack_id || this.latestState.content_pack_id || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
+                <h4>Current Location</h4>
+                <div>${escapeHtml(currentLocation)}</div>
             </div>
             <div class="state-block">
                 <h4>Party</h4>
@@ -3129,46 +3658,7 @@ class ChatInterface {
     }
 
     private async refreshDashboardPanels(): Promise<void> {
-        this.renderCombatSidebar(null);
-        this.renderSpellSidebar(null, null);
-        this.renderLocationSidebar(null, []);
-        this.renderStatusSidebar([]);
-
-        if (!this.sessionId) {
-            return;
-        }
-
-        try {
-            const [session, activeCombatData] = await Promise.all([
-                api.getSession(this.sessionId),
-                api.getActiveCombat(this.sessionId),
-            ]);
-
-            this.renderCombatSidebar(activeCombatData.combat || null);
-
-            if (!this.characterId) {
-                return;
-            }
-
-            const [character, spellsData, statusData] = await Promise.all([
-                api.getCharacter(this.characterId),
-                api.getCharacterSpells(this.characterId),
-                api.getCharacterStatusEffects(this.characterId),
-            ]);
-
-            this.renderSpellSidebar(spellsData.spells || [], spellsData.spell_slots || {});
-            this.renderStatusSidebar(statusData.status_effects || []);
-
-            if (character.current_location_id) {
-                const [location, connectionData] = await Promise.all([
-                    api.getLocation(character.current_location_id),
-                    api.getLocationConnections(character.current_location_id),
-                ]);
-                this.renderLocationSidebar(location, connectionData.connections || []);
-            }
-        } catch (error) {
-            console.error('Failed to refresh chat dashboard panels', error);
-        }
+        await this.loadBootstrap();
     }
 
     private renderCombatSidebar(combat: any): void {
@@ -3186,7 +3676,7 @@ class ChatInterface {
         }
         container.innerHTML = this.characterId
             ? renderSpellPanel(spells || [], spellSlots || {}, this.characterId)
-            : '<div class="empty-state">Select a character to view spells.</div>';
+            : '<div class="empty-state">Select or create a character to view spells.</div>';
     }
 
     private renderLocationSidebar(location: any, connections: any[]): void {
@@ -3215,7 +3705,7 @@ class ChatInterface {
         }
         container.innerHTML = this.characterId
             ? renderStatusEffectsPanel(statusEffects || [])
-            : '<div class="empty-state">Active buffs and debuffs will appear here.</div>';
+            : '<div class="empty-state">Select or create a character to view buffs and debuffs.</div>';
     }
 }
 
@@ -3309,10 +3799,6 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).editEvent = editEvent;
 (window as any).updateEvent = updateEvent;
 (window as any).deleteEvent = deleteEvent;
-(window as any).loadSnapshots = loadSnapshots;
-(window as any).createSavepoint = createSavepoint;
-(window as any).loadSavepoint = loadSavepoint;
-(window as any).deleteSavepoint = deleteSavepoint;
 (window as any).editCharacter = editCharacter;
 (window as any).updateCharacter = updateCharacter;
 (window as any).showCharacterInventory = showCharacterInventory;
@@ -3373,3 +3859,7 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).removePreviewItem = removePreviewItem;
 (window as any).addItem = addItem;
 (window as any).editSection = editSection;
+(window as any).saveCampaignPreviewEdit = saveCampaignPreviewEdit;
+(window as any).openLocationConnectionEditor = openLocationConnectionEditor;
+(window as any).saveLocationConnection = saveLocationConnection;
+(window as any).deleteLocationConnection = deleteLocationConnection;

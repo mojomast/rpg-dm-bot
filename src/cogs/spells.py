@@ -7,29 +7,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from typing import Optional, List, Dict, Any
-import json
-import os
 import random
 
-# Load spells data
-SPELLS_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'spells.json')
-SPELLS_DATA = {}
-
-def load_spells():
-    global SPELLS_DATA
-    try:
-        with open(SPELLS_FILE, 'r', encoding='utf-8') as f:
-            SPELLS_DATA = json.load(f)
-    except FileNotFoundError:
-        SPELLS_DATA = {"spells": {}, "class_spell_lists": {}}
-
-load_spells()
+from src.utils import load_runtime_content
 
 
 class SpellSelectView(discord.ui.View):
     """View for selecting a spell to cast"""
     
-    def __init__(self, cog, character: Dict, spells: List[Dict], target: str = None):
+    def __init__(self, cog, character: Dict, spells: List[Dict], spell_content: Dict[str, Any], target: str = None):
         super().__init__(timeout=120)
         self.cog = cog
         self.character = character
@@ -37,21 +23,22 @@ class SpellSelectView(discord.ui.View):
         self.target = target
         
         if spells:
-            self.add_item(SpellSelectDropdown(cog, character, spells, target))
+            self.add_item(SpellSelectDropdown(cog, character, spells, spell_content, target))
 
 
 class SpellSelectDropdown(discord.ui.Select):
     """Dropdown for spell selection"""
     
-    def __init__(self, cog, character: Dict, spells: List[Dict], target: str = None):
+    def __init__(self, cog, character: Dict, spells: List[Dict], spell_content: Dict[str, Any], target: str = None):
         self.cog = cog
         self.character = character
         self.target = target
+        self.spell_content = spell_content
         self.spell_map = {s['spell_id']: s for s in spells}
         
         options = []
         for spell in spells[:25]:  # Discord limit
-            spell_data = SPELLS_DATA.get('spells', {}).get(spell['spell_id'], {})
+            spell_data = self.spell_content.get('spells', {}).get(spell['spell_id'], {})
             level_text = "Cantrip" if spell['is_cantrip'] else f"Level {spell['spell_level']}"
             emoji = "✨" if spell['is_cantrip'] else "🔮"
             
@@ -74,7 +61,7 @@ class SpellSelectDropdown(discord.ui.Select):
         
         spell_id = self.values[0]
         spell_db = self.spell_map.get(spell_id)
-        spell_data = SPELLS_DATA.get('spells', {}).get(spell_id, {})
+        spell_data = self.spell_content.get('spells', {}).get(spell_id, {})
         
         if not spell_data:
             await interaction.response.send_message("❌ Spell data not found!", ephemeral=True)
@@ -267,6 +254,26 @@ class Spells(commands.Cog):
     @property
     def db(self):
         return self.bot.db
+
+    async def _get_spell_content(
+        self,
+        *,
+        guild_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        session_id: Optional[int] = None,
+        character: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Load spells.json for the resolved runtime session/content pack."""
+        return await load_runtime_content(
+            self.db,
+            'spells.json',
+            guild_id=guild_id,
+            user_id=user_id,
+            channel_id=channel_id,
+            session_id=session_id,
+            character=character,
+        )
     
     spell_group = app_commands.Group(
         name="spell",
@@ -294,6 +301,13 @@ class Spells(commands.Cog):
                 ephemeral=True
             )
             return
+
+        spell_content = await self._get_spell_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         # Get character's spells
         spells = await self.db.get_character_spells(char['id'], prepared_only=True)
@@ -319,7 +333,7 @@ class Spells(commands.Cog):
                 return
             
             spell = matching[0]
-            spell_data = SPELLS_DATA.get('spells', {}).get(spell['spell_id'], {})
+            spell_data = spell_content.get('spells', {}).get(spell['spell_id'], {})
             
             if spell['is_cantrip']:
                 await self.execute_spell(interaction, char, spell['spell_id'], spell_data, target)
@@ -343,7 +357,7 @@ class Spells(commands.Cog):
                 await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
             # Show spell selection
-            view = SpellSelectView(self, char, spells, target)
+            view = SpellSelectView(self, char, spells, spell_content, target)
             
             embed = discord.Embed(
                 title=f"🔮 {char['name']}'s Spellbook",
@@ -571,9 +585,15 @@ class Spells(commands.Cog):
         
         char_class = char['char_class'].lower()
         level = char['level']
+        spell_content = await self._get_spell_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         # Check if class can cast spells
-        class_spells = SPELLS_DATA.get('class_spell_lists', {}).get(char_class)
+        class_spells = spell_content.get('class_spell_lists', {}).get(char_class)
         
         if not class_spells:
             await interaction.response.send_message(
@@ -588,7 +608,7 @@ class Spells(commands.Cog):
         
         # Get available spells based on level
         available = []
-        all_spells = SPELLS_DATA.get('spells', {})
+        all_spells = spell_content.get('spells', {})
         
         # Add cantrips
         for spell_id in class_spells.get('cantrips', []):
@@ -647,9 +667,14 @@ class Spells(commands.Cog):
     async def spell_info(self, interaction: discord.Interaction, spell_name: str):
         """Get detailed information about a spell"""
         spell_lower = spell_name.lower().replace(' ', '_')
+        spell_content = await self._get_spell_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+        )
         
         # Search for spell
-        all_spells = SPELLS_DATA.get('spells', {})
+        all_spells = spell_content.get('spells', {})
         matching = None
         
         for spell_id, spell in all_spells.items():
@@ -859,6 +884,13 @@ class Spells(commands.Cog):
                 ephemeral=True
             )
             return
+
+        spell_content = await self._get_spell_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         spells = await self.db.get_character_spells(char['id'], prepared_only=True)
         
@@ -877,7 +909,7 @@ class Spells(commands.Cog):
             )
             return
         
-        spell_data = SPELLS_DATA.get('spells', {}).get(spell_db['spell_id'], {})
+        spell_data = spell_content.get('spells', {}).get(spell_db['spell_id'], {})
         
         # Cantrips don't use slots
         if spell_db['is_cantrip']:
@@ -920,15 +952,23 @@ class Spells(commands.Cog):
         char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
         if not char:
             return []
+
+        spell_content = await self._get_spell_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         spells = await self.db.get_character_spells(char['id'], prepared_only=True)
         choices = []
         
         for spell in spells:
-            if current.lower() in spell['spell_name'].lower():
+            spell_name_value = spell_content.get('spells', {}).get(spell['spell_id'], {}).get('name', spell['spell_name'])
+            if current.lower() in spell_name_value.lower():
                 choices.append(app_commands.Choice(
-                    name=spell['spell_name'][:100],
-                    value=spell['spell_name'][:100]
+                    name=spell_name_value[:100],
+                    value=spell_name_value[:100]
                 ))
         
         return choices[:25]

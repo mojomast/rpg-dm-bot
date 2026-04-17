@@ -80,7 +80,7 @@ class ChatHandler:
 
             char_class = char.get("char_class") or char.get("class", "Unknown")
             context_lines.append(
-                f"- {message['display_name']} is playing {char['name']}: Level {char['level']} {char['race']} {char_class}, HP {char['hp']}/{char['max_hp']}"
+                f"- {message['display_name']} is playing {char['name']} (character_id={char['id']}, user_id={message['user_id']}): Level {char['level']} {char['race']} {char_class}, HP {char['hp']}/{char['max_hp']}"
             )
 
         if not context_lines:
@@ -95,11 +95,14 @@ class ChatHandler:
         channel_id: int,
         session_id: Optional[int] = None,
         character_id: Optional[int] = None,
+        include_character_context: bool = True,
     ) -> str:
         """Build context about the current game state."""
         context_parts: List[str] = []
 
-        char = await self.db.get_character(character_id) if character_id else await self.db.get_active_character(user_id, guild_id)
+        char = None
+        if include_character_context:
+            char = await self.db.get_character(character_id) if character_id else await self.db.get_active_character(user_id, guild_id)
         if char:
             char_class = char.get("char_class") or char.get("class", "Unknown")
             context_parts.append(
@@ -150,10 +153,12 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
             if game_state:
                 if game_state.get("current_scene"):
                     context_parts.append(f"\nCURRENT SCENE: {game_state['current_scene']}")
-                if game_state.get("current_location"):
-                    context_parts.append(f"CURRENT LOCATION (NAME): {game_state['current_location']}")
                 if game_state.get("current_location_id"):
                     current_location = await self.db.get_location(game_state["current_location_id"])
+                if current_location:
+                    context_parts.append(f"CURRENT LOCATION: {current_location['name']}")
+                elif game_state.get("current_location"):
+                    context_parts.append(f"CURRENT LOCATION: {game_state['current_location']}")
                 if game_state.get("dm_notes"):
                     context_parts.append(f"DM NOTES: {game_state['dm_notes']}")
 
@@ -208,13 +213,14 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
                 quest = await self.db.get_quest(session["current_quest_id"])
                 if quest:
                     stages = await self.db.get_quest_stages(quest["id"])
-                    current_stage = stages[quest["current_stage"]] if quest["current_stage"] < len(stages) else None
+                    stage_info = await self.db.get_quest_current_stage(quest["id"], character_id)
+                    current_stage = stage_info.get("stage")
                     context_parts.append(
                         f"""
 CURRENT QUEST: {quest['title']}
 Description: {quest['description']}
 Difficulty: {quest['difficulty']}
-Stage: {quest['current_stage'] + 1}/{len(stages)}"""
+Stage: {stage_info['index'] + 1}/{stage_info['total']}"""
                     )
                     if current_stage:
                         context_parts.append(
@@ -258,6 +264,8 @@ Multiple players may act simultaneously. Handle each player's action in sequence
 4. If players are doing different things, describe each separately but in the same scene
 5. Keep all players in the same location unless they explicitly split up
 6. End with a prompt that addresses the whole party
+7. For any player-specific tool call, include the acting player's `character_id` from the batch roster whenever possible
+8. If a player-specific tool call cannot include `character_id`, include `actor_name` matching the batch roster exactly
 
 IMPORTANT: Each player's action is prefixed with their name. Make sure you address each player's action!
 """
@@ -283,6 +291,67 @@ CRITICAL:
 {'- Address ALL player actions in your response, not just one!\n- Use get_character_info if you need to know who a player is playing\n' if include_multiplayer else ''}"""
         )
         return "\n\n".join(sections)
+
+    def _match_batch_actor_by_name(self, batch_actors: List[Dict[str, Any]], actor_name: Any) -> Optional[Dict[str, Any]]:
+        normalized_name = str(actor_name or "").strip().lower()
+        if not normalized_name:
+            return None
+
+        for actor in batch_actors:
+            if str(actor.get("character_name") or "").strip().lower() == normalized_name:
+                return actor
+            if str(actor.get("display_name") or "").strip().lower() == normalized_name:
+                return actor
+        return None
+
+    async def _resolve_tool_context(self, base_context: Dict[str, Any], tool_args: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolve the acting player context for a tool call in multiplayer turns."""
+        tool_context = dict(base_context)
+        batch_actors = tool_context.get("batch_actors") or []
+        if not batch_actors:
+            return tool_context
+
+        actor = None
+        character_id = tool_args.get("character_id")
+        user_id = tool_args.get("user_id") or tool_args.get("actor_user_id")
+        actor_name = tool_args.get("actor_name") or tool_args.get("character_name") or tool_args.get("player_name")
+
+        if character_id is not None:
+            try:
+                character_id = int(character_id)
+            except (TypeError, ValueError):
+                character_id = None
+            if character_id is not None:
+                actor = next((entry for entry in batch_actors if entry.get("character_id") == character_id), None)
+                if not actor:
+                    char = await self.db.get_character(character_id)
+                    if char:
+                        actor = {
+                            "user_id": char.get("user_id"),
+                            "character_id": char.get("id"),
+                            "character_name": char.get("name"),
+                        }
+        elif user_id is not None:
+            try:
+                user_id = int(user_id)
+            except (TypeError, ValueError):
+                user_id = None
+            if user_id is not None:
+                actor = next((entry for entry in batch_actors if entry.get("user_id") == user_id), None)
+        elif actor_name:
+            actor = self._match_batch_actor_by_name(batch_actors, actor_name)
+        elif len(batch_actors) == 1:
+            actor = batch_actors[0]
+
+        if actor:
+            if actor.get("user_id") is not None:
+                tool_context["user_id"] = actor["user_id"]
+            if actor.get("character_id") is not None:
+                tool_context["character_id"] = actor["character_id"]
+            if actor.get("character_name"):
+                tool_context["character_name"] = actor["character_name"]
+
+        return tool_context
 
     async def _run_tool_loop(self, messages: List[Dict[str, Any]], context: Dict[str, Any]) -> tuple[str, List[Dict[str, Any]]]:
         response_text = ""
@@ -316,7 +385,8 @@ CRITICAL:
                         tool_args = {}
 
                     logger.info("Executing tool: %s with args: %s", tool_name, tool_args)
-                    tool_result = await self.tools.execute_tool(tool_name, tool_args, context)
+                    tool_context = await self._resolve_tool_context(context, tool_args)
+                    tool_result = await self.tools.execute_tool(tool_name, tool_args, tool_context)
                     tool_results.append({
                         "tool_name": tool_name,
                         "args": tool_args,
@@ -413,8 +483,19 @@ CRITICAL:
             channel_id,
             resolved_session_id,
             character_id=first_character_id,
+            include_character_context=False,
         )
         game_context += await self.build_batch_character_context(messages)
+
+        batch_actors = [
+            {
+                "user_id": message["user_id"],
+                "display_name": message["display_name"],
+                "character_name": message.get("character_name"),
+                "character_id": message.get("character_id"),
+            }
+            for message in messages
+        ]
 
         player_actions = "\n".join(
             [f"**{msg['display_name']}** ({msg['character_name']}): {msg['content']}" for msg in messages]
@@ -427,11 +508,13 @@ CRITICAL:
         ]
         context = {
             "guild_id": guild_id,
-            "user_id": first_user_id,
             "channel_id": channel_id,
             "session_id": resolved_session_id,
-            "character_id": first_character_id,
+            "batch_actors": batch_actors,
         }
+        if len(batch_actors) == 1:
+            context["user_id"] = first_user_id
+            context["character_id"] = first_character_id
 
         response_text, tool_results = await self._run_tool_loop(llm_messages, context)
         mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""

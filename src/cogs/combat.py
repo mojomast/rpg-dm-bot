@@ -12,6 +12,40 @@ import logging
 logger = logging.getLogger('rpg.combat')
 
 
+async def resolve_attack(db, attacker_char: dict, target_combatant: dict) -> dict:
+    """Resolve a simple weapon attack against a combatant."""
+    str_mod = (attacker_char['strength'] - 10) // 2
+    attack_roll = random.randint(1, 20)
+    total = attack_roll + str_mod
+    target_ac = 10
+
+    is_crit = attack_roll == 20
+    is_fumble = attack_roll == 1
+    hit = (total >= target_ac or is_crit) and not is_fumble
+
+    damage = 0
+    hp_result = None
+    if is_crit:
+        damage = random.randint(2, 16) + str_mod
+    elif hit:
+        damage = random.randint(1, 8) + str_mod
+
+    if hit and damage > 0:
+        hp_result = await db.update_combatant_hp(target_combatant['id'], -damage)
+
+    return {
+        'attack_roll': attack_roll,
+        'attack_bonus': str_mod,
+        'total': total,
+        'target_ac': target_ac,
+        'is_crit': is_crit,
+        'is_fumble': is_fumble,
+        'hit': hit,
+        'damage': damage,
+        'hp_result': hp_result,
+    }
+
+
 class CombatView(discord.ui.View):
     """Interactive combat action buttons"""
     
@@ -114,38 +148,30 @@ class TargetSelectView(discord.ui.View):
             await interaction.response.send_message("No active character!", ephemeral=True)
             return
         
-        # Calculate attack
-        attack_bonus = (char['strength'] - 10) // 2  # Simplified
-        attack_roll = random.randint(1, 20)
-        total_attack = attack_roll + attack_bonus
-        
-        target_ac = 10  # Default AC
-        
-        is_crit = attack_roll == 20
-        is_fumble = attack_roll == 1
-        hit = (total_attack >= target_ac or is_crit) and not is_fumble
+        target_combatant = next((c for c in await self.bot.db.get_combatants(self.encounter_id) if c['id'] == target_id), None)
+        if not target_combatant:
+            await interaction.response.send_message("Target not found!", ephemeral=True)
+            return
+
+        attack = await resolve_attack(self.bot.db, char, target_combatant)
         
         # Build result message
         lines = []
-        lines.append(f"⚔️ **{char['name']}** attacks!")
-        lines.append(f"🎲 Attack Roll: {attack_roll} + {attack_bonus} = **{total_attack}** vs AC {target_ac}")
+        lines.append(f"⚔️ **{char['name']}** attacks **{target_combatant['name']}**!")
+        lines.append(f"🎲 Attack Roll: {attack['attack_roll']} + {attack['attack_bonus']} = **{attack['total']}** vs AC {attack['target_ac']}")
         
-        if is_crit:
+        if attack['is_crit']:
             lines.append("🎯 **CRITICAL HIT!**")
-            damage = random.randint(2, 16)  # 2d8 for crit
-        elif is_fumble:
+        elif attack['is_fumble']:
             lines.append("💥 **CRITICAL MISS!**")
-            damage = 0
-        elif hit:
+        elif attack['hit']:
             lines.append("✅ **HIT!**")
-            damage = random.randint(1, 8) + (char['strength'] - 10) // 2
         else:
             lines.append("❌ **MISS!**")
-            damage = 0
         
-        if hit and damage > 0:
-            result = await self.bot.db.update_combatant_hp(target_id, -damage)
-            lines.append(f"💥 Damage: **{damage}**")
+        if attack['hit'] and attack['damage'] > 0:
+            result = attack['hp_result'] or {}
+            lines.append(f"💥 Damage: **{attack['damage']}**")
             
             if result.get('is_dead'):
                 lines.append(f"💀 **{result['name']} is defeated!**")
@@ -381,36 +407,23 @@ class Combat(commands.Cog):
             )
             return
         
-        # Roll attack
-        str_mod = (char['strength'] - 10) // 2
-        attack_roll = random.randint(1, 20)
-        total = attack_roll + str_mod
-        
-        is_crit = attack_roll == 20
-        is_fumble = attack_roll == 1
-        target_ac = 10
-        
-        hit = (total >= target_ac or is_crit) and not is_fumble
+        attack = await resolve_attack(self.db, char, target_combatant)
         
         lines = []
         lines.append(f"⚔️ **{char['name']}** attacks **{target_combatant['name']}**!")
-        lines.append(f"🎲 Roll: {attack_roll} + {str_mod} = **{total}** vs AC {target_ac}")
+        lines.append(f"🎲 Roll: {attack['attack_roll']} + {attack['attack_bonus']} = **{attack['total']}** vs AC {attack['target_ac']}")
         
-        if is_crit:
-            damage = random.randint(2, 16) + str_mod  # 2d8 + mod
-            lines.append(f"🎯 **CRITICAL HIT!** 💥 {damage} damage!")
-        elif is_fumble:
-            damage = 0
+        if attack['is_crit']:
+            lines.append(f"🎯 **CRITICAL HIT!** 💥 {attack['damage']} damage!")
+        elif attack['is_fumble']:
             lines.append("💥 **CRITICAL MISS!** Your attack goes wide!")
-        elif hit:
-            damage = random.randint(1, 8) + str_mod
-            lines.append(f"✅ **HIT!** 💥 {damage} damage!")
+        elif attack['hit']:
+            lines.append(f"✅ **HIT!** 💥 {attack['damage']} damage!")
         else:
-            damage = 0
             lines.append("❌ **MISS!**")
         
-        if hit and damage > 0:
-            result = await self.db.update_combatant_hp(target_combatant['id'], -damage)
+        if attack['hit'] and attack['damage'] > 0:
+            result = attack['hp_result'] or {}
             
             if result.get('is_dead'):
                 lines.append(f"💀 **{target_combatant['name']} is defeated!**")
@@ -420,7 +433,7 @@ class Combat(commands.Cog):
         embed = discord.Embed(
             title="⚔️ Attack!",
             description="\n".join(lines),
-            color=discord.Color.red() if hit else discord.Color.grey()
+            color=discord.Color.red() if attack['hit'] else discord.Color.grey()
         )
         
         await interaction.response.send_message(embed=embed)

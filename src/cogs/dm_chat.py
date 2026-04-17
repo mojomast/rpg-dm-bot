@@ -10,10 +10,12 @@ from discord import ui
 import logging
 import json
 import asyncio
+import re
 from typing import Optional, Dict, List
 from datetime import datetime
 
 from src.mechanics_tracker import new_tracker, get_tracker
+from src.utils import send_chunked
 
 logger = logging.getLogger('rpg.dm_chat')
 
@@ -56,48 +58,25 @@ class PlayerActionButton(ui.Button):
         
         # Build the action prompt
         action_prompts = {
-            'option_1': f"{char['name']} chooses option 1.",
-            'option_2': f"{char['name']} chooses option 2.",
-            'option_3': f"{char['name']} chooses option 3.",
             'look': f"{char['name']} looks around carefully.",
             'continue': f"{char['name']} continues forward.",
         }
-        
-        prompt = action_prompts.get(self.action, f"{char['name']} does: {self.action}")
-        
-        # Process through DM
-        class FakeMessage:
-            def __init__(self, interaction):
-                self.channel = interaction.channel
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.content = prompt
-        
-        response = await cog.process_dm_message(FakeMessage(interaction), prompt)
-        
-        # Get mechanics display
-        tracker = get_tracker()
-        mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""
-        
-        # Build response
-        full_response = ""
-        if mechanics_text:
-            full_response = mechanics_text + "\n"
-        full_response += response
-        
-        # Create new view with buttons
-        view = GameActionsView(cog)
-        
-        # Send response
-        if len(full_response) > 2000:
-            chunks = [full_response[i:i+2000] for i in range(0, len(full_response), 2000)]
-            for i, chunk in enumerate(chunks):
-                if i == len(chunks) - 1:
-                    await interaction.followup.send(chunk, view=view)
-                else:
-                    await interaction.followup.send(chunk)
+        if self.action.startswith('option_'):
+            option_text = self.label
+            prompt = f"{char['name']} chooses: {option_text}"
         else:
-            await interaction.followup.send(full_response, view=view)
+            prompt = action_prompts.get(self.action, f"{char['name']} does: {self.action}")
+
+        response, mechanics_text = await cog.process_dm_input(
+            channel=interaction.channel,
+            guild=interaction.guild,
+            author=interaction.user,
+            user_message=prompt,
+        )
+
+        full_response = cog.build_full_response(response, mechanics_text)
+        view = GameActionsView(cog, options=cog.extract_response_options(response))
+        await send_chunked(interaction.followup, full_response, view=view)
 
 
 class InfoButton(ui.Button):
@@ -174,7 +153,7 @@ class InfoButton(ui.Button):
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
     async def _show_quest_info(self, interaction: discord.Interaction, cog):
-        session = await cog.db.get_user_active_session(interaction.guild.id, interaction.user.id)
+        session = await cog.resolve_session(interaction.guild.id, interaction.user.id, interaction.channel.id)
         if not session or not session.get('current_quest_id'):
             await interaction.response.send_message("📋 No active quest!", ephemeral=True)
             return
@@ -225,7 +204,7 @@ class InfoButton(ui.Button):
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
     async def _show_location_info(self, interaction: discord.Interaction, cog):
-        session = await cog.db.get_user_active_session(interaction.guild.id, interaction.user.id)
+        session = await cog.resolve_session(interaction.guild.id, interaction.user.id, interaction.channel.id)
         if not session:
             await interaction.response.send_message("🗺️ No active session!", ephemeral=True)
             return
@@ -302,7 +281,7 @@ class InfoButton(ui.Button):
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
     async def _show_party_info(self, interaction: discord.Interaction, cog):
-        session = await cog.db.get_user_active_session(interaction.guild.id, interaction.user.id)
+        session = await cog.resolve_session(interaction.guild.id, interaction.user.id, interaction.channel.id)
         if not session:
             await interaction.response.send_message("👥 No active session!", ephemeral=True)
             return
@@ -352,7 +331,7 @@ class GameActionsView(ui.View):
         if options:
             for i, option in enumerate(options[:3], 1):
                 self.add_item(PlayerActionButton(
-                    label=f"Option {i}",
+                    label=option[:80],
                     action=f"option_{i}",
                     style=discord.ButtonStyle.primary,
                     emoji="🎯"
@@ -452,6 +431,23 @@ class DMChat(commands.Cog):
         """Mark a new session as started for a channel - clears old history"""
         self.histories[channel_id] = {'session_id': session_id, 'messages': []}
         logger.info(f"Started new session {session_id} for channel {channel_id}, cleared history")
+
+    async def resolve_session(self, guild_id: int, user_id: int = None, channel_id: int = None):
+        """Resolve the active session for this channel/user context."""
+        session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
+        if not session_id:
+            return None
+        return await self.db.get_session(session_id)
+
+    def build_full_response(self, response_text: str, mechanics_text: str = "") -> str:
+        """Combine mechanics and response text for sending."""
+        return f"{mechanics_text}\n{response_text}" if mechanics_text else response_text
+
+    def extract_response_options(self, response_text: str) -> List[str]:
+        """Extract numbered options from a DM response."""
+        if not response_text:
+            return []
+        return [match.group(1).strip() for match in re.finditer(r'^\s*[1-3][.)]\s*(.+)', response_text, re.MULTILINE)]
     
     async def get_game_context(
         self,
@@ -493,23 +489,7 @@ PLAYER CHARACTER:
                 if char_location:
                     context_parts.append(f"- Current Location: {char_location['name']}")
         
-        # Get active session - use provided session_id or look it up
-        session = None
-        if session_id:
-            session = await self.db.get_session(session_id)
-            if session:
-                logger.debug(f"get_game_context: Using provided session_id {session_id} ({session['name']})")
-        if not session:
-            # Fallback: get session from channel or user
-            session = await self.db.get_user_active_session(guild_id, user_id)
-            if session:
-                logger.debug(f"get_game_context: Fell back to user session {session['id']} ({session['name']})")
-        if not session:
-            # Last fallback: first active session for the guild
-            sessions = await self.db.get_sessions(guild_id, status='active')
-            session = sessions[0] if sessions else None
-            if session:
-                logger.debug(f"get_game_context: Fell back to first guild session {session['id']} ({session['name']})")
+        session = await self.db.get_session(session_id) if session_id else await self.resolve_session(guild_id, user_id, channel_id)
         
         if session:
             context_parts.append(f"""
@@ -832,9 +812,11 @@ CRITICAL:
         
         return response_text or "*The Dungeon Master remains silent.*", mechanics_text
     
-    async def process_dm_message(
+    async def process_dm_input(
         self,
-        message: discord.Message,
+        channel,
+        guild,
+        author,
         user_message: str
     ) -> tuple:
         """Process a message through the AI DM with tool support
@@ -842,9 +824,9 @@ CRITICAL:
         Returns:
             tuple: (response_text, mechanics_text) - The DM response and formatted game mechanics
         """
-        channel_id = message.channel.id
-        guild_id = message.guild.id
-        user_id = message.author.id
+        channel_id = channel.id
+        guild_id = guild.id
+        user_id = author.id
         
         # Initialize new mechanics tracker for this message
         tracker = new_tracker()
@@ -885,10 +867,10 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         
         # Get character name for this player
         char = await self.db.get_active_character(user_id, guild_id)
-        char_name = char['name'] if char else message.author.display_name
+        char_name = char['name'] if char else author.display_name
         
         # Add user message to history with character name
-        user_msg = {"role": "user", "content": f"[{message.author.display_name}] ({char_name}): {user_message}"}
+        user_msg = {"role": "user", "content": f"[{author.display_name}] ({char_name}): {user_message}"}
         self.add_to_history(channel_id, user_msg, session_id)
         
         # Build messages for LLM
@@ -969,6 +951,14 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""
         
         return response_text or "*The Dungeon Master remains silent.*", mechanics_text
+
+    async def process_dm_message(
+        self,
+        message: discord.Message,
+        user_message: str
+    ) -> tuple:
+        """Compatibility wrapper for Discord message objects."""
+        return await self.process_dm_input(message.channel, message.guild, message.author, user_message)
     
     async def queue_player_message(self, message: discord.Message, content: str):
         """Queue a player message for batched processing"""
@@ -1034,25 +1024,9 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
                 response, mechanics_text = await self.process_batched_messages(channel, messages)
                 
                 # Build full response with mechanics
-                full_response = ""
-                if mechanics_text:
-                    full_response = mechanics_text + "\n"
-                full_response += response
-                
-                # Create view with action buttons
-                view = GameActionsView(self)
-                
-                # Split response if too long
-                if len(full_response) > 2000:
-                    chunks = [full_response[i:i+2000] for i in range(0, len(full_response), 2000)]
-                    for i, chunk in enumerate(chunks):
-                        if i == len(chunks) - 1:
-                            # Add buttons to last chunk
-                            await channel.send(chunk, view=view)
-                        else:
-                            await channel.send(chunk)
-                else:
-                    await channel.send(full_response, view=view)
+                full_response = self.build_full_response(response, mechanics_text)
+                view = GameActionsView(self, options=self.extract_response_options(response))
+                await send_chunked(channel, full_response, view=view)
                     
         except asyncio.CancelledError:
             # Task was cancelled, new messages came in - that's fine
@@ -1112,16 +1086,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
         
-        # Create a fake message object for processing
-        class FakeMessage:
-            def __init__(self, interaction):
-                self.channel = interaction.channel
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.content = message
-        
-        fake_msg = FakeMessage(interaction)
-        response, mechanics_text = await self.process_dm_message(fake_msg, message)
+        response, mechanics_text = await self.process_dm_input(interaction.channel, interaction.guild, interaction.user, message)
         
         # Handle empty/silent responses
         if not response or response.strip() == "" or response == "*The Dungeon Master remains silent.*":
@@ -1139,7 +1104,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         full_response += response
         
         # Create view with action buttons
-        view = GameActionsView(self)
+        view = GameActionsView(self, options=self.extract_response_options(response))
         
         # Create embed for response
         embed = discord.Embed(
@@ -1191,15 +1156,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         
         prompt = action_prompts.get(action, "What happens next?")
         
-        class FakeMessage:
-            def __init__(self, interaction):
-                self.channel = interaction.channel
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.content = prompt
-        
-        fake_msg = FakeMessage(interaction)
-        response, mechanics_text = await self.process_dm_message(fake_msg, prompt)
+        response, mechanics_text = await self.process_dm_input(interaction.channel, interaction.guild, interaction.user, prompt)
         
         # Build full response with mechanics
         full_response = ""
@@ -1218,7 +1175,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         }
         
         # Create view with action buttons
-        view = GameActionsView(self)
+        view = GameActionsView(self, options=self.extract_response_options(response))
         
         embed = discord.Embed(
             title=action_titles.get(action, "Action"),
@@ -1253,15 +1210,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         
         prompt = f"Narrate this scene in a {tone} tone: {scene}"
         
-        class FakeMessage:
-            def __init__(self, interaction):
-                self.channel = interaction.channel
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.content = prompt
-        
-        fake_msg = FakeMessage(interaction)
-        response, mechanics_text = await self.process_dm_message(fake_msg, prompt)
+        response, mechanics_text = await self.process_dm_input(interaction.channel, interaction.guild, interaction.user, prompt)
         
         # Build full response with mechanics
         full_response = ""
@@ -1309,15 +1258,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         dc_text = f" against DC {difficulty}" if difficulty else ""
         prompt = f"I want to make a {skill} check{dc_text}. Roll the dice and narrate the result."
         
-        class FakeMessage:
-            def __init__(self, interaction):
-                self.channel = interaction.channel
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.content = prompt
-        
-        fake_msg = FakeMessage(interaction)
-        response, mechanics_text = await self.process_dm_message(fake_msg, prompt)
+        response, mechanics_text = await self.process_dm_input(interaction.channel, interaction.guild, interaction.user, prompt)
         
         # Build full response with mechanics
         full_response = ""
@@ -1326,7 +1267,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         full_response += response
         
         # Create view with action buttons
-        view = GameActionsView(self)
+        view = GameActionsView(self, options=self.extract_response_options(response))
         
         embed = discord.Embed(
             title=f"🎲 {skill.title()} Check",
@@ -1356,15 +1297,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         
         prompt = f"Set the following scene for our adventure and describe what the players see, hear, and feel: {description}"
         
-        class FakeMessage:
-            def __init__(self, interaction):
-                self.channel = interaction.channel
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.content = prompt
-        
-        fake_msg = FakeMessage(interaction)
-        response, mechanics_text = await self.process_dm_message(fake_msg, prompt)
+        response, mechanics_text = await self.process_dm_input(interaction.channel, interaction.guild, interaction.user, prompt)
         
         # Build full response with mechanics
         full_response = ""
@@ -1373,7 +1306,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         full_response += response
         
         # Create view with action buttons
-        view = GameActionsView(self)
+        view = GameActionsView(self, options=self.extract_response_options(response))
         
         embed = discord.Embed(
             title="🏰 Scene Set",

@@ -199,8 +199,8 @@
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="campaign-guild-id">Discord Guild ID *</label>
-                                <input type="number" id="campaign-guild-id" placeholder="Discord server ID" required>
+                                <label for="campaign-guild-id">Discord Guild ID (ussyverse)</label>
+                                <input type="number" id="campaign-guild-id" placeholder="Discord server ID" required readonly>
                             </div>
                             <div class="form-group">
                                 <label for="campaign-dm-id">DM User ID *</label>
@@ -503,6 +503,10 @@
                             <div class="chat-toolbar-group">
                                 <label for="chat-character-select">Character</label>
                                 <select id="chat-character-select"></select>
+                            </div>
+                            <div class="chat-toolbar-group">
+                                <label>&nbsp;</label>
+                                <button type="button" class="btn btn-small btn-secondary" onclick="window.chatInterface?.createBrowserCharacter()">Create Character</button>
                             </div>
                         </div>
 

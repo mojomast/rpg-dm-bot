@@ -13,7 +13,7 @@ from src.cogs.skills import Skills
 @pytest.mark.asyncio
 async def test_dm_chat_resolve_session_rejects_other_guild():
     db = SimpleNamespace(get_session=AsyncMock(return_value={"id": 7, "guild_id": 999}))
-    cog = DMChat(SimpleNamespace(db=db, llm=None, tools=None))
+    cog = DMChat(SimpleNamespace(db=db, llm=None, prompts=None, tool_schemas=None, tools=None))
     cog.get_active_session_id = AsyncMock(return_value=7)
 
     session = await cog.resolve_session(guild_id=123, user_id=1, channel_id=2)

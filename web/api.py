@@ -185,6 +185,14 @@ class CharacterUpdate(BaseModel):
     max_mana: Optional[int] = None
     gold: Optional[int] = None
 
+
+class BrowserCharacterCreate(BaseModel):
+    session_id: int
+    name: str
+    race: str
+    char_class: str
+    backstory: Optional[str] = None
+
 class InventoryItemAdd(BaseModel):
     item_id: str
     item_name: str
@@ -801,6 +809,55 @@ async def update_character(char_id: int, character: CharacterUpdate):
     if updates:
         await db.update_character(char_id, **updates)
     return {"message": "Character updated"}
+
+
+@app.post("/api/characters/browser")
+async def create_browser_character(
+    character: BrowserCharacterCreate,
+    x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity"),
+):
+    """Create and attach a browser-playable character to a session."""
+    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
+        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+
+    session = await db.get_session(character.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    web_user_id = web_user_id_from_uuid(x_web_identity)
+    existing_participants = await db.get_session_participants(character.session_id)
+    existing_character_id = next(
+        (
+            participant.get('character_id')
+            for participant in existing_participants
+            if participant.get('user_id') == web_user_id and participant.get('character_id')
+        ),
+        None,
+    )
+    if existing_character_id:
+        raise HTTPException(status_code=400, detail="Browser player already has a character in this session")
+
+    char_id = await db.create_character(
+        user_id=web_user_id,
+        guild_id=session['guild_id'],
+        name=character.name,
+        race=character.race,
+        char_class=character.char_class,
+        stats={
+            'strength': 12,
+            'dexterity': 12,
+            'constitution': 12,
+            'intelligence': 12,
+            'wisdom': 12,
+            'charisma': 12,
+        },
+        backstory=character.backstory,
+        session_id=character.session_id,
+    )
+    await db.join_session(character.session_id, web_user_id, character_id=char_id)
+
+    created = await db.get_character(char_id)
+    return {"character": created}
 
 # ============================================================================
 # INVENTORY ENDPOINTS

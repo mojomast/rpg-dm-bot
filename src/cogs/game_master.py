@@ -658,8 +658,8 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
             admin_embed.add_field(
                 name="🎮 Game Commands",
                 value=(
-                    f"`/game begin {session_id}` - Start the adventure\n"
-                    f"`/game pause {session_id}` - Pause the game\n"
+                    f"`/session start {session_id}` - Start the adventure\n"
+                    f"`/session pause {session_id}` - Pause the game\n"
                     f"`/game end {session_id}` - End the session\n"
                     f"`/game status {session_id}` - Check game status"
                 ),
@@ -713,7 +713,7 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
             embed.add_field(name="Your Character", value=f"{char['name']} the {char['race']} {char['char_class']}", inline=True)
             embed.add_field(
                 name="Next Steps",
-                value=f"• Share the session ID for others to join\n• Use `/game begin {session_id}` when ready to start!",
+                value=f"• Share the session ID for others to join\n• Use `/session start {session_id}` when ready to start!",
                 inline=False
             )
             
@@ -739,7 +739,7 @@ class BeginGameView(discord.ui.View):
     async def wait_players(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Just acknowledge waiting"""
         await interaction.response.send_message(
-            f"👍 Take your time! Use `/game begin {self.session_id}` when everyone's ready.",
+            f"👍 Take your time! Use `/session start {self.session_id}` when everyone's ready.",
             ephemeral=True
         )
 
@@ -1128,9 +1128,9 @@ class GameMaster(commands.Cog):
             admin_embed.add_field(
                 name="Commands",
                 value=(
-                    f"`/game begin {session_id}` - Start the adventure\n"
+                    f"`/session start {session_id}` - Start the adventure\n"
                     f"`/game status {session_id}` - View game status\n"
-                    f"`/game pause {session_id}` - Pause game\n"
+                    f"`/session pause {session_id}` - Pause game\n"
                     f"`/game end {session_id}` - End session"
                 ),
                 inline=False
@@ -1158,7 +1158,7 @@ class GameMaster(commands.Cog):
             embed.add_field(name="Session ID", value=str(session_id), inline=True)
             embed.add_field(
                 name="Next Steps",
-                value=f"• Others join with `/game join {session_id}`\n• Begin with `/game begin {session_id}`",
+                value=f"• Others join with `/game join {session_id}`\n• Begin with `/session start {session_id}`",
                 inline=False
             )
             view = BeginGameView(self, session_id)
@@ -1265,7 +1265,11 @@ class GameMaster(commands.Cog):
                 ephemeral=True
             )
             return
-        
+
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog:
+            return await sessions_cog.start_session.callback(sessions_cog, interaction, session_id)
+
         await self.begin_game(interaction, session_id)
     
     async def begin_game(self, interaction: discord.Interaction, session_id: int, resume: bool = False):
@@ -1388,6 +1392,7 @@ class GameMaster(commands.Cog):
         }
         
         # Save game state to database for persistence
+        existing_game_state = await self.db.get_game_state(session_id)
         state_updates = {
             'dm_notes': f"Adventure '{session['name']}' has begun. {session['description']}",
             'game_data': {
@@ -1399,7 +1404,16 @@ class GameMaster(commands.Cog):
         }
         if not resume:
             state_updates['current_scene'] = 'Opening Scene'
-            state_updates['current_location'] = 'Starting Location'
+            if not existing_game_state or not existing_game_state.get('current_location'):
+                state_updates['current_location'] = 'Starting Location'
+        else:
+            if existing_game_state:
+                if existing_game_state.get('current_scene'):
+                    state_updates['current_scene'] = existing_game_state['current_scene']
+                if existing_game_state.get('current_location'):
+                    state_updates['current_location'] = existing_game_state['current_location']
+                if existing_game_state.get('current_location_id'):
+                    state_updates['current_location_id'] = existing_game_state['current_location_id']
 
         await self.db.save_game_state(session_id=session_id, **state_updates)
         
@@ -1411,7 +1425,7 @@ class GameMaster(commands.Cog):
                 await dm_channel.send(
                     f"🎮 **{session['name']}** is now live!\n\n"
                     f"The AI DM will keep things moving. Use `/dm` or `/narrate` to guide the story.\n"
-                    f"Use `/game pause {session_id}` if you need a break!"
+                    f"Use `/session pause {session_id}` if you need a break!"
                 )
         except discord.Forbidden:
             pass
@@ -1483,6 +1497,10 @@ class GameMaster(commands.Cog):
     @app_commands.describe(session_id="The session ID to pause")
     async def pause_game(self, interaction: discord.Interaction, session_id: int):
         """Pause a game"""
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog:
+            return await sessions_cog.pause_session.callback(sessions_cog, interaction, session_id)
+
         session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
@@ -1505,7 +1523,7 @@ class GameMaster(commands.Cog):
         
         await interaction.response.send_message(
             f"⏸️ **{session['name']}** has been paused.\n"
-            f"Use `/game begin {session_id}` to resume!"
+            f"Use `/session resume {session_id}` to resume!"
         )
     
     @game_group.command(name="end", description="End the current game (creator only)")

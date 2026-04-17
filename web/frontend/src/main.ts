@@ -47,6 +47,10 @@ interface ChatBootstrapResponse {
     connections: any[];
 }
 
+interface BrowserCharacterResponse {
+    character: any;
+}
+
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
     const headers = {
@@ -87,6 +91,13 @@ const api = {
             },
         });
     },
+    createBrowserCharacter: (data: any, webIdentity: string) => apiCall<BrowserCharacterResponse>('/characters/browser', {
+        method: 'POST',
+        headers: {
+            'X-Web-Identity': webIdentity,
+        },
+        body: JSON.stringify(data),
+    }),
     chatWithDM: (data: any, webIdentity: string) => apiCall<ChatApiResponse>('/chat', {
         method: 'POST',
         headers: {
@@ -3059,6 +3070,45 @@ class ChatInterface {
         await this.sendMessage(message);
     }
 
+    async createBrowserCharacter(): Promise<void> {
+        if (!this.sessionId) {
+            showToast('Select a session first', 'error');
+            return;
+        }
+
+        const name = prompt('Character name?')?.trim();
+        if (!name) {
+            return;
+        }
+
+        const race = prompt('Character race?', 'human')?.trim() || 'human';
+        const charClass = prompt('Character class?', 'warrior')?.trim() || 'warrior';
+        const backstory = prompt('Short backstory? (optional)')?.trim() || '';
+
+        try {
+            const response = await api.createBrowserCharacter({
+                session_id: this.sessionId,
+                name,
+                race,
+                char_class: charClass,
+                backstory,
+            }, this.userId);
+
+            await this.populateCharacterSelect();
+            this.characterId = response.character.id;
+
+            const select = document.getElementById('chat-character-select') as HTMLSelectElement | null;
+            if (select) {
+                select.value = String(response.character.id);
+            }
+
+            await this.loadBootstrap();
+            showToast(`${response.character.name} is ready to play`, 'success');
+        } catch (error: any) {
+            showToast(error?.message || 'Failed to create browser character', 'error');
+        }
+    }
+
     async runCharacterRest(characterId: number, restType: string): Promise<void> {
         try {
             await api.characterRest(characterId, restType);
@@ -3132,7 +3182,7 @@ class ChatInterface {
 
         if (this.chatHistory.length === 0) {
             container.innerHTML = this.sessionId
-                ? '<div class="empty-state">This session has no chat history yet. Pick a character and start the adventure.</div>'
+                ? '<div class="empty-state">This session has no chat history yet. Pick a character or create one to start the adventure.</div>'
                 : '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
             return;
         }
@@ -3238,7 +3288,7 @@ class ChatInterface {
         }
         container.innerHTML = this.characterId
             ? renderSpellPanel(spells || [], spellSlots || {}, this.characterId)
-            : '<div class="empty-state">Select a character to view spells.</div>';
+            : '<div class="empty-state">Select or create a character to view spells.</div>';
     }
 
     private renderLocationSidebar(location: any, connections: any[]): void {
@@ -3267,7 +3317,7 @@ class ChatInterface {
         }
         container.innerHTML = this.characterId
             ? renderStatusEffectsPanel(statusEffects || [])
-            : '<div class="empty-state">Active buffs and debuffs will appear here.</div>';
+            : '<div class="empty-state">Select or create a character to view buffs and debuffs.</div>';
     }
 }
 

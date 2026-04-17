@@ -254,15 +254,12 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
     async def resume_game(self, interaction: discord.Interaction, session_id: Optional[int] = None):
         """Resume a game with full context restoration"""
         sessions_cog = self.bot.get_cog('Sessions')
-        if sessions_cog and session_id is not None:
-            return await sessions_cog.resume_session.callback(sessions_cog, interaction, session_id)
+        target_session_id = session_id
 
-        await interaction.response.defer()
-        
-        if session_id:
-            session = await self._get_guild_session(interaction.guild.id, session_id)
+        if target_session_id:
+            session = await self._get_guild_session(interaction.guild.id, target_session_id)
             if not session:
-                await interaction.followup.send("❌ Game not found!", ephemeral=True)
+                await interaction.response.send_message("❌ Game not found!", ephemeral=True)
                 return
         else:
             # Get most recent session
@@ -271,13 +268,19 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
                 sessions = await self.db.get_sessions(interaction.guild.id, status='inactive')
             
             if not sessions:
-                await interaction.followup.send(
+                await interaction.response.send_message(
                     "❌ No games to resume! Start one with `/game start`",
                     ephemeral=True
                 )
                 return
             
             session = sessions[0]
+            target_session_id = session['id']
+
+        if sessions_cog:
+            return await sessions_cog.resume_session.callback(sessions_cog, interaction, target_session_id)
+
+        await interaction.response.defer()
         
         # Check permissions
         if session['dm_user_id'] != interaction.user.id:

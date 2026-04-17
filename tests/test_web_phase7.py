@@ -186,3 +186,51 @@ async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
             x_web_identity=identity,
         )
     assert invalid_chat.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_browser_character_attaches_to_session(db):
+    api_module.db = db
+
+    session_id = await db.create_session(
+        guild_id=67890,
+        name="Fresh Browser Session",
+        dm_user_id=12345,
+        description="Fresh onboarding test",
+    )
+    await db.update_session(session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+
+    identity = "22222222-2222-4222-8222-222222222222"
+    await db.create_web_identity(identity, "hashed-ip")
+    web_user_id = web_user_id_from_uuid(identity)
+
+    response = await api_module.create_browser_character(
+        character=api_module.BrowserCharacterCreate(
+            session_id=session_id,
+            name="Mira",
+            race="human",
+            char_class="warrior",
+            backstory="A caravan guard looking for work.",
+        ),
+        x_web_identity=identity,
+    )
+
+    assert response["character"]["name"] == "Mira"
+    assert response["character"]["session_id"] == session_id
+
+    participants = await db.get_session_participants(session_id)
+    assert len(participants) == 1
+    assert participants[0]["user_id"] == web_user_id
+    assert participants[0]["character_id"] == response["character"]["id"]
+
+    with pytest.raises(api_module.HTTPException) as duplicate:
+        await api_module.create_browser_character(
+            character=api_module.BrowserCharacterCreate(
+                session_id=session_id,
+                name="Second Hero",
+                race="elf",
+                char_class="mage",
+            ),
+            x_web_identity=identity,
+        )
+    assert duplicate.value.status_code == 400

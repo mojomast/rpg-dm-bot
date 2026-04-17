@@ -2716,33 +2716,60 @@ function renderCombatPanel(combat: any): string {
         return '<p class="empty-hint">No active combat in this session.</p>';
     }
 
+    const currentTurn = combat.current_turn || 0;
+
     return `
         <div class="detail-stack">
             <div class="detail-list-item"><strong>Status</strong><span>Round ${combat.round_number || 1}, Turn ${combat.current_turn || 0}</span></div>
             <div class="detail-list">
-                ${(combat.participants || []).map((participant: any) => `
-                    <div class="detail-list-item combat-participant ${participant.current_hp <= 0 ? 'dead' : ''}">
-                        <strong>${escapeHtml(participant.name || 'Unknown')}</strong>
-                        <span>${participant.current_hp}/${participant.max_hp} HP${participant.initiative ? `, Init ${participant.initiative}` : ''}</span>
+                ${(combat.participants || []).map((participant: any, index: number) => {
+                    const hpPercent = Math.max(0, Math.min(100, Math.round(((participant.current_hp || 0) / Math.max(1, participant.max_hp || 1)) * 100)));
+                    return `
+                    <div class="detail-list-item combat-participant ${participant.current_hp <= 0 ? 'dead' : ''} ${index === currentTurn ? 'active-turn' : ''}">
+                        <div class="combat-participant-header">
+                            <strong>${escapeHtml(participant.name || 'Unknown')}</strong>
+                            <span>${participant.current_hp}/${participant.max_hp} HP${participant.initiative ? `, Init ${participant.initiative}` : ''}</span>
+                        </div>
+                        <div class="hp-bar">
+                            <div class="hp-bar-fill" style="width: ${hpPercent}%"></div>
+                        </div>
+                        ${index === currentTurn ? '<div class="turn-indicator">Current turn</div>' : ''}
                     </div>
-                `).join('')}
+                `}).join('')}
             </div>
         </div>
     `;
 }
 
-function renderSpellPanel(spells: any[], spellSlots: Record<string, any>): string {
+function renderSpellPanel(spells: any[], spellSlots: Record<string, any>, characterId?: number): string {
     const slots = Object.entries(spellSlots || {}).map(([level, slot]: [string, any]) => `
         <div class="detail-list-item"><strong>Level ${escapeHtml(level)}</strong><span>${slot.remaining}/${slot.total} slots</span></div>
     `).join('');
 
+    const spellRows = spells.map((spell: any) => {
+        const canCast = Boolean(characterId && !spell.is_cantrip);
+        const prepareLabel = spell.is_prepared ? 'Prepared' : 'Known';
+        return `
+            <div class="spell-row">
+                <div>
+                    <strong>${escapeHtml(spell.spell_name || spell.name || 'Spell')}</strong>
+                    <div class="spell-row-meta">${escapeHtml(spell.school || 'Unknown school')} • Level ${spell.spell_level ?? '?'}${spell.is_cantrip ? ' • Cantrip' : ''} • ${prepareLabel}</div>
+                </div>
+                <div class="spell-row-actions">
+                    ${canCast ? `<button class="btn btn-small btn-primary" onclick="window.chatInterface?.sendQuickAction('Cast ${escapeHtml(spell.spell_name || spell.name || 'this spell')}.')">Cast</button>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+
     return `
         <div class="detail-stack">
             ${slots || '<p class="empty-hint">No spell slots tracked</p>'}
-            ${renderSimpleList(spells.map((spell: any) => ({
-                title: `${spell.spell_name || spell.name || 'Spell'}${spell.is_prepared ? ' (Prepared)' : ''}`,
-                meta: `${spell.school || 'Unknown school'} • Level ${spell.spell_level ?? '?'}${spell.is_cantrip ? ' • Cantrip' : ''}`,
-            })))}
+            <div class="spell-actions-bar">
+                ${characterId ? `<button class="btn btn-small btn-secondary" onclick="window.chatInterface?.runCharacterRest(${characterId}, 'short')">Short Rest</button>` : ''}
+                ${characterId ? `<button class="btn btn-small btn-secondary" onclick="window.chatInterface?.runCharacterRest(${characterId}, 'long')">Long Rest</button>` : ''}
+            </div>
+            ${spellRows || '<p class="empty-hint">No known spells.</p>'}
         </div>
     `;
 }
@@ -2910,6 +2937,7 @@ class ChatInterface {
             await this.populateCharacterSelect();
             this.latestState = null;
             this.renderSessionState();
+            await this.refreshDashboardPanels();
         };
 
         form.onsubmit = async (event) => {
@@ -2937,14 +2965,25 @@ class ChatInterface {
         const participants = (session.participants || []).filter((participant: any) => participant.character_id);
         select.innerHTML = '<option value="">Select a character...</option>' +
             participants.map((participant: any) => `<option value="${participant.character_id}">${escapeHtml(participant.character_name || 'Unknown')}</option>`).join('');
-        select.onchange = () => {
+        select.onchange = async () => {
             this.characterId = select.value ? parseInt(select.value) : null;
+            await this.refreshDashboardPanels();
         };
         this.characterId = null;
     }
 
     async sendQuickAction(message: string): Promise<void> {
         await this.sendMessage(message);
+    }
+
+    async runCharacterRest(characterId: number, restType: string): Promise<void> {
+        try {
+            await api.characterRest(characterId, restType);
+            showToast(`${restType === 'long' ? 'Long' : 'Short'} rest completed`, 'success');
+            await this.refreshDashboardPanels();
+        } catch (error) {
+            showToast('Failed to rest character', 'error');
+        }
     }
 
     async sendMessage(message: string): Promise<void> {
@@ -2988,6 +3027,7 @@ class ChatInterface {
             this.renderToolResults(response.tool_results || []);
             this.latestState = response.updated_state;
             this.renderSessionState();
+            await this.refreshDashboardPanels();
         } catch (error: any) {
             this.chatHistory.pop();
             this.renderMessages();
@@ -3086,6 +3126,96 @@ class ChatInterface {
                 })))}
             </div>
         `;
+    }
+
+    private async refreshDashboardPanels(): Promise<void> {
+        this.renderCombatSidebar(null);
+        this.renderSpellSidebar(null, null);
+        this.renderLocationSidebar(null, []);
+        this.renderStatusSidebar([]);
+
+        if (!this.sessionId) {
+            return;
+        }
+
+        try {
+            const [session, activeCombatData] = await Promise.all([
+                api.getSession(this.sessionId),
+                api.getActiveCombat(this.sessionId),
+            ]);
+
+            this.renderCombatSidebar(activeCombatData.combat || null);
+
+            if (!this.characterId) {
+                return;
+            }
+
+            const [character, spellsData, statusData] = await Promise.all([
+                api.getCharacter(this.characterId),
+                api.getCharacterSpells(this.characterId),
+                api.getCharacterStatusEffects(this.characterId),
+            ]);
+
+            this.renderSpellSidebar(spellsData.spells || [], spellsData.spell_slots || {});
+            this.renderStatusSidebar(statusData.status_effects || []);
+
+            if (character.current_location_id) {
+                const [location, connectionData] = await Promise.all([
+                    api.getLocation(character.current_location_id),
+                    api.getLocationConnections(character.current_location_id),
+                ]);
+                this.renderLocationSidebar(location, connectionData.connections || []);
+            }
+        } catch (error) {
+            console.error('Failed to refresh chat dashboard panels', error);
+        }
+    }
+
+    private renderCombatSidebar(combat: any): void {
+        const container = document.getElementById('chat-combat-panel');
+        if (!container) {
+            return;
+        }
+        container.innerHTML = combat ? renderCombatPanel(combat) : '<div class="empty-state">Active combat will appear here.</div>';
+    }
+
+    private renderSpellSidebar(spells: any[] | null, spellSlots: Record<string, any> | null): void {
+        const container = document.getElementById('chat-spells-panel');
+        if (!container) {
+            return;
+        }
+        container.innerHTML = this.characterId
+            ? renderSpellPanel(spells || [], spellSlots || {}, this.characterId)
+            : '<div class="empty-state">Select a character to view spells.</div>';
+    }
+
+    private renderLocationSidebar(location: any, connections: any[]): void {
+        const container = document.getElementById('chat-location-panel');
+        if (!container) {
+            return;
+        }
+        if (!location) {
+            container.innerHTML = '<div class="empty-state">Current location details will appear here.</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="detail-stack">
+                <div class="detail-list-item"><strong>${escapeHtml(location.name || 'Unknown')}</strong><span>${escapeHtml(location.location_type || 'unknown')} • danger ${location.danger_level || 0}</span></div>
+                <div class="location-description">${escapeHtml(location.description || 'No description')}</div>
+                ${renderLocationConnectionsPanel(connections || [])}
+            </div>
+        `;
+    }
+
+    private renderStatusSidebar(statusEffects: any[]): void {
+        const container = document.getElementById('chat-status-panel');
+        if (!container) {
+            return;
+        }
+        container.innerHTML = this.characterId
+            ? renderStatusEffectsPanel(statusEffects || [])
+            : '<div class="empty-state">Active buffs and debuffs will appear here.</div>';
     }
 }
 

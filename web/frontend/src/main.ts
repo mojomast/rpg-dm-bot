@@ -2963,8 +2963,9 @@ class ChatInterface {
             content: entry.content,
         }));
 
-        this.chatHistory.push({ role: 'user', content: message });
-        this.renderMessages();
+        const userMessage = { role: 'user' as const, content: message };
+        this.chatHistory.push(userMessage);
+        this.renderMessage(userMessage);
         this.setTyping(true);
 
         try {
@@ -2976,11 +2977,14 @@ class ChatInterface {
             }, this.userId);
 
             if (response.mechanics_text) {
-                this.chatHistory.push({ role: 'mechanics', content: response.mechanics_text });
+                const mechanicsMessage = { role: 'mechanics' as const, content: response.mechanics_text };
+                this.chatHistory.push(mechanicsMessage);
+                this.renderMessage(mechanicsMessage);
             }
 
-            this.chatHistory.push({ role: 'assistant', content: response.response });
-            this.renderMessages();
+            const assistantMessage = { role: 'assistant' as const, content: response.response };
+            this.chatHistory.push(assistantMessage);
+            this.renderMessage(assistantMessage);
             this.renderToolResults(response.tool_results || []);
             this.latestState = response.updated_state;
             this.renderSessionState();
@@ -3008,12 +3012,27 @@ class ChatInterface {
             return;
         }
 
-        container.innerHTML = this.chatHistory.map(message => `
-            <div class="chat-message ${message.role}">
-                <div class="chat-message-meta">${message.role === 'user' ? 'Player' : message.role === 'mechanics' ? 'Mechanics' : 'Dungeon Master'}</div>
-                <div>${escapeHtml(message.content)}</div>
-            </div>
-        `).join('');
+        container.innerHTML = '';
+        this.chatHistory.forEach(message => this.renderMessage(message));
+    }
+
+    private renderMessage(message: ChatHistoryMessage): void {
+        const container = document.getElementById('chat-messages');
+        if (!container) {
+            return;
+        }
+
+        if (this.chatHistory.length === 1 && container.querySelector('.empty-state')) {
+            container.innerHTML = '';
+        }
+
+        const messageElement = document.createElement('div');
+        messageElement.className = `chat-message ${message.role}`;
+        messageElement.innerHTML = `
+            <div class="chat-message-meta">${message.role === 'user' ? 'Player' : message.role === 'mechanics' ? 'Mechanics' : 'Dungeon Master'}</div>
+            <div>${escapeHtml(message.content)}</div>
+        `;
+        container.appendChild(messageElement);
         container.scrollTop = container.scrollHeight;
     }
 

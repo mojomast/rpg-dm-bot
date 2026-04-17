@@ -35,6 +35,35 @@ class GamePersistence(commands.Cog):
         if not session or session.get('guild_id') != guild_id:
             return None
         return session
+
+    async def _resolve_context_session(
+        self,
+        guild_id: int,
+        channel_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        statuses: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve the most relevant session for the current guild/channel/user context."""
+        statuses = statuses or ['active']
+        get_session_by_channel = getattr(self.db, 'get_session_by_channel', None)
+        get_user_active_session = getattr(self.db, 'get_user_active_session', None)
+
+        if channel_id and get_session_by_channel:
+            session = await get_session_by_channel(guild_id, channel_id, statuses=statuses)
+            if session:
+                return session
+
+        if user_id and get_user_active_session:
+            user_session = await get_user_active_session(guild_id, user_id)
+            if user_session and user_session.get('status') in statuses:
+                return user_session
+
+        for status in statuses:
+            sessions = await self.db.get_sessions(guild_id, status=status)
+            if sessions:
+                return sessions[0]
+
+        return None
     
     # =========================================================================
     # STORY LOG COMMANDS
@@ -66,16 +95,18 @@ class GamePersistence(commands.Cog):
         event_type: str = "note"
     ):
         """Add an event to the story log"""
-        # Get active session
-        sessions = await self.db.get_sessions(interaction.guild.id, status='active')
-        if not sessions:
+        session = await self._resolve_context_session(
+            interaction.guild.id,
+            interaction.channel.id,
+            interaction.user.id,
+            statuses=['active'],
+        )
+        if not session:
             await interaction.response.send_message(
                 "❌ No active game session! Start one with `/game start`",
                 ephemeral=True
             )
             return
-        
-        session = sessions[0]
         
         # Get the user's character for participant info
         char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
@@ -107,19 +138,18 @@ class GamePersistence(commands.Cog):
     @app_commands.describe(count="Number of recent events to show (default: 10)")
     async def story_recap(self, interaction: discord.Interaction, count: int = 10):
         """Show recent story events"""
-        sessions = await self.db.get_sessions(interaction.guild.id, status='active')
-        if not sessions:
-            # Try inactive sessions
-            sessions = await self.db.get_sessions(interaction.guild.id, status='inactive')
-        
-        if not sessions:
+        session = await self._resolve_context_session(
+            interaction.guild.id,
+            interaction.channel.id,
+            interaction.user.id,
+            statuses=['active', 'paused', 'inactive'],
+        )
+        if not session:
             await interaction.response.send_message(
                 "❌ No game sessions found!",
                 ephemeral=True
             )
             return
-        
-        session = sessions[0]
         entries = await self.db.get_story_log(session['id'], limit=count)
         
         if not entries:
@@ -163,16 +193,16 @@ class GamePersistence(commands.Cog):
     async def story_summary(self, interaction: discord.Interaction):
         """Generate an AI summary of the story"""
         await interaction.response.defer()
-        
-        sessions = await self.db.get_sessions(interaction.guild.id, status='active')
-        if not sessions:
-            sessions = await self.db.get_sessions(interaction.guild.id, status='inactive')
-        
-        if not sessions:
+
+        session = await self._resolve_context_session(
+            interaction.guild.id,
+            interaction.channel.id,
+            interaction.user.id,
+            statuses=['active', 'paused', 'inactive'],
+        )
+        if not session:
             await interaction.followup.send("❌ No game sessions found!", ephemeral=True)
             return
-        
-        session = sessions[0]
         entries = await self.db.get_story_log(session['id'], limit=50)
         
         if not entries:
@@ -263,18 +293,20 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
                 return
         else:
             # Get most recent session
-            sessions = await self.db.get_sessions(interaction.guild.id, status='paused')
-            if not sessions:
-                sessions = await self.db.get_sessions(interaction.guild.id, status='inactive')
-            
-            if not sessions:
+            session = await self._resolve_context_session(
+                interaction.guild.id,
+                interaction.channel.id,
+                interaction.user.id,
+                statuses=['paused', 'inactive'],
+            )
+
+            if not session:
                 await interaction.response.send_message(
                     "❌ No games to resume! Start one with `/game start`",
                     ephemeral=True
                 )
                 return
-            
-            session = sessions[0]
+
             target_session_id = session['id']
 
         if sessions_cog:
@@ -403,15 +435,18 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         location: Optional[str] = None
     ):
         """Manually save the current game state"""
-        sessions = await self.db.get_sessions(interaction.guild.id, status='active')
-        if not sessions:
+        session = await self._resolve_context_session(
+            interaction.guild.id,
+            interaction.channel.id,
+            interaction.user.id,
+            statuses=['active'],
+        )
+        if not session:
             await interaction.response.send_message(
                 "❌ No active game to save!",
                 ephemeral=True
             )
             return
-        
-        session = sessions[0]
         
         # Get current party state
         players = await self.db.get_session_players(session['id'])
@@ -471,15 +506,18 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
     @activequest_group.command(name="current", description="View the current active quest")
     async def current_quest(self, interaction: discord.Interaction):
         """Show current quest details"""
-        sessions = await self.db.get_sessions(interaction.guild.id, status='active')
-        if not sessions:
+        session = await self._resolve_context_session(
+            interaction.guild.id,
+            interaction.channel.id,
+            interaction.user.id,
+            statuses=['active'],
+        )
+        if not session:
             await interaction.response.send_message(
                 "❌ No active game session!",
                 ephemeral=True
             )
             return
-        
-        session = sessions[0]
         
         if not session.get('current_quest_id'):
             await interaction.response.send_message(
@@ -551,18 +589,19 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
     @activequest_group.command(name="list", description="List all quests for this game")
     async def list_quests(self, interaction: discord.Interaction):
         """List all quests"""
-        sessions = await self.db.get_sessions(interaction.guild.id, status='active')
-        if not sessions:
-            sessions = await self.db.get_sessions(interaction.guild.id)
-        
-        if not sessions:
+        session = await self._resolve_context_session(
+            interaction.guild.id,
+            interaction.channel.id,
+            interaction.user.id,
+            statuses=['active', 'paused', 'inactive'],
+        )
+        if not session:
             await interaction.response.send_message(
                 "❌ No game sessions found!",
                 ephemeral=True
             )
             return
-        
-        session = sessions[0]
+
         quests = await self.db.get_quests(session_id=session['id'])
         
         if not quests:
@@ -612,9 +651,13 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         if not message.guild:
             return
         
-        # Check if in an active game channel
-        sessions = await self.db.get_sessions(message.guild.id, status='active')
-        if not sessions:
+        session = await self._resolve_context_session(
+            message.guild.id,
+            message.channel.id,
+            None,
+            statuses=['active'],
+        )
+        if not session:
             return
         
         # Check for combat-related keywords to auto-log
@@ -623,7 +666,7 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         # Auto-log combat events
         if any(word in content_lower for word in ['deals damage', 'takes damage', 'hits', 'misses', 'attacks', 'defeated', 'slain']):
             await self.db.add_story_entry(
-                session_id=sessions[0]['id'],
+                session_id=session['id'],
                 entry_type='combat',
                 content=message.content[:500],
                 participants=[]
@@ -632,7 +675,7 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         # Auto-log discoveries
         elif any(word in content_lower for word in ['discover', 'find', 'uncover', 'reveal', 'learn']):
             await self.db.add_story_entry(
-                session_id=sessions[0]['id'],
+                session_id=session['id'],
                 entry_type='discovery',
                 content=message.content[:500],
                 participants=[]
@@ -641,7 +684,7 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         # Auto-log location changes
         elif any(word in content_lower for word in ['arrive at', 'enter', 'reach', 'come to']):
             await self.db.add_story_entry(
-                session_id=sessions[0]['id'],
+                session_id=session['id'],
                 entry_type='location',
                 content=message.content[:500],
                 participants=[]

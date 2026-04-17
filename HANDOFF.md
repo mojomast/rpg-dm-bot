@@ -19,7 +19,7 @@ What is not yet coherent end to end:
 - There is not yet one canonical campaign lifecycle across Discord and browser.
 - `/game`, `/session`, and `/resume` still split lifecycle responsibility.
 - Character creation, combat, and quest progression still have duplicate or drifting implementations.
-- Theme/content-pack support is still mostly generation flavor, not first-class runtime content selection.
+- Theme/content-pack foundation is in place (`world_theme`, `content_pack_id`, `fantasy_core`, loader, pack-aware web/tool reads), but Discord runtime parity is still incomplete.
 - Storyline graph, faction runtime, map/discovery systems, and full snapshot continuity are not implemented end to end.
 
 Reference spec for the next implementation wave:
@@ -30,17 +30,66 @@ Reference spec for the next implementation wave:
 
 The highest-priority architectural gaps are:
 
-1. broken schema/runtime/API drift in story items, story events, quest stage reads, and location state
+1. remaining Discord runtime pack-awareness in inventory/items and skills flows
 2. duplicate lifecycle flows across `/game`, `/session`, and `/resume`
-3. missing persistent channel binding and incomplete pause/resume continuity
-4. fantasy-only flat game data with no first-class content-pack runtime
-5. incomplete browser/dashboard contracts for snapshots, campaign editing, and onboarding
+3. remaining character creation/combat canonicalization beyond the landed slices
+4. incomplete browser/dashboard contracts for campaign editing/admin parity
+5. larger roadmap features: factions, storylines, map/discovery systems
 
 The implementation-ready source of truth for these gaps is `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`.
 
 ---
 
 ## Latest Changes (April 17, 2026 - Session 13)
+
+### Additional Runtime Hardening (same day follow-up)
+
+This follow-up pass continued the worldbuilding/campaign gap-spec implementation beyond browser continuity and into Discord runtime coherence.
+
+#### Changes Made
+
+**`src/cogs/game_persistence.py`:**
+- Added context-aware session resolution so story log, recap, summary, save, resume, quest views, and auto-logging prefer the channel-bound session over guild-global fallbacks
+
+**`src/cogs/combat.py`:**
+- Updated `/combat start` to bind encounters to the channel/session context instead of the first active guild session
+
+**`src/cogs/dm_chat.py`:**
+- Persisted channel binding on final active-session fallback so later runtime flows converge on the same session
+
+**`src/cogs/game_master.py`:**
+- Made the Discord GM character interview session-bound and content-pack aware
+- Loaded pack-aware races/classes/starter kits/spells for interview creation
+- Created interview characters with `session_id`, auto-joined them to the session, and provisioned real gold/spells through canonical character tables
+
+**`src/chat_handler.py`:**
+- Added actor-scoped tool routing for batched multiplayer DM turns so player-specific tool calls no longer default to the first actor in the batch
+
+**`src/utils.py`:**
+- Added shared runtime session/content resolution helpers for live Discord command surfaces
+
+**`src/cogs/spells.py`:**
+- Made cast/learn/info/quickcast/autocomplete resolve `spells.json` through the active session content pack instead of legacy flat files
+
+**Tests:**
+- Added regression coverage for channel-bound session selection, GM interview session/pack binding, batched actor-context tool routing, runtime session helper preference, and pack-aware spell runtime lookups
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/python -m compileall src/utils.py src/chat_handler.py src/cogs/game_persistence.py src/cogs/combat.py src/cogs/dm_chat.py src/cogs/game_master.py src/cogs/spells.py
+.venv/bin/pytest tests/test_lifecycle_resume.py tests/test_dm_chat.py tests/test_combat_cog.py -q
+```
+
+Results:
+- compile checks passed
+- focused lifecycle/DM chat/combat regressions passed
+
+#### Remaining Limitation
+
+- Discord runtime pack-awareness is still not end-to-end; inventory/items and skills flows still rely on legacy flat-data assumptions instead of session content-pack resolution.
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion
 

@@ -18,12 +18,8 @@ Use the gap spec for planned schema additions and phased migration work.
 
 These are important current mismatches between declared schema and runtime/helper usage:
 
-1. `story_items` helper methods still target legacy columns instead of the implemented schema.
-2. `story_events` helper methods still target legacy columns and mismatched status semantics.
-3. chat/UI code reads `quest['current_stage']`, but that is not a canonical stored field.
-4. chat/runtime expects `game_state.current_location_id`, but the current schema stores only `current_location` text.
-5. `locations.points_of_interest` exists, but current write helpers misroute POI data into `connected_locations`.
-6. snapshot UI/API surfaces exist, but snapshot DB method coverage is incomplete.
+1. Discord runtime consumers are not yet uniformly content-pack aware; inventory/item and skill reads still need session-scoped pack resolution.
+2. Larger planned tables from the worldbuilding gap spec (factions, storyline graphs, maps/discovery, etc.) are still intentionally unimplemented.
 
 ---
 

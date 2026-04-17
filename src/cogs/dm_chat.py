@@ -422,6 +422,23 @@ class DMChat(commands.Cog):
             self.histories[key] = {'session_id': session_id, 'messages': []}
         
         return self.histories[key]['messages']
+
+    async def hydrate_history_from_db(self, guild_id: int, channel_id: int, session_id: int, user_id: int) -> list:
+        """Populate in-memory history from persisted session history when cache is cold."""
+        history = self.get_history(guild_id, channel_id, session_id)
+        if history or not session_id or not user_id:
+            return history
+
+        persisted = await self.db.get_recent_messages_by_session(user_id, session_id, limit=self.max_history)
+        if persisted:
+            self.histories[self._history_key(guild_id, channel_id)] = {
+                'session_id': session_id,
+                'messages': [
+                    {'role': message['role'], 'content': message['content']}
+                    for message in persisted
+                ],
+            }
+        return self.get_history(guild_id, channel_id, session_id)
     
     def add_to_history(self, guild_id: int, channel_id: int, message: dict, session_id: int = None):
         """Add a message to channel history"""
@@ -530,6 +547,8 @@ class DMChat(commands.Cog):
         sessions = await self.db.get_sessions(guild_id, status='active')
         if sessions:
             logger.debug(f"Falling back to first active session {sessions[0]['id']} for guild {guild_id}")
+            if channel_id:
+                await self.db.bind_session_channel(sessions[0]['id'], channel_id)
             return sessions[0]['id']
         
         logger.warning(f"No active session found for guild {guild_id}")
@@ -556,7 +575,7 @@ class DMChat(commands.Cog):
             await self.db.bind_session_channel(session_id, channel_id)
         self.last_activity[channel_id] = datetime.utcnow()
 
-        history = self.get_history(guild_id, channel_id, session_id)
+        history = await self.hydrate_history_from_db(guild_id, channel_id, session_id, first_user_id)
         result = await self.chat_handler.process_batched_messages(
             guild_id=guild_id,
             channel_id=channel_id,
@@ -564,6 +583,25 @@ class DMChat(commands.Cog):
             history=history,
             session_id=session_id,
         )
+
+        if result.get('session_id'):
+            for message in messages:
+                await self.db.save_message(
+                    message['user_id'],
+                    guild_id,
+                    channel_id,
+                    'user',
+                    message['content'],
+                    session_id=result['session_id'],
+                )
+            await self.db.save_message(
+                first_user_id,
+                guild_id,
+                channel_id,
+                'assistant',
+                result['assistant_message']['content'],
+                session_id=result['session_id'],
+            )
 
         self.add_to_history(guild_id, channel_id, result['user_message'], result['session_id'])
         self.add_to_history(guild_id, channel_id, result['assistant_message'], result['session_id'])
@@ -589,7 +627,7 @@ class DMChat(commands.Cog):
             await self.db.bind_session_channel(session_id, channel_id)
         self.last_activity[channel_id] = datetime.utcnow()
 
-        history = self.get_history(guild_id, channel_id, session_id)
+        history = await self.hydrate_history_from_db(guild_id, channel_id, session_id, user_id)
         char = await self.db.get_active_character(user_id, guild_id)
         actor = ChatActor(
             user_id=user_id,
@@ -605,6 +643,17 @@ class DMChat(commands.Cog):
             history=history,
             session_id=session_id,
         )
+
+        if result.get('session_id'):
+            await self.db.save_message(user_id, guild_id, channel_id, 'user', user_message, session_id=result['session_id'])
+            await self.db.save_message(
+                user_id,
+                guild_id,
+                channel_id,
+                'assistant',
+                result['assistant_message']['content'],
+                session_id=result['session_id'],
+            )
 
         self.add_to_history(guild_id, channel_id, result['user_message'], result['session_id'])
         self.add_to_history(guild_id, channel_id, result['assistant_message'], result['session_id'])

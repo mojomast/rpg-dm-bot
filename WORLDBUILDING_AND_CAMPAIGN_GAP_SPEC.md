@@ -719,6 +719,14 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: API continuity regressions added for campaign finalize and browser chat bootstrap/validation in `tests/test_web_phase7.py`
 - ✅ COMPLETE: snapshot save/load/delete now restore session-scoped v1 runtime continuity beyond `game_state`, including participants, characters, locations, quests, story state, combat, and session history in `src/database.py`
 - ✅ COMPLETE: regression coverage added for snapshot create/load/delete and restore semantics in `tests/test_database.py` and `tests/test_web_phase7.py`
+- ✅ COMPLETE: quest completion and reward distribution now follow one canonical DB-backed path for Discord command and tool flows in `src/database.py` and `src/cogs/quests.py`
+- ✅ COMPLETE: connected-location travel now validates `location_connections` and updates canonical `current_location_id` for session and party runtime state in `src/tools.py`
+- ✅ COMPLETE: v1 combat participants now persist authoritative `armor_class` and `combat_stats` snapshots, and Discord/tool attack resolution reads those values instead of hardcoded AC defaults in `src/database.py`, `src/tools.py`, and `src/cogs/combat.py`
+- ✅ COMPLETE: persistence, story recap/logging, resume, and combat start flows now resolve the channel-bound session before guild-global fallbacks, preventing wrong-session drift in multi-session guilds across `src/cogs/game_persistence.py`, `src/cogs/combat.py`, and `src/cogs/dm_chat.py`
+- ✅ COMPLETE: the Discord GM character interview flow now resolves the session/content pack, loads pack-aware race/class/starter-kit/spell data, creates the character bound to that session, auto-joins the session, and provisions gold/spells through the canonical character model in `src/cogs/game_master.py`
+- ✅ COMPLETE: batched multiplayer DM chat now routes tool execution using the acting player's character/user context instead of defaulting all player-scoped tool calls to the first batched actor in `src/chat_handler.py`
+- ✅ COMPLETE: Discord spell runtime reads now resolve `spells.json` through the active session content pack for cast/learn/info/quickcast flows via shared runtime content helpers in `src/cogs/spells.py` and `src/utils.py`
+- ⚠️ PARTIAL: Discord runtime pack-awareness is complete for GM interview creation, spell reads, and core tool/web reads, but remaining Discord command/runtime surfaces still need session-scoped pack-aware lookups, especially inventory/items and skills
 - ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
 - ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics
 - ✅ COMPLETE: persistent Discord channel/session rebinding is implemented at the v1 lifecycle level via DB-backed bindings and legacy UI path delegation

@@ -294,13 +294,21 @@ class TestCombatTools:
             {
                 "name": sample_enemy['name'],
                 "hp": sample_enemy['hp'],
-                "initiative_bonus": 2
+                "initiative_bonus": 2,
+                "stats": {"ac": sample_enemy['ac']}
             },
             mock_context
         )
         
         assert "Added" in result
         assert sample_enemy['name'] in result
+        assert "AC: 15" in result
+
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        combatants = await tool_executor.db.get_combatants(combat['id'])
+        enemy = next(c for c in combatants if c['participant_type'] == 'enemy')
+        assert enemy['armor_class'] == 15
+        assert enemy['combat_stats']['ac'] == 15
 
     async def test_add_enemy_no_combat(self, tool_executor, mock_context, sample_enemy):
         """Test adding enemy when no combat active"""
@@ -483,6 +491,44 @@ class TestCombatTools:
         result = await tool_executor.execute_tool("end_combat", {}, mock_context)
         
         assert "No active combat" in result
+
+    async def test_roll_attack_uses_target_armor_class(self, tool_executor, mock_context):
+        """Tool attack resolution should use persisted target AC instead of a default."""
+        await tool_executor.execute_tool("start_combat", {}, mock_context)
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        attacker_id = await tool_executor.db.add_combatant(
+            combat['id'], "character", 12345, "Test Hero", 20, 20, 2, is_player=True
+        )
+        await tool_executor.execute_tool(
+            "add_enemy",
+            {"name": "Goblin", "hp": 7, "stats": {"ac": 15}},
+            mock_context,
+        )
+
+        combatants = await tool_executor.db.get_combatants(combat['id'])
+        target = next(c for c in combatants if not c['is_player'])
+
+        original_roll = tool_executor.dice.roll
+        rolls = iter([
+            {"total": 14, "rolls": [10], "kept": [10], "modifier": 4, "critical": False, "fumble": False},
+        ])
+        tool_executor.dice.roll = lambda *args, **kwargs: next(rolls)
+        try:
+            result = await tool_executor.execute_tool(
+                "roll_attack",
+                {
+                    "attacker_id": attacker_id,
+                    "target_id": target['id'],
+                    "attack_bonus": 4,
+                    "damage_dice": "1d8+3",
+                },
+                mock_context,
+            )
+        finally:
+            tool_executor.dice.roll = original_roll
+
+        assert "vs AC 15" in result
+        assert "MISS" in result
 
 
 # =============================================================================
@@ -792,3 +838,100 @@ class TestHardeningRegressions:
 
         assert "VICTORY" in result
         assert "Error" not in result
+
+
+class TestTravelTools:
+    async def test_move_party_to_connected_location_updates_session_and_party(self, tool_executor, db, sample_character_stats, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Travel Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+            description="Town square",
+            location_type="town",
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Whisperwood",
+            description="Ancient forest",
+            location_type="wilderness",
+        )
+        await db.connect_locations(town_id, forest_id, direction='north', travel_time=2)
+        char_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Aria",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        await db.join_session(session_id, 12345, character_id=char_id)
+        await db.save_game_state(session_id, current_location='Oakheart', current_location_id=town_id)
+        await db.update_character(char_id, current_location_id=town_id)
+
+        result = await tool_executor.execute_tool(
+            "move_party_to_location",
+            {"location_id": forest_id, "travel_description": "The road bends into the pines."},
+            {**mock_context, "session_id": session_id},
+        )
+
+        assert "Whisperwood" in result
+        state = await db.get_game_state(session_id)
+        assert state['current_location_id'] == forest_id
+        char = await db.get_character(char_id)
+        assert char['current_location_id'] == forest_id
+
+    async def test_move_party_to_unconnected_location_is_rejected(self, tool_executor, db, sample_character_stats, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Travel Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+            description="Town square",
+            location_type="town",
+        )
+        mountain_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Stormpeak",
+            description="Frozen cliffs",
+            location_type="landmark",
+        )
+        char_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Aria",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        await db.join_session(session_id, 12345, character_id=char_id)
+        await db.save_game_state(session_id, current_location='Oakheart', current_location_id=town_id)
+        await db.update_character(char_id, current_location_id=town_id)
+
+        result = await tool_executor.execute_tool(
+            "move_party_to_location",
+            {"location_id": mountain_id},
+            {**mock_context, "session_id": session_id},
+        )
+
+        assert "not directly connected" in result
+        state = await db.get_game_state(session_id)
+        assert state['current_location_id'] == town_id

@@ -6,6 +6,7 @@ Handles characters, inventory, quests, NPCs, combat, and sessions
 
 import aiosqlite
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -193,6 +194,8 @@ class Database:
                     max_hp INTEGER NOT NULL,
                     initiative INTEGER DEFAULT 0,
                     is_player INTEGER DEFAULT 1,
+                    armor_class INTEGER DEFAULT 10,
+                    combat_stats TEXT DEFAULT '{}',
                     status_effects TEXT DEFAULT '[]',
                     turn_order INTEGER DEFAULT 0,
                     FOREIGN KEY (encounter_id) REFERENCES combat_encounters(id)
@@ -752,6 +755,25 @@ class Database:
                   AND current_location IS NOT NULL
                   AND trim(current_location) <> ''
             """)
+            await db.commit()
+        except Exception:
+            pass
+
+        # Migration 6: Add combat participant runtime stat snapshot fields
+        try:
+            cursor = await db.execute("PRAGMA table_info(combat_participants)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'armor_class' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN armor_class INTEGER DEFAULT 10")
+                await db.commit()
+
+            if 'combat_stats' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN combat_stats TEXT DEFAULT '{}'")
+                await db.commit()
+
+            await db.execute("UPDATE combat_participants SET armor_class = COALESCE(armor_class, 10)")
+            await db.execute("UPDATE combat_participants SET combat_stats = COALESCE(combat_stats, '{}')")
             await db.commit()
         except Exception:
             pass
@@ -1760,6 +1782,18 @@ class Database:
         quest = await self.get_quest(quest_id)
         if not quest:
             return {"error": "Quest not found"}
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT status FROM quest_progress WHERE quest_id = ? AND character_id = ?",
+                (quest_id, character_id),
+            )
+            progress = await cursor.fetchone()
+            if not progress:
+                return {"error": "Quest not accepted"}
+            if progress['status'] == 'completed':
+                return {"error": "Quest already completed"}
         
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
@@ -1785,7 +1819,7 @@ class Database:
                                    item.get('type', 'misc'), item.get('quantity', 1))
             rewards_given['items'] = quest['rewards']['items']
         
-        return {"success": True, "rewards": rewards_given}
+        return {"success": True, "quest_title": quest['title'], "rewards": rewards_given}
     
     async def update_quest(self, quest_id: int, **kwargs) -> bool:
         """Update quest fields"""
@@ -2061,6 +2095,64 @@ class Database:
             """, (guild_id, channel_id, session_id, now))
             await db.commit()
             return cursor.lastrowid
+
+    def _parse_ac_text_bonus(self, value: Any) -> int:
+        """Extract a numeric AC bonus from legacy strings like '+2 AC'."""
+        if isinstance(value, (int, float)):
+            return int(value)
+        if not isinstance(value, str):
+            return 0
+        match = re.search(r"([+-]?\d+)", value)
+        return int(match.group(1)) if match else 0
+
+    async def calculate_character_armor_class(self, character_id: int) -> int:
+        """Calculate a character's current armor class from stats and equipped items."""
+        char = await self.get_character(character_id)
+        if not char:
+            return 10
+
+        dex_mod = (char.get('dexterity', 10) - 10) // 2
+        base_ac = 10 + dex_mod
+        equipped_items = await self.get_equipped_items(character_id)
+
+        body_armor = next((item for item in equipped_items if item.get('slot') == 'body'), None)
+        shield_bonus = 0
+        misc_bonus = 0
+
+        if body_armor:
+            properties = body_armor.get('properties') or {}
+            ac_base = properties.get('ac_base')
+            if isinstance(ac_base, (int, float)):
+                max_dex_bonus = properties.get('max_dex_bonus')
+                armor_dex = dex_mod
+                if isinstance(max_dex_bonus, (int, float)):
+                    armor_dex = min(dex_mod, int(max_dex_bonus))
+                base_ac = int(ac_base) + max(armor_dex, 0)
+            else:
+                base_ac += self._parse_ac_text_bonus(properties.get('ac'))
+
+        for item in equipped_items:
+            properties = item.get('properties') or {}
+            if item.get('slot') == 'off_hand':
+                shield_bonus += int(properties.get('ac_bonus', 0) or 0)
+                if not properties.get('ac_bonus'):
+                    shield_bonus += self._parse_ac_text_bonus(properties.get('ac'))
+                continue
+            if item.get('slot') != 'body':
+                misc_bonus += int(properties.get('ac_bonus', 0) or 0)
+                if not properties.get('ac_bonus'):
+                    misc_bonus += self._parse_ac_text_bonus(properties.get('ac'))
+
+        return max(1, int(base_ac + shield_bonus + misc_bonus))
+
+    def _normalize_combat_stats(self, combat_stats: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Normalize participant combat stats into a JSON-safe dict."""
+        if isinstance(combat_stats, str):
+            try:
+                combat_stats = json.loads(combat_stats)
+            except Exception:
+                combat_stats = {}
+        return dict(combat_stats or {})
     
     async def get_active_combat(self, guild_id: int = None, channel_id: int = None) -> Optional[Dict[str, Any]]:
         """Get active combat in a channel or guild"""
@@ -2108,16 +2200,29 @@ class Database:
             return None
     
     async def add_combatant(self, encounter_id: int, participant_type: str,
-                           participant_id: int, name: str, hp: int, max_hp: int,
-                           initiative: int, is_player: bool = True) -> int:
+                            participant_id: int, name: str, hp: int, max_hp: int,
+                            initiative: int, is_player: bool = True,
+                            armor_class: int = None, combat_stats: Dict[str, Any] = None) -> int:
         """Add a combatant to an encounter"""
+        normalized_stats = self._normalize_combat_stats(combat_stats)
+        if armor_class is None:
+            armor_class = normalized_stats.get('ac') or normalized_stats.get('armor_class')
+        if armor_class is None and participant_type == 'character' and participant_id:
+            armor_class = await self.calculate_character_armor_class(participant_id)
+        armor_class = int(armor_class or 10)
+
+        if 'ac' not in normalized_stats:
+            normalized_stats['ac'] = armor_class
+        if 'armor_class' not in normalized_stats:
+            normalized_stats['armor_class'] = armor_class
+
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO combat_participants (encounter_id, participant_type, participant_id,
-                    name, current_hp, max_hp, initiative, is_player)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    name, current_hp, max_hp, initiative, is_player, armor_class, combat_stats)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (encounter_id, participant_type, participant_id, name, hp, max_hp,
-                  initiative, 1 if is_player else 0))
+                  initiative, 1 if is_player else 0, armor_class, json.dumps(normalized_stats)))
             await db.commit()
             return cursor.lastrowid
     
@@ -2134,6 +2239,7 @@ class Database:
             for row in rows:
                 c = dict(row)
                 c['status_effects'] = json.loads(c['status_effects'])
+                c['combat_stats'] = self._normalize_combat_stats(c.get('combat_stats'))
                 combatants.append(c)
             return combatants
     
@@ -3069,6 +3175,7 @@ class Database:
             for row in rows:
                 p = dict(row)
                 p['status_effects'] = json.loads(p['status_effects']) if p.get('status_effects') else []
+                p['combat_stats'] = self._normalize_combat_stats(p.get('combat_stats'))
                 p['character_id'] = p['participant_id'] if p.get('participant_type') == 'character' else None
                 participants.append(p)
             return participants
@@ -4292,53 +4399,21 @@ class Database:
         if not character:
             return {"success": False, "error": "Character not found"}
         
-        # Parse rewards
-        rewards = quest.get('rewards', {})
-        if isinstance(rewards, str):
-            rewards = json.loads(rewards)
-        
+        completion = await self.complete_quest(quest_id, character_id)
+        if not completion.get('success'):
+            return {"success": False, "error": completion.get('error', 'Quest completion failed')}
+
+        rewards = completion.get('rewards', {})
+        updated_character = await self.get_character(character_id)
         results = {
             "quest_title": quest['title'],
             "character_name": character['name'],
-            "xp_gained": 0,
-            "gold_gained": 0,
-            "items_gained": [],
-            "leveled_up": False,
-            "new_level": character['level']
+            "xp_gained": rewards.get('xp', 0),
+            "gold_gained": rewards.get('gold', 0),
+            "items_gained": rewards.get('items', []),
+            "leveled_up": rewards.get('level_up', False),
+            "new_level": updated_character['level'] if updated_character else character['level']
         }
-        
-        # Award XP
-        if rewards.get('experience') or rewards.get('xp'):
-            xp = rewards.get('experience') or rewards.get('xp')
-            xp_result = await self.add_experience(character_id, xp)
-            results['xp_gained'] = xp
-            results['leveled_up'] = xp_result.get('leveled_up', False)
-            results['new_level'] = xp_result.get('new_level', character['level'])
-        
-        # Award gold
-        if rewards.get('gold'):
-            new_gold = await self.update_gold(character_id, rewards['gold'])
-            results['gold_gained'] = rewards['gold']
-            results['new_gold_total'] = new_gold
-        
-        # Award items
-        if rewards.get('items'):
-            for item in rewards['items']:
-                item_id = await self.add_item(
-                    character_id,
-                    item.get('item_id', ''),
-                    item.get('name', item.get('item_name', 'Unknown')),
-                    item.get('type', item.get('item_type', 'misc')),
-                    quantity=item.get('quantity', 1),
-                    properties=item.get('properties', {})
-                )
-                results['items_gained'].append({
-                    "name": item.get('name', item.get('item_name')),
-                    "inventory_id": item_id
-                })
-        
-        # Mark quest as completed
-        await self.complete_quest(quest_id, character_id)
         
         # Log to story
         if character.get('session_id'):

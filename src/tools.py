@@ -551,17 +551,26 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         name = args.get('name')
         hp = args.get('hp')
         init_bonus = args.get('initiative_bonus', 0)
-        stats = args.get('stats', {})
+        stats = dict(args.get('stats') or {})
+        armor_class = args.get('armor_class')
+        if armor_class is None:
+            armor_class = stats.get('ac') or stats.get('armor_class')
+        if armor_class is None:
+            armor_class = 10
+        stats.setdefault('ac', armor_class)
+        stats.setdefault('armor_class', armor_class)
+        stats.setdefault('max_hp', max(hp or 0, 0))
         
         combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat. Start combat first."
         
         combatant_id = await self.db.add_combatant(
-            combat['id'], 'enemy', 0, name, hp, hp, init_bonus, is_player=False
+            combat['id'], 'enemy', 0, name, hp, hp, init_bonus,
+            is_player=False, armor_class=armor_class, combat_stats=stats
         )
         
-        return f"Added {name} to combat (HP: {hp}, ID: {combatant_id})"
+        return f"Added {name} to combat (HP: {hp}, AC: {armor_class}, ID: {combatant_id})"
     
     async def _roll_initiative(self, context: Dict) -> str:
         """Roll initiative for all combatants"""
@@ -659,7 +668,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             status = " ".join([f"[{e['effect']}]" for e in c['status_effects']])
             dead = "💀" if c['current_hp'] <= 0 else ""
             marker = "🎮" if c['is_player'] else "👹"
-            lines.append(f"{dead}{marker} {c['name']}: {hp_bar} {c['current_hp']}/{c['max_hp']} {status}")
+            lines.append(f"{dead}{marker} {c['name']}: AC {c.get('armor_class', 10)} | {hp_bar} {c['current_hp']}/{c['max_hp']} {status}")
         
         return "\n".join(lines)
     
@@ -763,7 +772,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         
         # Roll to hit
         attack_roll = self.dice.roll(f"1d20+{attack_bonus}")
-        target_ac = 10  # Default AC, could be stored in stats
+        target_ac = target.get('armor_class') or target.get('combat_stats', {}).get('ac') or 10
         
         hit = attack_roll['total'] >= target_ac or attack_roll['critical']
         
@@ -1620,15 +1629,48 @@ Points of Interest: {pois}"""
         loc = await self.db.get_location(location_id)
         if not loc:
             return "Error: Location not found"
+
+        current_state = await self.db.get_game_state(session['id']) or {}
+        current_location_id = current_state.get('current_location_id')
+        if current_location_id and current_location_id != location_id:
+            nearby_locations = await self.db.get_nearby_locations(current_location_id)
+            if not any(nearby.get('id') == location_id for nearby in nearby_locations):
+                current_location = await self.db.get_location(current_location_id)
+                current_name = current_location.get('name', 'Unknown') if current_location else 'Unknown'
+                return f"Error: **{loc['name']}** is not directly connected to **{current_name}**"
+
+        participants = await self.db.get_session_participants(session['id'])
+        moved_characters = []
+        for participant in participants:
+            character_id = participant.get('character_id')
+            if not character_id:
+                continue
+            result = await self.db.move_character_to_location(character_id, location_id)
+            if not result.get('error'):
+                moved_characters.append(character_id)
         
         # Update game state with new location
-        await self.db.save_game_state(session['id'], current_location=loc['name'])
+        await self.db.save_game_state(
+            session['id'],
+            current_location=loc['name'],
+            current_location_id=location_id,
+        )
         
         # Log the travel
-        await self.db.add_story_log_entry(session['id'], 'travel', 
-            f"Party traveled to {loc['name']}. {travel_desc}")
-        
-        return f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}"
+        await self.db.add_story_log_entry(
+            session['id'],
+            'travel',
+            f"Party traveled to {loc['name']}. {travel_desc}".strip(),
+            moved_characters,
+        )
+
+        nearby_locations = await self.db.get_nearby_locations(location_id)
+        exits = ""
+        if nearby_locations:
+            exit_lines = [f"• {nearby.get('name', 'Unknown')} ({nearby.get('direction', 'path')})" for nearby in nearby_locations[:5]]
+            exits = "\n\n🚪 Exits:\n" + "\n".join(exit_lines)
+
+        return f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}{exits}"
     
     # =========================================================================
     # STORY ITEM TOOL IMPLEMENTATIONS

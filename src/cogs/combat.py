@@ -20,7 +20,8 @@ async def resolve_attack(db, attacker_char: dict, target_combatant: dict) -> dic
     str_mod = (attacker_char['strength'] - 10) // 2
     attack_roll = random.randint(1, 20)
     total = attack_roll + str_mod
-    target_ac = 10 + sum(2 for effect in target_combatant.get('status_effects', []) if effect.get('effect') == 'defending')
+    target_ac = target_combatant.get('armor_class') or target_combatant.get('combat_stats', {}).get('ac') or 10
+    target_ac += sum(2 for effect in target_combatant.get('status_effects', []) if effect.get('effect') == 'defending')
 
     is_crit = attack_roll == 20
     is_fumble = attack_roll == 1
@@ -317,7 +318,15 @@ class Combat(commands.Cog):
         
         # Create combat
         guild_id = interaction.guild.id
-        session = await self.db.get_active_session(guild_id)
+        session = await self.db.get_session_by_channel(
+            guild_id,
+            interaction.channel.id,
+            statuses=['active', 'paused', 'inactive'],
+        )
+        if not session:
+            session = await self.db.get_user_active_session(guild_id, interaction.user.id)
+        if not session:
+            session = await self.db.get_active_session(guild_id)
         
         encounter_id = await self.db.create_combat(
             guild_id=guild_id,
@@ -329,9 +338,12 @@ class Combat(commands.Cog):
         char = await self.db.get_active_character(interaction.user.id, guild_id)
         if char:
             dex_mod = (char['dexterity'] - 10) // 2
+            armor_class = await self.db.calculate_character_armor_class(char['id'])
             await self.db.add_combatant(
                 encounter_id, 'character', char['id'], char['name'],
-                char['hp'], char['max_hp'], dex_mod, is_player=True
+                char['hp'], char['max_hp'], dex_mod, is_player=True,
+                armor_class=armor_class,
+                combat_stats={'armor_class': armor_class, 'ac': armor_class}
             )
         
         embed = discord.Embed(
@@ -377,9 +389,12 @@ class Combat(commands.Cog):
             return
         
         dex_mod = (char['dexterity'] - 10) // 2
+        armor_class = await self.db.calculate_character_armor_class(char['id'])
         await self.db.add_combatant(
             combat['id'], 'character', char['id'], char['name'],
-            char['hp'], char['max_hp'], dex_mod, is_player=True
+            char['hp'], char['max_hp'], dex_mod, is_player=True,
+            armor_class=armor_class,
+            combat_stats={'armor_class': armor_class, 'ac': armor_class}
         )
         
         await interaction.response.send_message(
@@ -412,11 +427,15 @@ class Combat(commands.Cog):
         for i in range(count):
             name = f"{enemy_name}" if count == 1 else f"{enemy_name} {i+1}"
             init_bonus = random.randint(-1, 3)  # Random initiative bonus
+            armor_class = 10
             
             combatant_id = await self.db.add_combatant(
-                combat['id'], 'enemy', 0, name, hp, hp, init_bonus, is_player=False
+                combat['id'], 'enemy', 0, name, hp, hp, init_bonus,
+                is_player=False,
+                armor_class=armor_class,
+                combat_stats={'armor_class': armor_class, 'ac': armor_class}
             )
-            spawned.append(f"👹 {name} (HP: {hp})")
+            spawned.append(f"👹 {name} (HP: {hp}, AC: {armor_class})")
         
         embed = discord.Embed(
             title="👹 Enemies Appear!",

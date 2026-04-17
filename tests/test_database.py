@@ -576,6 +576,21 @@ class TestQuests:
         assert char['gold'] == 100
         assert char['experience'] == 50
 
+    async def test_complete_quest_blocks_duplicate_rewards(self, db_with_full_setup):
+        """Test quest rewards are only granted once."""
+        data = db_with_full_setup
+
+        await data['db'].accept_quest(data['quest_id'], data['character_id'])
+        first = await data['db'].complete_quest(data['quest_id'], data['character_id'])
+        second = await data['db'].complete_quest(data['quest_id'], data['character_id'])
+
+        assert first['success'] is True
+        assert second['error'] == 'Quest already completed'
+
+        char = await data['db'].get_character(data['character_id'])
+        assert char['gold'] == 100
+        assert char['experience'] == 50
+
     async def test_get_quest_stages_from_objectives(self, db_with_full_setup):
         """Test synthesizing quest stages from objective data."""
         data = db_with_full_setup
@@ -759,6 +774,38 @@ class TestCombat:
         # Should be ordered by initiative (descending)
         assert combatants[0]['name'] == "Test Hero"
         assert combatants[1]['name'] == "Goblin"
+
+    async def test_add_character_combatant_snapshots_equipped_armor_class(self, db_with_character):
+        """Character combatants should snapshot authoritative AC from equipped gear."""
+        db, char_id = db_with_character
+        await db.add_item(
+            character_id=char_id,
+            item_id="armor_chain",
+            item_name="Chain Mail",
+            item_type="armor",
+            is_equipped=True,
+            slot="body",
+            properties={"ac_base": 16, "max_dex_bonus": 0},
+        )
+        await db.add_item(
+            character_id=char_id,
+            item_id="shield_wooden",
+            item_name="Wooden Shield",
+            item_type="armor",
+            is_equipped=True,
+            slot="off_hand",
+            properties={"ac_bonus": 2},
+        )
+
+        combat_id = await db.create_combat(67890, 11111)
+        await db.add_combatant(
+            combat_id, "character", char_id, "Test Hero", 20, 20, 2, is_player=True
+        )
+
+        combatant = (await db.get_combatants(combat_id))[0]
+        assert combatant['armor_class'] == 18
+        assert combatant['combat_stats']['ac'] == 18
+        assert combatant['combat_stats']['armor_class'] == 18
 
     async def test_update_combatant_hp(self, db):
         """Test updating combatant HP (damage/healing)"""

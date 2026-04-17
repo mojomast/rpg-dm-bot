@@ -39,14 +39,17 @@ logger = logging.getLogger('rpg')
 logger.info(f"Logging to file: {log_filename}")
 
 TOKEN = os.getenv('DISCORD_TOKEN')
-REQUESTY_API_KEY = os.getenv('REQUESTY_API_KEY')
+LLM_API_KEY = os.getenv('OPENROUTER_API_KEY') or os.getenv('REQUESTY_API_KEY')
 DATABASE_PATH = os.getenv('DATABASE_URL') or os.getenv('DATABASE_PATH', 'data/rpg.db')
 LLM_MODEL = os.getenv('LLM_MODEL', 'openai/gpt-4o-mini')
+LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'https://router.requesty.ai/v1')
+DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID')
+LLM_PROVIDER = 'OpenRouter' if 'openrouter.ai' in LLM_BASE_URL else 'Requesty'
 
-if not REQUESTY_API_KEY:
-    logger.warning("REQUESTY_API_KEY not found - AI DM features will be disabled")
+if not LLM_API_KEY:
+    logger.warning("No LLM API key found - AI DM features will be disabled")
 else:
-    logger.info(f"LLM configured: {LLM_MODEL} via Requesty")
+    logger.info(f"LLM configured: {LLM_MODEL} via {LLM_PROVIDER}")
 
 
 class RPGBot(commands.Bot):
@@ -78,10 +81,10 @@ class RPGBot(commands.Bot):
         logger.info("Database initialized")
         
         # Initialize LLM client
-        if REQUESTY_API_KEY:
+        if LLM_API_KEY:
             from src.llm import LLMClient
-            self.llm = LLMClient(REQUESTY_API_KEY, LLM_MODEL)
-            logger.info(f"LLM client initialized with model: {LLM_MODEL}")
+            self.llm = LLMClient(LLM_API_KEY, LLM_MODEL, base_url=LLM_BASE_URL)
+            logger.info(f"LLM client initialized with model: {LLM_MODEL} via {LLM_PROVIDER}")
         
         # Initialize prompts
         from src.prompts import Prompts
@@ -129,8 +132,14 @@ class RPGBot(commands.Bot):
         
         # Sync commands
         try:
-            synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} command(s)")
+            if DISCORD_GUILD_ID:
+                guild = discord.Object(id=int(DISCORD_GUILD_ID))
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                logger.info(f"Synced {len(synced)} guild command(s) to {DISCORD_GUILD_ID}")
+            else:
+                synced = await self.tree.sync()
+                logger.info(f"Synced {len(synced)} global command(s)")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
     

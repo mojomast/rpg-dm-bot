@@ -6,6 +6,7 @@ import aiohttp
 import asyncio
 import json
 import logging
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -28,9 +29,10 @@ class LLMClient:
     
     BASE_URL = "https://router.requesty.ai/v1"
     
-    def __init__(self, api_key: str, model: str = "openai/gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "openai/gpt-4o-mini", base_url: str | None = None):
         self.api_key = api_key
         self.model = model
+        self.base_url = (base_url or self.BASE_URL).rstrip("/")
         self.session: Optional[aiohttp.ClientSession] = None
         self._api_lock = asyncio.Lock()
     
@@ -50,6 +52,13 @@ class LLMClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+
+        if "openrouter.ai" in self.base_url:
+            site_url = os.getenv("OPENROUTER_SITE_URL")
+            app_name = os.getenv("OPENROUTER_APP_NAME", "RPG DM Bot")
+            if site_url:
+                headers["HTTP-Referer"] = site_url
+            headers["X-Title"] = app_name
         
         logger.info("=" * 60)
         logger.info("LLM API REQUEST")
@@ -77,7 +86,7 @@ class LLMClient:
             async with self._api_lock:
                 try:
                     async with self.session.post(
-                        f"{self.BASE_URL}/chat/completions",
+                        f"{self.base_url}/chat/completions",
                         headers=headers,
                         json=payload,
                         timeout=aiohttp.ClientTimeout(total=60)
@@ -672,4 +681,3 @@ class LLMClient:
         
         logger.info("Campaign world generation complete!")
         return results
-

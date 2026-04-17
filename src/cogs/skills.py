@@ -7,30 +7,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from typing import Optional, List, Dict, Any
-import json
-import os
 import random
 
-from src.utils import get_character_class
-
-# Load skills data
-SKILLS_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'skills.json')
-SKILLS_DATA = {}
-
-def load_skills():
-    global SKILLS_DATA
-    try:
-        with open(SKILLS_FILE, 'r', encoding='utf-8') as f:
-            SKILLS_DATA = json.load(f)
-    except FileNotFoundError:
-        SKILLS_DATA = {"skill_trees": {}, "skills": {}, "passive_abilities": {}, "status_effects": {}}
-
-load_skills()
+from src.utils import get_character_class, load_runtime_content
 
 
-def get_skill_tree_branches(char_class: str) -> List[Dict[str, Any]]:
+def get_skill_tree_branches(skill_content: Dict[str, Any], char_class: str) -> List[Dict[str, Any]]:
     """Return skill tree branches in the list shape expected by the UI."""
-    tree = SKILLS_DATA.get('skill_trees', {}).get(char_class.lower(), {})
+    tree = skill_content.get('skill_trees', {}).get(char_class.lower(), {})
     branches = tree.get('branches', [])
     if isinstance(branches, dict):
         return [{"id": branch_id, **branch_data} for branch_id, branch_data in branches.items()]
@@ -44,23 +28,24 @@ def get_skill_tree_branches(char_class: str) -> List[Dict[str, Any]]:
 class SkillTreeView(discord.ui.View):
     """View for browsing skill trees"""
     
-    def __init__(self, cog, character: Dict, char_class: str):
+    def __init__(self, cog, character: Dict, char_class: str, skill_content: Dict[str, Any]):
         super().__init__(timeout=180)
         self.cog = cog
         self.character = character
         self.char_class = char_class.lower()
+        self.skill_content = skill_content
         self.current_branch = None
         
         # Get branches for this class
-        self.branches = get_skill_tree_branches(self.char_class)
+        self.branches = get_skill_tree_branches(self.skill_content, self.char_class)
         
         if self.branches:
-            self.add_item(BranchSelectDropdown(cog, character, self.char_class, self.branches))
+            self.add_item(BranchSelectDropdown(cog, character, self.char_class, self.branches, self.skill_content))
     
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.secondary, row=2)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Refresh the skill tree view"""
-        embed = await self.cog.create_skill_tree_embed(self.character, self.char_class)
+        embed = await self.cog.create_skill_tree_embed(self.character, self.char_class, self.skill_content)
         await interaction.response.edit_message(embed=embed, view=self)
     
     @discord.ui.button(label="📊 My Skills", style=discord.ButtonStyle.primary, row=2)
@@ -91,7 +76,7 @@ class SkillTreeView(discord.ui.View):
         for branch, branch_skills in by_branch.items():
             skill_lines = []
             for s in sorted(branch_skills, key=lambda x: x['skill_tier']):
-                skill_data = SKILLS_DATA.get('skills', {}).get(s['skill_id'], {})
+                skill_data = self.skill_content.get('skills', {}).get(s['skill_id'], {})
                 icon = skill_data.get('icon', '⚡')
                 passive = " (Passive)" if s['is_passive'] else ""
                 
@@ -115,10 +100,11 @@ class SkillTreeView(discord.ui.View):
 class BranchSelectDropdown(discord.ui.Select):
     """Dropdown for selecting a skill tree branch"""
     
-    def __init__(self, cog, character: Dict, char_class: str, branches: List[Dict]):
+    def __init__(self, cog, character: Dict, char_class: str, branches: List[Dict], skill_content: Dict[str, Any]):
         self.cog = cog
         self.character = character
         self.char_class = char_class
+        self.skill_content = skill_content
         self.branch_map = {b['id']: b for b in branches}
         
         options = []
@@ -145,40 +131,42 @@ class BranchSelectDropdown(discord.ui.Select):
         
         # Show branch details with skills
         embed = await self.cog.create_branch_embed(
-            self.character, self.char_class, branch
+            self.character, self.char_class, branch, self.skill_content
         )
         
-        view = BranchSkillsView(self.cog, self.character, self.char_class, branch)
+        view = BranchSkillsView(self.cog, self.character, self.char_class, branch, self.skill_content)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class BranchSkillsView(discord.ui.View):
     """View for skills within a branch"""
     
-    def __init__(self, cog, character: Dict, char_class: str, branch: Dict):
+    def __init__(self, cog, character: Dict, char_class: str, branch: Dict, skill_content: Dict[str, Any]):
         super().__init__(timeout=120)
         self.cog = cog
         self.character = character
         self.char_class = char_class
         self.branch = branch
+        self.skill_content = skill_content
         
         # Get skills in this branch
         branch_skills = []
         for skill_id in branch.get('skills', []):
-            skill = SKILLS_DATA.get('skills', {}).get(skill_id)
+            skill = self.skill_content.get('skills', {}).get(skill_id)
             if skill:
                 branch_skills.append({'id': skill_id, **skill})
         
         if branch_skills:
-            self.add_item(SkillLearnDropdown(cog, character, branch_skills))
+            self.add_item(SkillLearnDropdown(cog, character, branch_skills, self.skill_content))
 
 
 class SkillLearnDropdown(discord.ui.Select):
     """Dropdown for learning a skill"""
     
-    def __init__(self, cog, character: Dict, skills: List[Dict]):
+    def __init__(self, cog, character: Dict, skills: List[Dict], skill_content: Dict[str, Any]):
         self.cog = cog
         self.character = character
+        self.skill_content = skill_content
         self.skill_map = {s['id']: s for s in skills}
         
         options = []
@@ -237,24 +225,25 @@ class SkillLearnDropdown(discord.ui.Select):
             prereq_text = ", ".join(skill['prerequisites'])
             embed.add_field(name="Prerequisites", value=prereq_text, inline=False)
         
-        view = LearnSkillConfirmView(self.cog, self.character, skill_id, skill)
+        view = LearnSkillConfirmView(self.cog, self.character, skill_id, skill, self.skill_content)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class LearnSkillConfirmView(discord.ui.View):
     """Confirmation view for learning a skill"""
     
-    def __init__(self, cog, character: Dict, skill_id: str, skill: Dict):
+    def __init__(self, cog, character: Dict, skill_id: str, skill: Dict, skill_content: Dict[str, Any]):
         super().__init__(timeout=60)
         self.cog = cog
         self.character = character
         self.skill_id = skill_id
         self.skill = skill
+        self.skill_content = skill_content
     
     @discord.ui.button(label="✅ Learn Skill", style=discord.ButtonStyle.success)
     async def learn(self, interaction: discord.Interaction, button: discord.ui.Button):
         result = await self.cog.learn_skill(
-            interaction, self.character, self.skill_id, self.skill
+            interaction, self.character, self.skill_id, self.skill, self.skill_content
         )
         if result:
             self.stop()
@@ -272,32 +261,34 @@ class LearnSkillConfirmView(discord.ui.View):
 class UseSkillView(discord.ui.View):
     """View for using active skills"""
     
-    def __init__(self, cog, character: Dict, skills: List[Dict], target: str = None):
+    def __init__(self, cog, character: Dict, skills: List[Dict], skill_content: Dict[str, Any], target: str = None):
         super().__init__(timeout=120)
         self.cog = cog
         self.character = character
         self.skills = skills
+        self.skill_content = skill_content
         self.target = target
         
         # Filter to active skills only
         active_skills = [s for s in skills if not s.get('is_passive')]
         
         if active_skills:
-            self.add_item(SkillUseDropdown(cog, character, active_skills, target))
+            self.add_item(SkillUseDropdown(cog, character, active_skills, self.skill_content, target))
 
 
 class SkillUseDropdown(discord.ui.Select):
     """Dropdown for selecting a skill to use"""
     
-    def __init__(self, cog, character: Dict, skills: List[Dict], target: str = None):
+    def __init__(self, cog, character: Dict, skills: List[Dict], skill_content: Dict[str, Any], target: str = None):
         self.cog = cog
         self.character = character
+        self.skill_content = skill_content
         self.target = target
         self.skill_map = {s['skill_id']: s for s in skills}
         
         options = []
         for skill in skills[:25]:
-            skill_data = SKILLS_DATA.get('skills', {}).get(skill['skill_id'], {})
+            skill_data = self.skill_content.get('skills', {}).get(skill['skill_id'], {})
             
             # Show availability status
             available = True
@@ -331,7 +322,7 @@ class SkillUseDropdown(discord.ui.Select):
         
         skill_id = self.values[0]
         skill_db = self.skill_map.get(skill_id)
-        skill_data = SKILLS_DATA.get('skills', {}).get(skill_id, {})
+        skill_data = self.skill_content.get('skills', {}).get(skill_id, {})
         
         if not skill_data:
             await interaction.response.send_message("❌ Skill data not found!", ephemeral=True)
@@ -422,10 +413,30 @@ class Skills(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+
+    async def _get_skill_content(
+        self,
+        *,
+        guild_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        session_id: Optional[int] = None,
+        character: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Load skills.json for the resolved runtime session/content pack."""
+        return await load_runtime_content(
+            self.bot.db,
+            'skills.json',
+            guild_id=guild_id,
+            user_id=user_id,
+            channel_id=channel_id,
+            session_id=session_id,
+            character=character,
+        )
     
-    async def create_skill_tree_embed(self, character: Dict, char_class: str) -> discord.Embed:
+    async def create_skill_tree_embed(self, character: Dict, char_class: str, skill_content: Dict[str, Any]) -> discord.Embed:
         """Create an embed showing the skill tree overview"""
-        tree = SKILLS_DATA.get('skill_trees', {}).get(char_class.lower(), {})
+        tree = skill_content.get('skill_trees', {}).get(char_class.lower(), {})
         
         embed = discord.Embed(
             title=f"🌳 {tree.get('name', char_class.title())} Skill Tree",
@@ -442,10 +453,10 @@ class Skills(commands.Cog):
         )
         
         # Show branches
-        for branch in get_skill_tree_branches(char_class):
+        for branch in get_skill_tree_branches(skill_content, char_class):
             branch_skills = []
             for skill_id in branch.get('skills', [])[:5]:
-                skill = SKILLS_DATA.get('skills', {}).get(skill_id, {})
+                skill = skill_content.get('skills', {}).get(skill_id, {})
                 has_skill = await self.bot.db.has_skill(character['id'], skill_id)
                 icon = "✅" if has_skill else skill.get('icon', '⚡')
                 branch_skills.append(f"{icon} {skill.get('name', skill_id)}")
@@ -459,7 +470,7 @@ class Skills(commands.Cog):
         embed.set_footer(text="Select a branch to view details and learn skills")
         return embed
     
-    async def create_branch_embed(self, character: Dict, char_class: str, branch: Dict) -> discord.Embed:
+    async def create_branch_embed(self, character: Dict, char_class: str, branch: Dict, skill_content: Dict[str, Any]) -> discord.Embed:
         """Create an embed showing a skill branch"""
         embed = discord.Embed(
             title=f"{branch.get('icon', '📂')} {branch['name']}",
@@ -470,7 +481,7 @@ class Skills(commands.Cog):
         # Group skills by tier
         by_tier = {}
         for skill_id in branch.get('skills', []):
-            skill = SKILLS_DATA.get('skills', {}).get(skill_id)
+            skill = skill_content.get('skills', {}).get(skill_id)
             if skill:
                 tier = skill.get('tier', 1)
                 if tier not in by_tier:
@@ -496,7 +507,7 @@ class Skills(commands.Cog):
         return embed
     
     async def learn_skill(self, interaction: discord.Interaction, character: Dict, 
-                          skill_id: str, skill: Dict) -> bool:
+                          skill_id: str, skill: Dict, skill_content: Dict[str, Any]) -> bool:
         """Learn a skill for a character"""
         # Check if already learned
         if await self.bot.db.has_skill(character['id'], skill_id):
@@ -521,7 +532,7 @@ class Skills(commands.Cog):
         prerequisites = skill.get('prerequisites', [])
         for prereq_id in prerequisites:
             if not await self.bot.db.has_skill(character['id'], prereq_id):
-                prereq_skill = SKILLS_DATA.get('skills', {}).get(prereq_id, {})
+                prereq_skill = skill_content.get('skills', {}).get(prereq_id, {})
                 prereq_name = prereq_skill.get('name', prereq_id)
                 await interaction.response.send_message(
                     f"❌ You need to learn **{prereq_name}** first!",
@@ -562,6 +573,13 @@ class Skills(commands.Cog):
                            skill_id: str, skill_data: Dict, skill_db: Dict, 
                            target: str = None) -> bool:
         """Execute a skill"""
+        skill_content = await self._get_skill_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=character,
+        )
+
         # Check cooldown
         if skill_db.get('cooldown_remaining', 0) > 0:
             await interaction.response.send_message(
@@ -640,7 +658,7 @@ class Skills(commands.Cog):
             elif effect_type == 'apply_status':
                 status_id = effect.get('status')
                 duration = effect.get('duration', 3)
-                status_data = SKILLS_DATA.get('status_effects', {}).get(status_id, {})
+                status_data = skill_content.get('status_effects', {}).get(status_id, {})
                 status_name = status_data.get('name', status_id)
                 effects_text.append(f"🎭 Applies **{status_name}** for {duration} turns")
         
@@ -709,16 +727,22 @@ class Skills(commands.Cog):
         
         char_class = get_character_class(character).lower()
         display_class = get_character_class(character)
+        skill_content = await self._get_skill_content(
+            guild_id=interaction.guild_id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=character,
+        )
 
-        if char_class not in SKILLS_DATA.get('skill_trees', {}):
+        if char_class not in skill_content.get('skill_trees', {}):
             await interaction.response.send_message(
                 f"❌ No skill tree found for class **{display_class}**!",
                 ephemeral=True
             )
             return
         
-        embed = await self.create_skill_tree_embed(character, char_class)
-        view = SkillTreeView(self, character, char_class)
+        embed = await self.create_skill_tree_embed(character, char_class, skill_content)
+        view = SkillTreeView(self, character, char_class, skill_content)
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
@@ -757,7 +781,14 @@ class Skills(commands.Cog):
             )
             return
         
-        view = UseSkillView(self, character, active_skills, target)
+        skill_content = await self._get_skill_content(
+            guild_id=interaction.guild_id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=character,
+        )
+
+        view = UseSkillView(self, character, active_skills, skill_content, target)
         
         embed = discord.Embed(
             title="⚡ Use Skill",
@@ -774,8 +805,13 @@ class Skills(commands.Cog):
         # Search for skill
         skill_id = None
         skill_data = None
+        skill_content = await self._get_skill_content(
+            guild_id=interaction.guild_id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+        )
         
-        for sid, sdata in SKILLS_DATA.get('skills', {}).items():
+        for sid, sdata in skill_content.get('skills', {}).items():
             if sdata.get('name', '').lower() == skill_name.lower():
                 skill_id = sid
                 skill_data = sdata
@@ -783,7 +819,7 @@ class Skills(commands.Cog):
         
         if not skill_data:
             # Try partial match
-            for sid, sdata in SKILLS_DATA.get('skills', {}).items():
+            for sid, sdata in skill_content.get('skills', {}).items():
                 if skill_name.lower() in sdata.get('name', '').lower():
                     skill_id = sid
                     skill_data = sdata
@@ -824,7 +860,7 @@ class Skills(commands.Cog):
         if skill_data.get('prerequisites'):
             prereqs = []
             for prereq_id in skill_data['prerequisites']:
-                prereq = SKILLS_DATA.get('skills', {}).get(prereq_id, {})
+                prereq = skill_content.get('skills', {}).get(prereq_id, {})
                 prereqs.append(prereq.get('name', prereq_id))
             embed.add_field(name="Prerequisites", value=", ".join(prereqs), inline=False)
         
@@ -834,8 +870,13 @@ class Skills(commands.Cog):
     async def skill_name_autocomplete(self, interaction: discord.Interaction, 
                                       current: str) -> List[app_commands.Choice[str]]:
         """Autocomplete for skill names"""
+        skill_content = await self._get_skill_content(
+            guild_id=interaction.guild_id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+        )
         choices = []
-        for skill_id, skill_data in SKILLS_DATA.get('skills', {}).items():
+        for skill_id, skill_data in skill_content.get('skills', {}).items():
             name = skill_data.get('name', skill_id)
             if current.lower() in name.lower():
                 choices.append(app_commands.Choice(name=name[:100], value=name[:100]))

@@ -150,14 +150,19 @@ cp .env.example .env
 # Set `DISCORD_TOKEN` and one LLM API key
 ```
 
-Required environment variables:
+Common environment variables:
 
 - `DISCORD_TOKEN`
-- `DISCORD_GUILD_ID`
-- `LLM_MODEL`
-- `LLM_BASE_URL`
 - `DATABASE_PATH` or `DATABASE_URL`
 - `OPENROUTER_API_KEY` or `REQUESTY_API_KEY`
+
+Optional but commonly used:
+
+- `DISCORD_GUILD_ID` for faster guild-scoped slash-command sync during development
+- `LLM_MODEL`
+- `LLM_BASE_URL`
+- `OPENROUTER_SITE_URL`
+- `OPENROUTER_APP_NAME`
 
 4. Run the bot:
 ```bash

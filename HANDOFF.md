@@ -20,7 +20,7 @@ What is not yet coherent end to end:
 - `/game`, `/session`, and `/resume` still split lifecycle responsibility.
 - Character creation, combat, and quest progression still have duplicate or drifting implementations.
 - Theme/content-pack foundation is in place (`world_theme`, `content_pack_id`, `fantasy_core`, loader, pack-aware web/tool reads), but Discord runtime parity is still incomplete.
-- Storyline graph, faction runtime, map/discovery systems, and full snapshot continuity are not implemented end to end.
+- Faction runtime and storyline graph foundations are now landed, but quest lifecycle wiring, map/discovery systems, and full snapshot continuity are still not implemented end to end.
 
 Reference spec for the next implementation wave:
 
@@ -34,7 +34,7 @@ The highest-priority architectural gaps are:
 2. duplicate lifecycle flows across `/game`, `/session`, and `/resume`
 3. remaining character creation/combat canonicalization beyond the landed slices
 4. incomplete browser/dashboard contracts for campaign editing/admin parity
-5. larger roadmap features: factions, storylines, map/discovery systems
+5. larger roadmap features: map/discovery systems and deeper campaign canonicalization
 
 The implementation-ready source of truth for these gaps is `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`.
 
@@ -222,6 +222,46 @@ npm run build
 Results:
 - 67 focused tests passed
 - frontend TypeScript build passed
+
+### Phase 10 - Faction, Monster Template, and Storyline Foundations
+
+This session implemented the next bounded worldbuilding/campaign slices from `WORLDBUILDING_AND_CAMPAIGN_GAP_SPEC.md`: Phase 5 (NPC/monster/faction foundation) and Phase 6 (storyline/quest graph foundation).
+
+#### Changes Made
+
+**`src/database.py`:**
+- Added faction tables (`factions`, `faction_memberships`, `character_faction_reputation`) and monster/storyline tables (`monster_templates`, `boss_phases`, `storylines`, `storyline_nodes`, `storyline_edges`, `storyline_progress`, `plot_points`, `plot_clues`)
+- Added migration-safe columns for NPC faction metadata, combat participant template/resource state, quest storyline linkage, and quest progress branch/failure tracking
+- Added CRUD/helpers for factions, faction reputation, monster templates, boss phases, storylines, plot points, and clue discovery/reveal flows
+- Seeded relational monster templates from `data/game_data/packs/fantasy/core/enemies.json`
+
+**`src/tools.py` + `src/tool_schemas.py`:**
+- Added faction tools (`get_factions`, `create_faction`, `update_faction_reputation`, `get_character_faction_reputation`)
+- Added monster tools (`spawn_monster`, `get_stat_block`) with template-backed combat spawning while preserving ad hoc fallback
+- Added storyline/clue tools (`get_storyline_state`, `advance_storyline_node`, `create_plot_point`, `record_clue_discovery`, `reveal_plot_point`)
+
+**`web/api.py`:**
+- Added faction endpoints, monster template endpoints, storyline endpoints, and plot/clue discovery endpoints
+- Fixed `GET /api/templates/npcs` to use pack-aware loading
+- Kept `GET /api/templates/enemies` working with DB-backed templates plus content-pack fallback
+
+**Tests:**
+- Added focused database and tool coverage for faction CRUD/reputation, template-backed monster spawning, storyline advancement, and clue auto-reveal thresholds
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_database.py tests/test_tools.py tests/test_web_phase7.py -q
+```
+
+Results:
+- 142 tests passed in the final focused run
+
+#### Remaining Limitation
+
+- `src/cogs/quests.py` was already dirty in the worktree, so the quest lifecycle wiring that would consume the new storyline foundation was intentionally deferred.
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion
 
@@ -873,8 +913,7 @@ The old browser-chat implementation plan is stale; browser chat already exists. 
 ### Planned-Not-Implemented Yet
 
 - full content-pack runtime switching beyond `fantasy_core`
-- relational faction runtime and faction reputation systems
-- storyline graph execution and clue/reveal systems
+- deeper faction/storyline runtime wiring into quest lifecycle and Discord/browser flows
 - maps, lore, and discovery runtime/editor systems
 - complete snapshot/save-point system behind the current UI
 
@@ -884,9 +923,10 @@ The old browser-chat implementation plan is stale; browser chat already exists. 
 
 ```bash
 # Clone and setup
-cd c:\Users\kyle\projects\rpg-dm-bot
+git clone https://github.com/mojomast/rpg-dm-bot.git
+cd rpg-dm-bot
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -895,8 +935,11 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with:
 # - DISCORD_TOKEN=your_bot_token
-# - REQUESTY_API_KEY=your_api_key
-# - REQUESTY_BASE_URL=https://router.requesty.ai/v1
+# - OPENROUTER_API_KEY=your_api_key
+#   or REQUESTY_API_KEY=your_api_key
+# - LLM_MODEL=your_model
+# - LLM_BASE_URL=https://openrouter.ai/api/v1
+#   or https://router.requesty.ai/v1
 
 # Run tests
 pytest tests/ -v

@@ -752,6 +752,24 @@ class Database:
             if 'points_of_interest' not in columns:
                 await db.execute("ALTER TABLE locations ADD COLUMN points_of_interest TEXT DEFAULT '[]'")
                 await db.commit()
+            if 'slug' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN slug TEXT")
+                await db.commit()
+            if 'hierarchy_kind' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN hierarchy_kind TEXT DEFAULT 'location'")
+                await db.commit()
+            if 'tags' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN tags TEXT DEFAULT '[]'")
+                await db.commit()
+            if 'dm_notes' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN dm_notes TEXT")
+                await db.commit()
+            if 'is_hidden' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN is_hidden INTEGER DEFAULT 0")
+                await db.commit()
+            if 'discoverability' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN discoverability TEXT DEFAULT 'visible'")
+                await db.commit()
         except Exception:
             pass
 
@@ -761,6 +779,18 @@ class Database:
 
             if 'travel_time' not in columns:
                 await db.execute("ALTER TABLE location_connections ADD COLUMN travel_time INTEGER DEFAULT 1")
+                await db.commit()
+            if 'connection_type' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN connection_type TEXT DEFAULT 'path'")
+                await db.commit()
+            if 'distance_text' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN distance_text TEXT")
+                await db.commit()
+            if 'travel_mode' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN travel_mode TEXT DEFAULT 'walk'")
+                await db.commit()
+            if 'lock_state' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN lock_state TEXT DEFAULT 'open'")
                 await db.commit()
             if 'requirements' not in columns:
                 await db.execute("ALTER TABLE location_connections ADD COLUMN requirements TEXT")
@@ -3975,6 +4005,12 @@ class Database:
         session_id: int = None,
         description: str = "",
         location_type: str = "generic",
+        slug: str = None,
+        hierarchy_kind: str = "location",
+        tags: List[str] = None,
+        dm_notes: str = None,
+        is_hidden: bool = False,
+        discoverability: str = "visible",
         points_of_interest: List = None,
         current_weather: str = None,
         danger_level: int = 0,
@@ -3985,19 +4021,28 @@ class Database:
         
         # Serialize points_of_interest to JSON
         poi_json = json.dumps(points_of_interest) if points_of_interest else "[]"
+        tags_json = json.dumps(tags) if tags else "[]"
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO locations 
-                (session_id, guild_id, name, description, location_type, danger_level,
+                (session_id, guild_id, name, slug, description, location_type, hierarchy_kind,
+                 parent_location_id, tags, dm_notes, is_hidden, discoverability, danger_level,
                  current_weather, hidden_secrets, points_of_interest, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id,
                 guild_id,
                 name,
+                slug,
                 description,
                 location_type,
+                hierarchy_kind,
+                None,
+                tags_json,
+                dm_notes,
+                int(is_hidden),
+                discoverability,
                 danger_level,
                 current_weather,
                 hidden_secrets,
@@ -4016,6 +4061,10 @@ class Database:
         # Map API field names to DB column names
         if 'points_of_interest' in kwargs:
             kwargs['points_of_interest'] = json.dumps(kwargs.pop('points_of_interest') or [])
+        if 'tags' in kwargs:
+            kwargs['tags'] = json.dumps(kwargs.pop('tags') or [])
+        if 'is_hidden' in kwargs:
+            kwargs['is_hidden'] = int(bool(kwargs['is_hidden']))
         kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
@@ -4133,6 +4182,26 @@ class Database:
             cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def get_location_connection_between(self, from_location_id: int, to_location_id: int) -> Optional[Dict[str, Any]]:
+        """Get the traversable connection row between two locations if one exists."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT lc.*, fl.name AS from_location_name, tl.name AS to_location_name
+                FROM location_connections lc
+                JOIN locations fl ON fl.id = lc.from_location_id
+                JOIN locations tl ON tl.id = lc.to_location_id
+                WHERE (lc.from_location_id = ? AND lc.to_location_id = ?)
+                   OR (lc.bidirectional = 1 AND lc.from_location_id = ? AND lc.to_location_id = ?)
+                ORDER BY CASE WHEN lc.from_location_id = ? AND lc.to_location_id = ? THEN 0 ELSE 1 END
+                LIMIT 1
+                """,
+                (from_location_id, to_location_id, to_location_id, from_location_id, from_location_id, to_location_id),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     async def update_location_connection(self, connection_id: int, **kwargs) -> bool:
         """Update a canonical location connection record."""
@@ -5105,7 +5174,7 @@ class Database:
             cursor = await db.execute("""
                 SELECT l.id, l.name, l.location_type, l.danger_level, l.description,
                        lc.id AS connection_id, lc.from_location_id, lc.to_location_id,
-                       lc.direction, lc.travel_time, lc.requirements, lc.hidden, lc.bidirectional,
+                       lc.direction, lc.connection_type, lc.distance_text, lc.travel_time, lc.travel_mode, lc.lock_state, lc.requirements, lc.hidden, lc.bidirectional,
                        l.name AS to_name
                 FROM location_connections lc
                 JOIN locations l ON lc.to_location_id = l.id
@@ -5122,7 +5191,7 @@ class Database:
                            WHEN 'down' THEN 'up'
                            ELSE lc.direction
                        END as direction,
-                       lc.travel_time, lc.requirements, lc.hidden, lc.bidirectional,
+                       lc.connection_type, lc.distance_text, lc.travel_time, lc.travel_mode, lc.lock_state, lc.requirements, lc.hidden, lc.bidirectional,
                        l.name as to_name
                 FROM location_connections lc
                 JOIN locations l ON lc.from_location_id = l.id
@@ -5130,6 +5199,14 @@ class Database:
             """, (location_id, location_id))
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def get_adjacent_locations(self, session_id: int) -> List[Dict[str, Any]]:
+        """Get locations adjacent to the session's current location."""
+        game_state = await self.get_game_state(session_id)
+        current_location_id = (game_state or {}).get('current_location_id')
+        if not current_location_id:
+            return []
+        return await self.get_nearby_locations(current_location_id)
     
     async def get_active_events(self, session_id: int) -> List[Dict]:
         """Get all active (triggered but not resolved) story events for a session"""

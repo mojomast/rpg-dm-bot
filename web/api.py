@@ -2211,16 +2211,23 @@ async def finalize_campaign(data: CampaignFinalize):
             preview_location_id = loc.get('id') or f"loc_{len(location_id_map) + 1}"
             cursor = await conn.execute("""
                 INSERT INTO locations (
-                    session_id, guild_id, name, description, location_type, danger_level,
+                    session_id, guild_id, name, slug, description, location_type, hierarchy_kind,
+                    tags, dm_notes, is_hidden, discoverability, danger_level,
                     hidden_secrets, points_of_interest, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id,
                 data.guild_id,
                 loc['name'],
+                loc.get('slug'),
                 loc.get('description', ''),
                 loc.get('type', 'generic'),
+                loc.get('hierarchy_kind', 'location'),
+                json.dumps(loc.get('tags', [])),
+                loc.get('dm_notes'),
+                int(bool(loc.get('is_hidden', False))),
+                loc.get('discoverability', 'visible'),
                 loc.get('danger_level', 1),
                 json.dumps({}),
                 json.dumps(loc.get('points_of_interest', [])),
@@ -2246,14 +2253,19 @@ async def finalize_campaign(data: CampaignFinalize):
 
             await conn.execute("""
                 INSERT OR IGNORE INTO location_connections (
-                    from_location_id, to_location_id, direction, travel_time, hidden, bidirectional
+                    from_location_id, to_location_id, direction, connection_type, distance_text,
+                    travel_time, travel_mode, lock_state, hidden, bidirectional
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 from_location_id,
                 to_location_id,
                 connection['direction'],
+                connection.get('connection_type', 'path'),
+                connection.get('distance_text'),
                 connection['travel_time'],
+                connection.get('travel_mode', 'walk'),
+                connection.get('lock_state', 'open'),
                 int(connection['hidden']),
                 int(connection['bidirectional']),
             ))

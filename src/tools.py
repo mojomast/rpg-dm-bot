@@ -280,6 +280,8 @@ class ToolExecutor:
                 return await self._get_location(tool_args)
             elif tool_name == "get_nearby_locations":
                 return await self._get_nearby_locations(tool_args)
+            elif tool_name == "get_adjacent_locations":
+                return await self._get_adjacent_locations(context)
             elif tool_name == "update_location":
                 return await self._update_location(tool_args)
             elif tool_name == "move_party_to_location":
@@ -1672,6 +1674,12 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             session_id=session['id'] if session else None,
             description=args.get('description'),
             location_type=args.get('location_type', 'generic'),
+            slug=args.get('slug'),
+            hierarchy_kind=args.get('hierarchy_kind', 'location'),
+            tags=args.get('tags', []),
+            dm_notes=args.get('dm_notes'),
+            is_hidden=args.get('is_hidden', False),
+            discoverability=args.get('discoverability', 'visible'),
             points_of_interest=args.get('points_of_interest', []),
             current_weather=args.get('current_weather'),
             danger_level=args.get('danger_level', 0),
@@ -1711,6 +1719,20 @@ Points of Interest: {pois}"""
         
         return "\n".join(lines)
 
+    async def _get_adjacent_locations(self, context: Dict) -> str:
+        """Get adjacent locations from the session's current location."""
+        session = await self._get_session_for_context(context)
+        if not session:
+            return json.dumps({"success": False, "reason": "no_active_session"})
+
+        locations = await self.db.get_adjacent_locations(session['id'])
+        return json.dumps({
+            "success": True,
+            "session_id": session['id'],
+            "current_location_id": (await self.db.get_game_state(session['id']) or {}).get('current_location_id'),
+            "locations": locations,
+        })
+
     async def _update_location(self, args: Dict) -> str:
         """Update location"""
         location_id = args.get('location_id')
@@ -1729,20 +1751,37 @@ Points of Interest: {pois}"""
         
         session = await self._get_session_for_context(context)
         if not session:
-            return "Error: No active session"
+            return json.dumps({"success": False, "reason": "no_active_session"})
         
         loc = await self.db.get_location(location_id)
         if not loc:
-            return "Error: Location not found"
+            return json.dumps({"success": False, "reason": "location_not_found", "location_id": location_id})
 
         current_state = await self.db.get_game_state(session['id']) or {}
         current_location_id = current_state.get('current_location_id')
+        connection = None
         if current_location_id and current_location_id != location_id:
-            nearby_locations = await self.db.get_nearby_locations(current_location_id)
-            if not any(nearby.get('id') == location_id for nearby in nearby_locations):
+            connection = await self.db.get_location_connection_between(current_location_id, location_id)
+            if not connection:
                 current_location = await self.db.get_location(current_location_id)
                 current_name = current_location.get('name', 'Unknown') if current_location else 'Unknown'
-                return f"Error: **{loc['name']}** is not directly connected to **{current_name}**"
+                return json.dumps({
+                    "success": False,
+                    "reason": "not_adjacent",
+                    "from_location_id": current_location_id,
+                    "from_location_name": current_name,
+                    "to_location_id": location_id,
+                    "to_location_name": loc['name'],
+                })
+            if (connection.get('lock_state') or 'open') != 'open':
+                return json.dumps({
+                    "success": False,
+                    "reason": "locked",
+                    "from_location_id": current_location_id,
+                    "to_location_id": location_id,
+                    "to_location_name": loc['name'],
+                    "lock_state": connection.get('lock_state'),
+                })
 
         participants = await self.db.get_session_participants(session['id'])
         moved_characters = []
@@ -1759,6 +1798,7 @@ Points of Interest: {pois}"""
             session['id'],
             current_location=loc['name'],
             current_location_id=location_id,
+            active_content_pack_id=session.get('content_pack_id'),
         )
         
         # Log the travel
@@ -1775,7 +1815,17 @@ Points of Interest: {pois}"""
             exit_lines = [f"• {nearby.get('name', 'Unknown')} ({nearby.get('direction', 'path')})" for nearby in nearby_locations[:5]]
             exits = "\n\n🚪 Exits:\n" + "\n".join(exit_lines)
 
-        return f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}{exits}"
+        return json.dumps({
+            "success": True,
+            "reason": "moved",
+            "session_id": session['id'],
+            "location_id": location_id,
+            "location_name": loc['name'],
+            "travel_description": travel_desc,
+            "moved_character_ids": moved_characters,
+            "connection_id": connection.get('id') if connection else None,
+            "narration": f"🚶 The party travels to **{loc['name']}**.\n{travel_desc}\n\n{loc['description'] or ''}{exits}",
+        })
     
     # =========================================================================
     # STORY ITEM TOOL IMPLEMENTATIONS

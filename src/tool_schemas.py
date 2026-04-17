@@ -1173,6 +1173,19 @@ GET_NEARBY_LOCATIONS_SCHEMA = {
     }
 }
 
+GET_ADJACENT_LOCATIONS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_adjacent_locations",
+        "description": "Get locations directly adjacent to the session's current location.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}
+
 UPDATE_LOCATION_SCHEMA = {
     "type": "function",
     "function": {
@@ -2275,6 +2288,7 @@ TOOLS_SCHEMA = [
     CREATE_LOCATION_SCHEMA,
     GET_LOCATION_SCHEMA,
     GET_NEARBY_LOCATIONS_SCHEMA,
+    GET_ADJACENT_LOCATIONS_SCHEMA,
     UPDATE_LOCATION_SCHEMA,
     MOVE_PARTY_TO_LOCATION_SCHEMA,
     MOVE_CHARACTER_TO_LOCATION_SCHEMA,
@@ -2358,7 +2372,7 @@ class ToolSchemas:
                       GET_CHARACTER_ABILITIES_SCHEMA, REST_CHARACTER_SCHEMA,
                       LONG_REST_SCHEMA, SHORT_REST_SCHEMA],
             "location": [CREATE_LOCATION_SCHEMA, GET_LOCATION_SCHEMA, 
-                        GET_NEARBY_LOCATIONS_SCHEMA, UPDATE_LOCATION_SCHEMA,
+                        GET_NEARBY_LOCATIONS_SCHEMA, GET_ADJACENT_LOCATIONS_SCHEMA, UPDATE_LOCATION_SCHEMA,
                         MOVE_PARTY_TO_LOCATION_SCHEMA, MOVE_CHARACTER_TO_LOCATION_SCHEMA,
                         GET_CHARACTERS_AT_LOCATION_SCHEMA, GET_NPCS_AT_LOCATION_SCHEMA,
                         EXPLORE_LOCATION_SCHEMA],

@@ -1146,6 +1146,20 @@ class TestLocations:
         assert deleted is True
         assert await db.get_location_connection(connection_id) is None
 
+    async def test_get_adjacent_locations_uses_session_current_location(self, db_with_session):
+        db, session_id = db_with_session
+
+        town_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Town")
+        cave_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Cave")
+        await db.create_location_connection(from_location_id=town_id, to_location_id=cave_id, direction='east')
+        await db.save_game_state(session_id, current_location='Town', current_location_id=town_id)
+
+        adjacent = await db.get_adjacent_locations(session_id)
+
+        assert len(adjacent) == 1
+        assert adjacent[0]['id'] == cave_id
+        assert adjacent[0]['direction'] == 'east'
+
 
 class TestStoryContent:
     async def test_update_story_item_normalizes_discovered_alias(self, db_with_session):

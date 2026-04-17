@@ -60,16 +60,21 @@ async def test_finalize_campaign_persists_playable_session_state(db):
     assert session["status"] == "active"
     assert session["world_theme"] == "fantasy"
     assert session["content_pack_id"] == "fantasy_core"
+    assert session["genre_family"] == "fantasy"
+    assert session["rules_profile_id"] == "d20_fantasy"
+    assert session["theme_config"]["magic_level"] is None
 
     game_state = await db.get_game_state(result["session_id"])
     assert game_state["current_location"] == "Oakheart"
     assert game_state["current_location_id"] is not None
     dm_notes = json.loads(game_state["dm_notes"])
     assert dm_notes["active_content_pack_id"] == "fantasy_core"
+    assert game_state["active_content_pack_id"] == "fantasy_core"
+    assert game_state["allowed_content_packs"] == ["fantasy_core"]
 
     starting_location = await db.get_location(game_state["current_location_id"])
     assert starting_location["name"] == "Oakheart"
-    assert "Market Square" in json.loads(starting_location["points_of_interest"])
+    assert "Market Square" in starting_location["points_of_interest"]
 
     nearby = await db.get_nearby_locations(game_state["current_location_id"])
     assert len(nearby) == 1
@@ -134,6 +139,7 @@ async def test_finalize_campaign_persists_user_edited_preview_content(db):
     session = await db.get_session(result["session_id"])
     assert session["name"] == "Edited Campaign"
     assert session["description"] == "Edited browser review content."
+    assert session["theme_config"]["magic_level"] is None
 
     game_state = await db.get_game_state(result["session_id"])
     assert game_state["current_scene"] == "The party arrives as emergency bells ring across Glassharbor."

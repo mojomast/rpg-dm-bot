@@ -3,6 +3,8 @@ Unit tests for ToolExecutor class in src/tools.py
 Tests tool execution for all game mechanics.
 """
 
+import json
+
 import pytest
 
 
@@ -956,9 +958,43 @@ class TestTravelTools:
             {**mock_context, "session_id": session_id},
         )
 
-        assert "not directly connected" in result
+        payload = json.loads(result)
+        assert payload["success"] is False
+        assert payload["reason"] == "not_adjacent"
         state = await db.get_game_state(session_id)
         assert state['current_location_id'] == town_id
+
+    async def test_get_adjacent_locations_returns_session_neighbors(self, tool_executor, db, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Travel Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Whisperwood",
+        )
+        await db.create_location_connection(from_location_id=town_id, to_location_id=forest_id, direction='north')
+        await db.save_game_state(session_id, current_location='Oakheart', current_location_id=town_id)
+
+        result = await tool_executor.execute_tool(
+            "get_adjacent_locations",
+            {},
+            {**mock_context, "session_id": session_id},
+        )
+
+        payload = json.loads(result)
+        assert payload["success"] is True
+        assert payload["locations"][0]["id"] == forest_id
 
 
 class TestMonsterTemplateTools:

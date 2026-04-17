@@ -234,3 +234,80 @@ async def test_create_browser_character_attaches_to_session(db):
             x_web_identity=identity,
         )
     assert duplicate.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_snapshot_api_create_load_delete_round_trip(db, sample_character_stats):
+    api_module.db = db
+
+    session_id = await db.create_session(
+        guild_id=67890,
+        name="Snapshot API Session",
+        dm_user_id=12345,
+        description="Snapshot API test",
+    )
+    await db.update_session(session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+    location_id = await db.create_location(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Oakheart",
+        description="Town center",
+        location_type="town",
+    )
+    char_id = await db.create_character(
+        user_id=12345,
+        guild_id=67890,
+        name="Aria",
+        race="human",
+        char_class="warrior",
+        stats=sample_character_stats,
+        session_id=session_id,
+    )
+    await db.join_session(session_id, user_id=12345, character_id=char_id)
+    await db.save_game_state(
+        session_id,
+        current_scene="Snapshot scene",
+        current_location="Oakheart",
+        current_location_id=location_id,
+        dm_notes="Original snapshot state",
+        turn_count=2,
+        game_data={"active_content_pack_id": "fantasy_core"},
+    )
+
+    created = await api_module.create_snapshot(
+        api_module.SnapshotCreate(
+            session_id=session_id,
+            name="Checkpoint",
+            created_by=12345,
+            description="Manual checkpoint",
+        )
+    )
+    snapshot_id = created["id"]
+
+    await db.save_game_state(
+        session_id,
+        current_scene="Mutated scene",
+        current_location="Elsewhere",
+        current_location_id=None,
+        dm_notes="Mutated",
+        turn_count=0,
+        game_data={},
+    )
+
+    snapshots = await api_module.list_snapshots(session_id)
+    assert any(snapshot["id"] == snapshot_id for snapshot in snapshots["snapshots"])
+
+    loaded = await api_module.load_snapshot(snapshot_id)
+    assert loaded["success"] is True
+
+    restored_state = await db.get_game_state(session_id)
+    assert restored_state["current_scene"] == "Snapshot scene"
+    assert restored_state["current_location"] == "Oakheart"
+    assert restored_state["turn_count"] == 2
+
+    deleted = await api_module.delete_snapshot(snapshot_id)
+    assert deleted["message"] == "Snapshot deleted"
+
+    snapshots_after_delete = await api_module.list_snapshots(session_id)
+    assert all(snapshot["id"] != snapshot_id for snapshot in snapshots_after_delete["snapshots"])

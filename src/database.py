@@ -3106,6 +3106,30 @@ class Database:
         if snapshot_data is None:
             snapshot_data = {}
 
+        if snapshot_data.get('locations'):
+            location_ids = [location['id'] for location in snapshot_data['locations'] if location.get('id')]
+            if location_ids:
+                placeholders = ', '.join('?' for _ in location_ids)
+                async with aiosqlite.connect(self.db_path) as db:
+                    db.row_factory = aiosqlite.Row
+                    cursor = await db.execute(
+                        f"SELECT * FROM location_connections WHERE from_location_id IN ({placeholders}) OR to_location_id IN ({placeholders})",
+                        location_ids + location_ids,
+                    )
+                    snapshot_data['location_connections'] = [dict(row) for row in await cursor.fetchall()]
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            cursor = await db.execute("SELECT * FROM quest_progress WHERE session_id = ?", (session_id,))
+            snapshot_data['quest_progress'] = [dict(row) for row in await cursor.fetchall()]
+
+            cursor = await db.execute("SELECT * FROM npc_relationships WHERE npc_id IN (SELECT id FROM npcs WHERE session_id = ?)", (session_id,))
+            snapshot_data['npc_relationships'] = [dict(row) for row in await cursor.fetchall()]
+
+            cursor = await db.execute("SELECT * FROM conversation_history WHERE session_id = ? ORDER BY id", (session_id,))
+            snapshot_data['conversation_history'] = [dict(row) for row in await cursor.fetchall()]
+
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO session_snapshots (session_id, name, description, snapshot_type, snapshot_data, created_by, created_at)
@@ -3138,25 +3162,395 @@ class Database:
             return snapshot
 
     async def load_session_snapshot(self, snapshot_id: int) -> Dict[str, Any]:
-        """Load a snapshot. For v1 this restores game_state fields and returns the stored payload."""
+        """Load a snapshot by restoring the session-scoped v1 runtime state."""
         snapshot = await self.get_session_snapshot(snapshot_id)
         if not snapshot:
             return {'success': False, 'error': 'Snapshot not found'}
 
         data = snapshot.get('snapshot_data') or {}
+        session_id = snapshot['session_id']
+        session = data or {}
         game_state = data.get('game_state') or {}
-        if game_state:
-            await self.save_game_state(
-                snapshot['session_id'],
-                current_scene=game_state.get('current_scene'),
-                current_location=game_state.get('current_location'),
-                current_location_id=game_state.get('current_location_id'),
-                dm_notes=game_state.get('dm_notes'),
-                turn_count=game_state.get('turn_count', 0),
-                game_data=game_state.get('game_data', {})
-            )
 
-        return {'success': True, 'session_id': snapshot['session_id'], 'snapshot': snapshot}
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("PRAGMA foreign_keys = OFF")
+            try:
+                await db.execute("BEGIN")
+
+                if session:
+                    session_updates = {
+                        'name': session.get('name'),
+                        'description': session.get('description'),
+                        'dm_user_id': session.get('dm_user_id'),
+                        'status': session.get('status'),
+                        'max_players': session.get('max_players'),
+                        'current_quest_id': session.get('current_quest_id'),
+                        'world_theme': session.get('world_theme'),
+                        'content_pack_id': session.get('content_pack_id'),
+                        'setting': session.get('setting'),
+                        'world_state': json.dumps(session.get('world_state') or {}),
+                        'session_notes': session.get('session_notes'),
+                        'primary_channel_id': session.get('primary_channel_id'),
+                        'last_active_channel_id': session.get('last_active_channel_id'),
+                        'last_played': session.get('last_played'),
+                    }
+                    fields = ', '.join(f"{key} = ?" for key in session_updates.keys())
+                    await db.execute(
+                        f"UPDATE sessions SET {fields} WHERE id = ?",
+                        list(session_updates.values()) + [session_id],
+                    )
+
+                await db.execute("DELETE FROM combat_participants WHERE encounter_id IN (SELECT id FROM combat_encounters WHERE session_id = ?)", (session_id,))
+                await db.execute("DELETE FROM combat_encounters WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM conversation_history WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM quest_progress WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM story_log WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM story_events WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM story_items WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM npc_relationships WHERE npc_id IN (SELECT id FROM npcs WHERE session_id = ?)", (session_id,))
+                await db.execute("DELETE FROM npcs WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM location_connections WHERE from_location_id IN (SELECT id FROM locations WHERE session_id = ?) OR to_location_id IN (SELECT id FROM locations WHERE session_id = ?)", (session_id, session_id))
+                await db.execute("DELETE FROM locations WHERE session_id = ?", (session_id,))
+
+                cursor = await db.execute("SELECT id FROM characters WHERE session_id = ?", (session_id,))
+                character_ids = [row['id'] for row in await cursor.fetchall()]
+                if character_ids:
+                    placeholders = ', '.join('?' for _ in character_ids)
+                    await db.execute(f"DELETE FROM inventory WHERE character_id IN ({placeholders})", character_ids)
+                    await db.execute(f"DELETE FROM character_spells WHERE character_id IN ({placeholders})", character_ids)
+                    await db.execute(f"DELETE FROM character_abilities WHERE character_id IN ({placeholders})", character_ids)
+                    await db.execute(f"DELETE FROM spell_slots WHERE character_id IN ({placeholders})", character_ids)
+                    await db.execute(f"DELETE FROM character_skills WHERE character_id IN ({placeholders})", character_ids)
+                    await db.execute(f"DELETE FROM character_status_effects WHERE character_id IN ({placeholders})", character_ids)
+                    await db.execute(f"DELETE FROM character_skill_points WHERE character_id IN ({placeholders})", character_ids)
+
+                await db.execute("DELETE FROM session_participants WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM characters WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM game_state WHERE session_id = ?", (session_id,))
+
+                location_id_map: Dict[int, int] = {}
+                for location in data.get('locations', []):
+                    location_row = dict(location)
+                    original_id = location_row.pop('id', None)
+                    columns = list(location_row.keys())
+                    values = [location_row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    cursor = await db.execute(
+                        f"INSERT INTO locations ({', '.join(columns)}) VALUES ({placeholders})",
+                        values,
+                    )
+                    if original_id is not None:
+                        location_id_map[original_id] = cursor.lastrowid
+
+                character_id_map: Dict[int, int] = {}
+                for character in data.get('characters_full', []):
+                    character_row = dict(character)
+                    original_id = character_row.pop('id', None)
+                    inventory = character_row.pop('inventory', [])
+                    spells = character_row.pop('spells', [])
+                    abilities = character_row.pop('abilities', [])
+                    skills = character_row.pop('skills', [])
+                    status_effects = character_row.pop('status_effects', [])
+                    spell_slots = character_row.pop('spell_slots', {}) or {}
+                    skill_points = character_row.pop('skill_points', None)
+                    if 'char_class' in character_row and 'class' not in character_row:
+                        character_row['class'] = character_row.pop('char_class')
+                    if character_row.get('current_location_id') in location_id_map:
+                        character_row['current_location_id'] = location_id_map[character_row['current_location_id']]
+
+                    columns = list(character_row.keys())
+                    values = [character_row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    cursor = await db.execute(
+                        f"INSERT INTO characters ({', '.join(columns)}) VALUES ({placeholders})",
+                        values,
+                    )
+                    new_character_id = cursor.lastrowid
+                    if original_id is not None:
+                        character_id_map[original_id] = new_character_id
+
+                    for item in inventory:
+                        item_row = dict(item)
+                        item_row.pop('id', None)
+                        item_row['character_id'] = new_character_id
+                        if item_row.get('properties') is not None and not isinstance(item_row['properties'], str):
+                            item_row['properties'] = json.dumps(item_row['properties'])
+                        columns = list(item_row.keys())
+                        values = [item_row[column] for column in columns]
+                        placeholders = ', '.join('?' for _ in values)
+                        await db.execute(f"INSERT INTO inventory ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                    for spell in spells:
+                        spell_row = dict(spell)
+                        spell_row.pop('id', None)
+                        spell_row['character_id'] = new_character_id
+                        columns = list(spell_row.keys())
+                        values = [spell_row[column] for column in columns]
+                        placeholders = ', '.join('?' for _ in values)
+                        await db.execute(f"INSERT INTO character_spells ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                    for ability in abilities:
+                        ability_row = dict(ability)
+                        ability_row.pop('id', None)
+                        ability_row['character_id'] = new_character_id
+                        if ability_row.get('properties') is not None and not isinstance(ability_row['properties'], str):
+                            ability_row['properties'] = json.dumps(ability_row['properties'])
+                        columns = list(ability_row.keys())
+                        values = [ability_row[column] for column in columns]
+                        placeholders = ', '.join('?' for _ in values)
+                        await db.execute(f"INSERT INTO character_abilities ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                    for skill in skills:
+                        skill_row = dict(skill)
+                        skill_row.pop('id', None)
+                        skill_row['character_id'] = new_character_id
+                        columns = list(skill_row.keys())
+                        values = [skill_row[column] for column in columns]
+                        placeholders = ', '.join('?' for _ in values)
+                        await db.execute(f"INSERT INTO character_skills ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                    for effect in status_effects:
+                        effect_row = dict(effect)
+                        effect_row.pop('id', None)
+                        effect_row['character_id'] = new_character_id
+                        if effect_row.get('properties') is not None and not isinstance(effect_row['properties'], str):
+                            effect_row['properties'] = json.dumps(effect_row['properties'])
+                        columns = list(effect_row.keys())
+                        values = [effect_row[column] for column in columns]
+                        placeholders = ', '.join('?' for _ in values)
+                        await db.execute(f"INSERT INTO character_status_effects ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                    for slot_level, slot_data in spell_slots.items():
+                        if isinstance(slot_data, dict):
+                            total = slot_data.get('total', 0)
+                            remaining = slot_data.get('remaining', total)
+                        else:
+                            total = slot_data
+                            remaining = slot_data
+                        await db.execute(
+                            "INSERT INTO spell_slots (character_id, slot_level, total, remaining) VALUES (?, ?, ?, ?)",
+                            (new_character_id, int(slot_level), total, remaining),
+                        )
+
+                    if skill_points is not None:
+                        await db.execute(
+                            "INSERT INTO character_skill_points (character_id, total_points, spent_points) VALUES (?, ?, ?)",
+                            (new_character_id, skill_points.get('total_points', 0), skill_points.get('spent_points', 0)),
+                        )
+
+                npc_id_map: Dict[int, int] = {}
+                for npc in data.get('npcs', []):
+                    npc_row = dict(npc)
+                    original_id = npc_row.pop('id', None)
+                    if npc_row.get('location_id') in location_id_map:
+                        npc_row['location_id'] = location_id_map[npc_row['location_id']]
+                    if npc_row.get('merchant_inventory') is not None and not isinstance(npc_row['merchant_inventory'], str):
+                        npc_row['merchant_inventory'] = json.dumps(npc_row['merchant_inventory'])
+                    if npc_row.get('stats') is not None and not isinstance(npc_row['stats'], str):
+                        npc_row['stats'] = json.dumps(npc_row['stats'])
+                    columns = list(npc_row.keys())
+                    values = [npc_row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    cursor = await db.execute(
+                        f"INSERT INTO npcs ({', '.join(columns)}) VALUES ({placeholders})",
+                        values,
+                    )
+                    if original_id is not None:
+                        npc_id_map[original_id] = cursor.lastrowid
+
+                for relationship in data.get('npc_relationships', []):
+                    row = dict(relationship)
+                    row.pop('id', None)
+                    if row.get('npc_id') in npc_id_map:
+                        row['npc_id'] = npc_id_map[row['npc_id']]
+                    if row.get('character_id') in character_id_map:
+                        row['character_id'] = character_id_map[row['character_id']]
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO npc_relationships ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                quest_id_map: Dict[int, int] = {}
+                for quest in data.get('quests', []):
+                    quest_row = dict(quest)
+                    original_id = quest_row.pop('id', None)
+                    if isinstance(quest_row.get('objectives'), list):
+                        quest_row['objectives'] = json.dumps(quest_row['objectives'])
+                    if isinstance(quest_row.get('rewards'), dict):
+                        quest_row['rewards'] = json.dumps(quest_row['rewards'])
+                    columns = list(quest_row.keys())
+                    values = [quest_row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    cursor = await db.execute(
+                        f"INSERT INTO quests ({', '.join(columns)}) VALUES ({placeholders})",
+                        values,
+                    )
+                    if original_id is not None:
+                        quest_id_map[original_id] = cursor.lastrowid
+
+                if session.get('current_quest_id') in quest_id_map:
+                    await db.execute("UPDATE sessions SET current_quest_id = ? WHERE id = ?", (quest_id_map[session['current_quest_id']], session_id))
+
+                for participant in data.get('participants', []):
+                    row = dict(participant)
+                    row.pop('id', None)
+                    row.pop('character_name', None)
+                    row.pop('character_class', None)
+                    row.pop('character_race', None)
+                    row.pop('character_level', None)
+                    row.pop('level', None)
+                    if row.get('character_id') in character_id_map:
+                        row['character_id'] = character_id_map[row['character_id']]
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO session_participants ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                for progress in data.get('quest_progress', []):
+                    row = dict(progress)
+                    row.pop('id', None)
+                    if row.get('quest_id') in quest_id_map:
+                        row['quest_id'] = quest_id_map[row['quest_id']]
+                    if row.get('character_id') in character_id_map:
+                        row['character_id'] = character_id_map[row['character_id']]
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO quest_progress ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                for item in data.get('story_items', []):
+                    row = dict(item)
+                    row.pop('id', None)
+                    if row.get('location_id') in location_id_map:
+                        row['location_id'] = location_id_map[row['location_id']]
+                    if row.get('discovered_by') in character_id_map:
+                        row['discovered_by'] = character_id_map[row['discovered_by']]
+                    if row.get('current_holder_id') in character_id_map:
+                        row['current_holder_id'] = character_id_map[row['current_holder_id']]
+                    if row.get('properties') is not None and not isinstance(row['properties'], str):
+                        row['properties'] = json.dumps(row['properties'])
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO story_items ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                for event in data.get('story_events', []):
+                    row = dict(event)
+                    row.pop('id', None)
+                    if row.get('location_id') in location_id_map:
+                        row['location_id'] = location_id_map[row['location_id']]
+                    if row.get('involved_npcs') is not None and not isinstance(row['involved_npcs'], str):
+                        row['involved_npcs'] = json.dumps([npc_id_map.get(npc_id, npc_id) for npc_id in row['involved_npcs']])
+                    if row.get('involved_items') is not None and not isinstance(row['involved_items'], str):
+                        row['involved_items'] = json.dumps(row['involved_items'])
+                    if row.get('involved_characters') is not None and not isinstance(row['involved_characters'], str):
+                        row['involved_characters'] = json.dumps([character_id_map.get(char_id, char_id) for char_id in row['involved_characters']])
+                    if row.get('outcomes') is not None and not isinstance(row['outcomes'], str):
+                        row['outcomes'] = json.dumps(row['outcomes'])
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO story_events ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                for entry in data.get('story_log', []):
+                    row = dict(entry)
+                    row.pop('id', None)
+                    if row.get('participants') is not None and not isinstance(row['participants'], str):
+                        row['participants'] = json.dumps(row['participants'])
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO story_log ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                for connection in data.get('location_connections', []):
+                    row = dict(connection)
+                    row.pop('id', None)
+                    if row.get('from_location_id') in location_id_map:
+                        row['from_location_id'] = location_id_map[row['from_location_id']]
+                    if row.get('to_location_id') in location_id_map:
+                        row['to_location_id'] = location_id_map[row['to_location_id']]
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO location_connections ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                for message in data.get('conversation_history', []):
+                    row = dict(message)
+                    row.pop('id', None)
+                    columns = list(row.keys())
+                    values = [row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    await db.execute(f"INSERT INTO conversation_history ({', '.join(columns)}) VALUES ({placeholders})", values)
+
+                if game_state:
+                    current_location_id = game_state.get('current_location_id')
+                    if current_location_id in location_id_map:
+                        current_location_id = location_id_map[current_location_id]
+                    await db.execute(
+                        "INSERT INTO game_state (session_id, current_scene, current_location, current_location_id, dm_notes, last_activity, turn_count, game_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            session_id,
+                            game_state.get('current_scene'),
+                            game_state.get('current_location'),
+                            current_location_id,
+                            game_state.get('dm_notes'),
+                            game_state.get('last_activity'),
+                            game_state.get('turn_count', 0),
+                            json.dumps(game_state.get('game_data') or {}),
+                        ),
+                    )
+
+                active_combat = data.get('active_combat')
+                if active_combat:
+                    combat_row = dict(active_combat)
+                    combatants = combat_row.pop('combatants', [])
+                    original_encounter_id = combat_row.pop('id', None)
+                    columns = list(combat_row.keys())
+                    values = [combat_row[column] for column in columns]
+                    placeholders = ', '.join('?' for _ in values)
+                    cursor = await db.execute(
+                        f"INSERT INTO combat_encounters ({', '.join(columns)}) VALUES ({placeholders})",
+                        values,
+                    )
+                    new_encounter_id = cursor.lastrowid if original_encounter_id is not None else cursor.lastrowid
+                    combat_participant_id_map: Dict[int, int] = {}
+                    for combatant in combatants:
+                        row = dict(combatant)
+                        original_participant_id = row.pop('id', None)
+                        row['encounter_id'] = new_encounter_id
+                        if row.get('participant_type') == 'character' and row.get('participant_id') in character_id_map:
+                            row['participant_id'] = character_id_map[row['participant_id']]
+                        if row.get('participant_type') == 'npc' and row.get('participant_id') in npc_id_map:
+                            row['participant_id'] = npc_id_map[row['participant_id']]
+                        if row.get('status_effects') is not None and not isinstance(row['status_effects'], str):
+                            row['status_effects'] = json.dumps(row['status_effects'])
+                        columns = list(row.keys())
+                        values = [row[column] for column in columns]
+                        placeholders = ', '.join('?' for _ in values)
+                        cursor = await db.execute(
+                            f"INSERT INTO combat_participants ({', '.join(columns)}) VALUES ({placeholders})",
+                            values,
+                        )
+                        if original_participant_id is not None:
+                            combat_participant_id_map[original_participant_id] = cursor.lastrowid
+
+                    if combat_row.get('initiative_order'):
+                        initiative_order = json.loads(combat_row['initiative_order']) if isinstance(combat_row['initiative_order'], str) else combat_row['initiative_order']
+                        remapped_order = [combat_participant_id_map.get(participant_id, participant_id) for participant_id in initiative_order]
+                        await db.execute(
+                            "UPDATE combat_encounters SET initiative_order = ? WHERE id = ?",
+                            (json.dumps(remapped_order), new_encounter_id),
+                        )
+
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+            finally:
+                await db.execute("PRAGMA foreign_keys = ON")
+
+        return {'success': True, 'session_id': session_id, 'snapshot': snapshot}
 
     async def delete_session_snapshot(self, snapshot_id: int) -> bool:
         """Delete a snapshot by ID."""

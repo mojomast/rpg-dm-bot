@@ -202,6 +202,149 @@ class TestSessionChannelBinding:
         assert session['id'] == session_id
 
 
+class TestSnapshots:
+    async def test_load_session_snapshot_restores_runtime_state(self, db, sample_character_stats):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Snapshot Session",
+            dm_user_id=12345,
+            description="Snapshot restore test",
+        )
+        await db.update_session(session_id, status='active', world_theme='fantasy', content_pack_id='fantasy_core')
+
+        town_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Oakheart",
+            description="Town square",
+            location_type="town",
+            points_of_interest=["Square"],
+        )
+        forest_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Whisperwood",
+            description="Ancient forest",
+            location_type="wilderness",
+        )
+        await db.connect_locations(town_id, forest_id, direction='north', travel_time=2)
+
+        char_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Aria",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        await db.join_session(session_id, user_id=12345, character_id=char_id)
+        await db.add_item(char_id, 'rope', 'Rope', 'gear', 1)
+
+        quest_id = await db.create_quest(
+            guild_id=67890,
+            title="Lost Relic",
+            description="Recover the relic.",
+            objectives=[{"description": "Find the shrine", "completed": False}],
+            rewards={"gold": 100},
+            created_by=12345,
+            session_id=session_id,
+        )
+        await db.accept_quest(quest_id, char_id)
+
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            name="Wren",
+            description="A worried scout.",
+            personality="Alert",
+            created_by=12345,
+            session_id=session_id,
+            location="Oakheart",
+        )
+        await db.update_npc(npc_id, location_id=town_id, loyalty=75, party_role='guide')
+
+        await db.save_game_state(
+            session_id,
+            current_scene='At the gates',
+            current_location='Oakheart',
+            current_location_id=town_id,
+            dm_notes='Original state',
+            turn_count=3,
+            game_data={'active_content_pack_id': 'fantasy_core'},
+        )
+        await db.save_message(12345, 67890, 555, 'assistant', 'Original message', session_id=session_id)
+
+        snapshot_id = await db.save_session_snapshot(
+            session_id=session_id,
+            name='Before divergence',
+            created_by=12345,
+            description='Reference restore point',
+        )
+
+        await db.update_session(session_id, name='Mutated Session', current_quest_id=None)
+        await db.save_game_state(
+            session_id,
+            current_scene='Changed scene',
+            current_location='Nowhere',
+            current_location_id=None,
+            dm_notes='Mutated',
+            turn_count=0,
+            game_data={},
+        )
+        await db.delete_npc(npc_id)
+        await db.delete_quest(quest_id)
+
+        mutated_char = await db.get_character(char_id)
+        await db.update_character(mutated_char['id'], name='Mutated Hero', current_location_id=None)
+        inventory = await db.get_inventory(mutated_char['id'])
+        if inventory:
+            await db.remove_item(inventory[0]['id'])
+
+        await db.load_session_snapshot(snapshot_id)
+
+        restored_session = await db.get_session(session_id)
+        assert restored_session['name'] == 'Snapshot Session'
+        assert restored_session['content_pack_id'] == 'fantasy_core'
+
+        restored_state = await db.get_game_state(session_id)
+        assert restored_state['current_scene'] == 'At the gates'
+        assert restored_state['current_location'] == 'Oakheart'
+        assert restored_state['turn_count'] == 3
+
+        restored_characters = await db.get_session_characters(session_id)
+        assert len(restored_characters) == 1
+        restored_char = restored_characters[0]
+        assert restored_char['name'] == 'Aria'
+
+        restored_inventory = await db.get_inventory(restored_char['id'])
+        assert len(restored_inventory) == 1
+        assert restored_inventory[0]['item_name'] == 'Rope'
+
+        restored_quests = await db.get_quests(session_id=session_id)
+        assert len(restored_quests) == 1
+        restored_quest = restored_quests[0]
+        assert restored_quest['title'] == 'Lost Relic'
+
+        quest_stage = await db.get_quest_current_stage(restored_quest['id'], restored_char['id'])
+        assert quest_stage['total'] == 1
+
+        restored_npcs = await db.get_npcs_by_session(session_id)
+        assert len(restored_npcs) == 1
+        assert restored_npcs[0]['name'] == 'Wren'
+
+        restored_locations = await db.get_locations(session_id=session_id)
+        assert len(restored_locations) == 2
+        restored_town = next(location for location in restored_locations if location['name'] == 'Oakheart')
+        connections = await db.get_nearby_locations(restored_town['id'])
+        assert len(connections) == 1
+        assert connections[0]['name'] == 'Whisperwood'
+
+        messages = await db.get_recent_messages_by_session(12345, session_id, limit=10)
+        assert any(message['content'] == 'Original message' for message in messages)
+
+
 # =============================================================================
 # INVENTORY TESTS
 # =============================================================================

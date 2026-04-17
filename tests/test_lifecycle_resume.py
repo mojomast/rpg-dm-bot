@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.cogs.game_master import GameMaster
+from src.cogs.game_master import SessionManageView
 from src.cogs.game_persistence import GamePersistence
 from src.cogs.sessions import Sessions
 
@@ -150,3 +151,27 @@ async def test_sessions_status_uses_canonical_session_listing(mock_interaction):
     mock_interaction.response.send_message.assert_awaited_once()
     embed = mock_interaction.response.send_message.await_args.kwargs["embed"]
     assert embed.title == "🎲 Session Status"
+
+
+@pytest.mark.asyncio
+async def test_session_management_pause_button_delegates_to_sessions_cog(mock_interaction):
+    sessions_cog = SimpleNamespace(pause_session=SimpleNamespace(callback=AsyncMock()))
+    bot = SimpleNamespace(get_cog=lambda name: sessions_cog if name == 'Sessions' else None, db=SimpleNamespace())
+    game_master = SimpleNamespace(bot=bot)
+    view = SessionManageView(game_master, {"id": 22, "name": "Bound Session", "dm_user_id": 12345})
+
+    await view.pause_game.callback(mock_interaction)
+
+    sessions_cog.pause_session.callback.assert_awaited_once_with(sessions_cog, mock_interaction, 22)
+
+
+@pytest.mark.asyncio
+async def test_session_management_reset_history_persists_channel_binding(mock_interaction):
+    dm_chat = SimpleNamespace(bind_session_channel=AsyncMock())
+    bot = SimpleNamespace(get_cog=lambda name: dm_chat if name == 'DMChat' else None)
+    game_master = SimpleNamespace(bot=bot)
+    view = SessionManageView(game_master, {"id": 33, "name": "Bound Session", "dm_user_id": 12345})
+
+    await view.reset_history.callback(mock_interaction)
+
+    dm_chat.bind_session_channel.assert_awaited_once_with(67890, 11111, 33, set_primary=False)

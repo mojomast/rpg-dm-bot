@@ -922,8 +922,17 @@ class SessionManageView(discord.ui.View):
                 ephemeral=True
             )
             return
-        
-        await self.game_master.bot.db.update_session(self.session['id'], status='paused')
+
+        sessions_cog = self.game_master.bot.get_cog('Sessions')
+        if sessions_cog:
+            return await sessions_cog.pause_session.callback(sessions_cog, interaction, self.session['id'])
+
+        await self.game_master.bot.db.update_session(
+            self.session['id'],
+            status='paused',
+            last_active_channel_id=interaction.channel.id,
+            last_played=discord.utils.utcnow().isoformat(),
+        )
         await interaction.response.send_message(
             f"⏸️ **{self.session['name']}** has been paused."
         )
@@ -933,7 +942,12 @@ class SessionManageView(discord.ui.View):
         """Reset the DM's conversation history for this game"""
         dm_chat_cog = self.game_master.bot.get_cog('DMChat')
         if dm_chat_cog:
-            dm_chat_cog.start_new_session(interaction.channel.id, self.session['id'], interaction.guild.id)
+            await dm_chat_cog.bind_session_channel(
+                interaction.guild.id,
+                interaction.channel.id,
+                self.session['id'],
+                set_primary=False,
+            )
         
         await interaction.response.send_message(
             f"🔄 Conversation history cleared for **{self.session['name']}**!\n"

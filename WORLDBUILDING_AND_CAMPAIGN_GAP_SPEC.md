@@ -715,10 +715,13 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: `/game begin` and `/game pause` now act as compatibility wrappers over canonical `/session start` and `/session pause` in `src/cogs/game_master.py`
 - ✅ COMPLETE: canonical `/session status` and `/session end` lifecycle helpers added in `src/cogs/sessions.py`
 - ✅ COMPLETE: `/game status` and `/game end` now act as compatibility wrappers over canonical session lifecycle handling in `src/cogs/game_master.py`
+- ✅ COMPLETE: legacy Discord session-management buttons now route through persisted pause/channel-binding paths so continuity survives in `src/cogs/game_master.py`
 - ✅ COMPLETE: API continuity regressions added for campaign finalize and browser chat bootstrap/validation in `tests/test_web_phase7.py`
+- ✅ COMPLETE: snapshot save/load/delete now restore session-scoped v1 runtime continuity beyond `game_state`, including participants, characters, locations, quests, story state, combat, and session history in `src/database.py`
+- ✅ COMPLETE: regression coverage added for snapshot create/load/delete and restore semantics in `tests/test_database.py` and `tests/test_web_phase7.py`
 - ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
-- ⚠️ PARTIAL: snapshot UI/API contract is now backed by DB methods, but full snapshot restore semantics remain limited to v1 game-state restoration
-- ⚠️ PARTIAL: persistent Discord channel/session rebinding is not fully implemented yet
+- ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics
+- ✅ COMPLETE: persistent Discord channel/session rebinding is implemented at the v1 lifecycle level via DB-backed bindings and legacy UI path delegation
 
 ## Missing DB Schema and Migrations
 

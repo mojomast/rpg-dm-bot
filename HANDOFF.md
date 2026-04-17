@@ -8,7 +8,81 @@
 
 ---
 
-## Latest Changes (April 17, 2026 - Session 12)
+## Latest Changes (April 17, 2026 - Session 13)
+
+### Phase 9 - Browser Chat Hardening and Dashboard Completion
+
+This session hardened the new browser chat flow and completed the missing web dashboard play panels.
+
+#### Changes Made
+
+**`src/chat_handler.py`:**
+- Added session-based combat fallback in `get_game_context()` for web users without a real Discord channel
+- Added batch character summaries so multiplayer batched prompts include every acting character, not just the first
+
+**`src/database.py`:**
+- Added `get_active_combat_by_session(session_id)`
+- Added `web_identities` table helpers for server-issued browser identities
+- Extended `conversation_history` with `session_id` support and added session-scoped history lookup
+- Added migration for existing databases missing `conversation_history.session_id`
+
+**`src/chat_web_identity.py`:**
+- Added server-side UUID generation helper
+- Added client IP hashing helper for persisted web identity metadata
+
+**`src/cogs/dm_chat.py`:**
+- Verified the proactive background DM task survived the Phase 8 refactor
+- Hardened the task lifecycle so the loop only starts once and skips work when the bot/LLM context is unavailable
+- Updated batched Discord queue entries to preserve each player's `character_id`
+
+**`web/api.py`:**
+- Added `POST /api/chat/identity` to mint browser chat UUIDs server-side and persist them in `web_identities`
+- Updated `/api/chat` to require `X-Web-Identity` and reject unknown browser identities
+- Added per-IP rate limiting of `10/minute` to `/api/chat` with `slowapi`
+- Updated `/api/chat` to load the last 20 persisted messages for `(session_id, web_user_id)` before processing and save both sides of each exchange after response generation
+
+**`web/frontend/index.html`:**
+- Added live browser-chat sidebar panels for combat, spells, location connections, and status effects
+
+**`web/frontend/src/main.ts`:**
+- Switched browser chat identity bootstrapping to request a server-issued UUID and store it in `localStorage`
+- Updated chat requests to send the UUID via `X-Web-Identity`
+- Changed chat rendering to append messages incrementally and auto-scroll after each `renderMessage()` call
+- Added live dashboard panel refresh for combat, spell management, location connections, and status effects
+- Added spell cast shortcuts and short/long rest actions to the browser chat spell panel
+
+**`web/frontend/styles.css`:**
+- Added the missing styles for detail panels, combat cards, HP bars, spell rows, connection cards, and status chips
+
+**`requirements.txt`:**
+- Added `fastapi`, `uvicorn`, and `slowapi`
+
+**Tests:**
+- Added coverage for session-based combat lookup, web identity persistence, session-scoped conversation history, and multi-player batch prompt context
+- Refreshed stale DM chat test fixtures to match the current `DMChat` constructor
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+python3 -m compileall src web tests
+.venv/bin/pytest tests/test_database.py -q
+.venv/bin/pytest tests/test_dm_chat.py -q
+```
+
+Results:
+- compile checks passed
+- focused database tests passed
+- focused DM chat tests passed
+
+#### Remaining Limitation
+
+- The checked-in frontend toolchain is incomplete in this workspace (`npm run build` fails because `tsc` is not executable and the installed TypeScript package is missing `lib/tsc.js`), so end-to-end frontend bundling still needs dependency repair.
+
+---
+
+## Previous Changes (April 17, 2026 - Session 12)
 
 ### Phase 7 - Slash Command and Session Hardening
 
@@ -535,27 +609,28 @@ c:\Users\kyle\projects\rpg-dm-bot\
 - Game persistence with save/load
 - Web API for all CRUD operations (~80 endpoints)
 - Frontend dashboard and management pages
+- Browser chat with persisted history, server-issued web identities, and rate limiting
 - Class/race editors with full edit/save functionality
 - Skill tree editor with branch editing
 - Item database browser with search and filtering
 - Spell browser with filtering by school/level/class
+- Browser chat dashboard panels for combat, spell management, location connections, and status effects
 - **Cross-system wiring** - All game systems properly integrated
 - **All 67 tools** matched with schemas and working
 
 ### ⚠️ Frontend UI - Partial
 - API client methods exist for all endpoints
-- **Missing UI components**: Combat viewer, spell management panels, location connection map, status effects display
+- Browser chat dashboard panels are now present, but frontend dependency repair is still needed before a clean local production bundle can be generated in this workspace
 
 ---
 
 ## Known Issues & Limitations
 
-1. **No authentication** on web API (local use only)
+1. **No user authentication** beyond server-issued browser chat identities (local use only)
 2. **Single SQLite database** - no horizontal scaling
 3. **No WebSocket** - frontend requires manual refresh
-4. **No browser chat** - can only interact with DM via Discord
-5. **Limited validation** - inputs not fully sanitized
-6. **No rate limiting** - API can be overwhelmed
+4. **Limited validation** - inputs not fully sanitized
+5. **Frontend build toolchain in repo is incomplete** - TypeScript CLI package contents/permissions need repair for `npm run build`
 
 ---
 ## Next Steps (Phase 5 - Browser Chat Feature)

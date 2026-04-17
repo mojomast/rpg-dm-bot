@@ -87,7 +87,9 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Data Editors**: Edit character classes, races, items, and spells
 - **Real-time Sync**: Changes made in the web interface are immediately available in Discord
 - **REST API**: Full API access for custom integrations (~76 endpoints)
-- **Coming Soon**: Browser-based chat interface to play without Discord
+- **Browser Chat**: Talk to the AI Dungeon Master from the web UI with persisted history and live session panels
+- **Play Panels**: Browser chat includes combat viewer, spell management, location connections, and status effects panels
+- **Basic Web Hardening**: Browser chat uses server-issued identities and per-IP rate limiting on `/api/chat`
 
 
 ## 🚀 Quick Start
@@ -138,6 +140,7 @@ The web dashboard provides a browser-based interface for game management:
 ### Available Pages
 - **Dashboard**: Overview of active sessions, characters, and recent activity
 - **Sessions**: Create, view, and manage game sessions
+- **Browser Chat**: Play through the web UI with DM responses, tool feedback, and live play-state panels
 - **Characters**: View and edit character details, stats, inventory
 - **Quests**: Manage quest definitions and track progress
 - **NPCs**: Create and edit NPCs, view relationships
@@ -158,6 +161,8 @@ The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api
 - `GET/PUT /api/gamedata/skills/trees/{class}` - Skill tree editor
 - `GET /api/gamedata/items` - Item database with filtering
 - `GET /api/gamedata/spells` - Spell database with filtering
+- `POST /api/chat/identity` - Issue a server-generated browser chat identity
+- `POST /api/chat` - Send a browser chat message to the DM
 
 ## 📚 Commands
 

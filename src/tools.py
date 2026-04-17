@@ -127,11 +127,20 @@ class ToolExecutor:
         return None
     
     async def execute_tool(self, tool_name: str, tool_args: Dict[str, Any], 
-                          context: Dict[str, Any]) -> str:
+                           context: Dict[str, Any]) -> str:
         """Execute a tool by name with arguments"""
         logger.info(f"Executing tool {tool_name} with args {tool_args}")
         
         try:
+            if tool_name == "award_experience":
+                tool_name = "add_experience"
+            elif tool_name == "update_weather":
+                tool_name = "update_location"
+                tool_args = {
+                    "location_id": tool_args.get("location_id"),
+                    "current_weather": tool_args.get("weather") or tool_args.get("current_weather"),
+                }
+
             # Character tools
             if tool_name == "get_character_info":
                 return await self._get_character_info(context, tool_args)
@@ -279,6 +288,8 @@ class ToolExecutor:
             # Enhanced NPC tools  
             elif tool_name == "generate_npc":
                 return await self._generate_npc(context, tool_args)
+            elif tool_name == "generate_npc_dialogue":
+                return await self._generate_npc_dialogue(context, tool_args)
             elif tool_name == "set_npc_secret":
                 return await self._set_npc_secret(tool_args)
             
@@ -841,12 +852,32 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         guild_id = context.get('guild_id')
         user_id = context.get('user_id')
         session = await self._get_session_for_context(context)
+        objectives = []
+        for objective in args.get('objectives', []):
+            if isinstance(objective, dict):
+                description = objective.get('description')
+                if not description:
+                    continue
+                objectives.append({
+                    'description': description,
+                    'optional': bool(objective.get('optional', False)),
+                    'completed': bool(objective.get('completed', False)),
+                })
+            elif isinstance(objective, str) and objective.strip():
+                objectives.append({
+                    'description': objective.strip(),
+                    'optional': False,
+                    'completed': False,
+                })
+
+        if not objectives:
+            return "Error: At least one valid quest objective is required"
         
         quest_id = await self.db.create_quest(
             guild_id=guild_id,
             title=args.get('title'),
             description=args.get('description'),
-            objectives=args.get('objectives', []),
+            objectives=objectives,
             rewards=args.get('rewards', {}),
             created_by=user_id,
             session_id=session['id'] if session else None,
@@ -1202,6 +1233,26 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
         
         if target:
             result_parts.append(f"*Target: {target}*")
+
+        target_combatant = None
+        target_character = None
+        if target and context.get('channel_id') and context.get('guild_id'):
+            combat = await self.db.get_active_combat(context.get('guild_id'), context.get('channel_id'))
+            if combat:
+                for combatant in await self.db.get_combatants(combat['id']):
+                    if target.lower() in combatant['name'].lower() and combatant['current_hp'] > 0:
+                        target_combatant = combatant
+                        break
+
+        if target and target.lower() == 'self':
+            target_character = char
+        elif target and not target_combatant:
+            session = await self._get_session_for_context(context)
+            if session:
+                for participant in await self.db.get_session_participants(session['id']):
+                    if participant.get('character_id') and target.lower() in (participant.get('character_name') or '').lower():
+                        target_character = await self.db.get_character(participant['character_id'])
+                        break
         
         # Handle damage
         if spell.get('damage'):
@@ -1221,12 +1272,31 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
                 import re
                 match = re.search(r'\+1d(\d+)', spell['upcast'])
                 if match:
-                    damage_dice = f"{damage_dice}+{upcast_levels}d{match.group(1)}"
-            
-            roll_result = self.dice.roll(damage_dice)
+                    base_roll = self.dice.roll(damage_dice)
+                    bonus_roll = self.dice.roll(f"{upcast_levels}d{match.group(1)}")
+                    if base_roll.get('error') or bonus_roll.get('error'):
+                        return f"Error: Could not roll damage for {spell['name']}"
+                    total_damage = base_roll['total'] + bonus_roll['total']
+                    all_rolls = base_roll['rolls'] + bonus_roll['rolls']
+                    roll_result = {'total': total_damage, 'rolls': all_rolls}
+                else:
+                    roll_result = self.dice.roll(damage_dice)
+            else:
+                roll_result = self.dice.roll(damage_dice)
+
+            if roll_result.get('error'):
+                return f"Error: {roll_result['error']}"
             damage_type = spell.get('damage_type', 'magical')
             result_parts.append(f"💥 **{roll_result['total']}** {damage_type} damage!")
             result_parts.append(f"🎲 Rolled {damage_dice}: {roll_result['rolls']}")
+
+            if target_combatant:
+                hp_result = await self.db.update_combatant_hp(target_combatant['id'], -roll_result['total'])
+                if not hp_result.get('error'):
+                    if hp_result['is_dead']:
+                        result_parts.append(f"💀 **{hp_result['name']}** is defeated!")
+                    else:
+                        result_parts.append(f"❤️ {hp_result['name']}: {hp_result['new_hp']}/{hp_result['max_hp']} HP")
             
             if spell.get('save'):
                 result_parts.append(f"🛡️ {spell['save'].upper()} save for half damage")
@@ -1254,11 +1324,27 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
                 import re
                 match = re.search(r'\+1d(\d+)', spell['upcast'])
                 if match:
-                    healing_dice = f"{healing_dice}+{upcast_levels}d{match.group(1)}"
-            
-            roll_result = self.dice.roll(healing_dice)
+                    base_roll = self.dice.roll(healing_dice)
+                    bonus_roll = self.dice.roll(f"{upcast_levels}d{match.group(1)}")
+                    if base_roll.get('error') or bonus_roll.get('error'):
+                        return f"Error: Could not roll healing for {spell['name']}"
+                    total_healing = base_roll['total'] + bonus_roll['total']
+                    all_rolls = base_roll['rolls'] + bonus_roll['rolls']
+                    roll_result = {'total': total_healing, 'rolls': all_rolls}
+                else:
+                    roll_result = self.dice.roll(healing_dice)
+            else:
+                roll_result = self.dice.roll(healing_dice)
+
+            if roll_result.get('error'):
+                return f"Error: {roll_result['error']}"
             result_parts.append(f"💚 **{roll_result['total']}** HP healed!")
             result_parts.append(f"🎲 Rolled {healing_dice}: {roll_result['rolls']}")
+
+            heal_target = target_character or char
+            hp_result = await self.db.update_character_hp(heal_target['id'], roll_result['total'])
+            if not hp_result.get('error'):
+                result_parts.append(f"❤️ {hp_result['name']}: {hp_result['new_hp']}/{hp_result['max_hp']} HP")
         
         # Handle effects
         elif spell.get('effect'):
@@ -1269,6 +1355,33 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             result_parts.append(f"*{spell['description'][:150]}...*" if len(spell.get('description', '')) > 150 else f"*{spell['description']}*")
         
         return "\n".join(result_parts)
+
+    async def _generate_npc_dialogue(self, context: Dict, args: Dict) -> str:
+        """Generate NPC dialogue through the configured LLM when available."""
+        llm = context.get('llm')
+        npc_id = args.get('npc_id')
+        character_id = args.get('character_id')
+        player_message = args.get('message') or args.get('player_message')
+
+        if not llm:
+            return "NPC dialogue generation is unavailable because the LLM client is not configured."
+        if not npc_id or not character_id or not player_message:
+            return "Error: npc_id, character_id, and message are required"
+
+        npc = await self.db.get_npc(npc_id)
+        character = await self.db.get_character(character_id)
+        if not npc or not character:
+            return "Error: NPC or character not found"
+
+        relationship = await self.db.get_npc_relationship(npc_id, character_id)
+        dialogue = await llm.generate_npc_dialogue(
+            npc=npc,
+            character=character,
+            relationship=relationship or {'reputation': 0},
+            player_message=player_message,
+            context=args.get('context'),
+        )
+        return dialogue or "..."
     
     async def _use_ability(self, args: Dict) -> str:
         """Use a class ability"""
@@ -1558,14 +1671,20 @@ Points of Interest: {pois}"""
     
     async def _get_story_items(self, context: Dict, args: Dict) -> str:
         """Get story items"""
-        guild_id = context.get('guild_id')
         session = await self._get_session_for_context(context)
         
         items = await self.db.get_story_items(
             session_id=session['id'] if session else None,
-            holder_id=args.get('holder_id'),
-            is_discovered=args.get('is_discovered')
+            guild_id=context.get('guild_id') if not session else None,
         )
+
+        holder_id = args.get('holder_id')
+        is_discovered = args.get('is_discovered')
+        if holder_id is not None:
+            items = [item for item in items if item.get('current_holder_id') == holder_id]
+        if is_discovered is not None:
+            discovered_flag = bool(is_discovered)
+            items = [item for item in items if bool(item.get('is_discovered')) == discovered_flag]
         
         if not items:
             return "No story items found."
@@ -1573,7 +1692,7 @@ Points of Interest: {pois}"""
         lines = ["**Story Items:**"]
         for item in items:
             status = "✨" if item['is_discovered'] else "🔒"
-            holder = f" - held by {item['holder_type']} #{item['current_holder_id']}" if item['current_holder_id'] else ""
+            holder = f" - held by character #{item['current_holder_id']}" if item.get('current_holder_id') else ""
             lines.append(f"{status} [{item['id']}] **{item['name']}** ({item['item_type']}){holder}")
         
         return "\n".join(lines)
@@ -1742,10 +1861,10 @@ Points of Interest: {pois}"""
         if result.get('error'):
             return f"Error: {result['error']}"
         
-        char = result.get('character', {})
-        location = result.get('location', {})
-        others = result.get('others_present', [])
-        npcs = result.get('npcs_at_location', [])
+        char = await self.db.get_character(char_id) or {}
+        location = await self.db.get_location(location_id) or {}
+        others = [other for other in await self.db.get_characters_at_location(location_id) if other.get('id') != char_id]
+        npcs = await self.db.get_npcs_at_location(location_id)
         
         lines = [f"🚶 **{char.get('name', 'Character')}** moved to **{location.get('name', 'Unknown')}**"]
         lines.append(f"_{location.get('description', '')}_")
@@ -1805,19 +1924,31 @@ Points of Interest: {pois}"""
     async def _explore_location(self, context: Dict, args: Dict) -> str:
         """Explore the current location - returns NPCs, items, events, connections"""
         char_id = args.get('character_id')
-        perception = args.get('perception_roll')
+        char = await self.db.get_character(char_id)
+        if not char:
+            return "Error: Character not found"
+
+        location_id = args.get('location_id') or char.get('current_location_id')
+        if not location_id:
+            return "Error: Character has no current location"
         
-        result = await self.db.explore_location(char_id, perception)
+        result = await self.db.explore_location(char_id, location_id)
         
         if result.get('error'):
             return f"Error: {result['error']}"
         
         location = result.get('location', {})
         npcs = result.get('npcs', [])
-        items = result.get('story_items', [])
-        events = result.get('events', [])
+        items = result.get('visible_items', [])
         connections = result.get('connections', [])
         characters = result.get('other_characters', [])
+        events = []
+
+        if char.get('session_id'):
+            events = [
+                event for event in await self.db.get_active_events(char['session_id'])
+                if not event.get('location_id') or event.get('location_id') == location_id
+            ]
         
         lines = [f"🔍 **Exploring {location.get('name', 'Unknown')}**"]
         lines.append(f"_{location.get('description', '')}_")
@@ -1858,15 +1989,13 @@ Points of Interest: {pois}"""
         """Character picks up a story item"""
         char_id = args.get('character_id')
         item_id = args.get('item_id')
-        discovery_context = args.get('discovery_context', 'found during exploration')
-        
-        result = await self.db.pickup_story_item(char_id, item_id, discovery_context)
+        result = await self.db.pickup_story_item(item_id, char_id)
         
         if result.get('error'):
             return f"Error: {result['error']}"
         
-        char = result.get('character', {})
-        item = result.get('item', {})
+        char = await self.db.get_character(char_id) or {}
+        item = await self.db.get_story_item(item_id) or {}
         
         lines = [f"✨ **{char.get('name', 'Character')}** picks up **{item.get('name', 'item')}**!"]
         lines.append(f"_{item.get('description', '')}_")
@@ -1880,15 +2009,17 @@ Points of Interest: {pois}"""
         """Character drops a story item at current location"""
         char_id = args.get('character_id')
         item_id = args.get('item_id')
-        
-        result = await self.db.drop_story_item(char_id, item_id)
+        char = await self.db.get_character(char_id)
+        if not char:
+            return "Error: Character not found"
+
+        result = await self.db.drop_story_item(item_id, char.get('current_location_id'))
         
         if result.get('error'):
             return f"Error: {result['error']}"
         
-        char = result.get('character', {})
-        item = result.get('item', {})
-        location = result.get('location', {})
+        item = await self.db.get_story_item(item_id) or {}
+        location = await self.db.get_location(char.get('current_location_id')) if char.get('current_location_id') else {}
         
         return f"📦 **{char.get('name', 'Character')}** drops **{item.get('name', 'item')}** at {location.get('name', 'this location')}."
     
@@ -1897,31 +2028,26 @@ Points of Interest: {pois}"""
         char_id = args.get('character_id')
         location_desc = args.get('location_description', 'at camp')
         interrupted = args.get('interrupted', False)
-        
-        session_id = None
-        session = await self._get_session_for_context(context)
-        if session:
-            session_id = session['id']
-        
-        result = await self.db.long_rest(char_id, session_id, location_desc, interrupted)
+
+        if interrupted:
+            return "Long rest was interrupted. No automatic recovery was applied."
+
+        before = await self.db.get_character(char_id)
+        result = await self.db.long_rest(char_id)
         
         if result.get('error'):
             return f"Error: {result['error']}"
-        
-        char = result.get('character', {})
-        hp_restored = result.get('hp_restored', 0)
-        mana_restored = result.get('mana_restored', 0)
-        effects_cleared = result.get('effects_cleared', 0)
+
+        char = await self.db.get_character(char_id) or {}
+        restored = result.get('restored', [])
+        hp_restored = max(0, char.get('hp', 0) - (before or {}).get('hp', 0))
+        mana_restored = max(0, char.get('mana', 0) - (before or {}).get('mana', 0))
+        effects_cleared = sum(1 for entry in restored if 'cleared' in entry.lower())
         
         lines = [f"🌙 **{char.get('name', 'Character')}** takes a long rest {location_desc}"]
-        
-        if interrupted:
-            lines.append("⚠️ _Rest interrupted! Only partial recovery._")
-            lines.append(f"Recovered {hp_restored} HP, {mana_restored} mana")
-        else:
-            lines.append("✨ _Eight hours pass peacefully..._")
-            lines.append(f"💚 HP fully restored: {char.get('hp', 0)}/{char.get('max_hp', 0)}")
-            lines.append(f"💙 Mana fully restored: {char.get('mana', 0)}/{char.get('max_mana', 0)}")
+        lines.append("✨ _Eight hours pass peacefully..._")
+        lines.append(f"💚 HP fully restored: {char.get('hp', 0)}/{char.get('max_hp', 0)}")
+        lines.append(f"💙 Mana restored: +{mana_restored} ({char.get('mana', 0)}/{char.get('max_mana', 0)})")
         
         if effects_cleared > 0:
             lines.append(f"🧹 {effects_cleared} status effect(s) cleared")
@@ -1931,15 +2057,16 @@ Points of Interest: {pois}"""
     async def _short_rest(self, args: Dict) -> str:
         """Character takes a short rest - partial recovery"""
         char_id = args.get('character_id')
+        before = await self.db.get_character(char_id)
         
         result = await self.db.short_rest(char_id)
         
         if result.get('error'):
             return f"Error: {result['error']}"
-        
-        char = result.get('character', {})
-        hp_restored = result.get('hp_restored', 0)
-        mana_restored = result.get('mana_restored', 0)
+
+        char = await self.db.get_character(char_id) or {}
+        hp_restored = max(0, char.get('hp', 0) - (before or {}).get('hp', 0))
+        mana_restored = max(0, char.get('mana', 0) - (before or {}).get('mana', 0))
         
         lines = [f"⏰ **{char.get('name', 'Character')}** takes a short rest (1 hour)"]
         lines.append(f"💚 Recovered {hp_restored} HP → {char.get('hp', 0)}/{char.get('max_hp', 0)}")
@@ -1963,15 +2090,22 @@ Points of Interest: {pois}"""
                 combat = await self.db.get_combat_for_channel(session['id'], channel_id)
                 if combat:
                     combat_id = combat['id']
+            if not combat_id and context.get('guild_id') and channel_id:
+                combat = await self.db.get_active_combat(context.get('guild_id'), channel_id)
+                if combat:
+                    combat_id = combat['id']
         
         if not combat_id:
             return "Error: No active combat found"
+
+        if not victory:
+            await self.db.end_combat(combat_id)
+            return "💀 **DEFEAT!** The party falls..."
         
         result = await self.db.end_combat_with_rewards(
-            combat_id=combat_id,
-            victory=victory,
-            bonus_xp=bonus_xp,
-            bonus_gold=bonus_gold,
+            encounter_id=combat_id,
+            xp_per_character=bonus_xp,
+            gold_per_character=bonus_gold,
             loot_items=loot_items
         )
         
@@ -1979,41 +2113,38 @@ Points of Interest: {pois}"""
             return f"Error: {result['error']}"
         
         lines = []
-        
-        if victory:
-            lines.append("⚔️ **VICTORY!** Combat concluded.")
-        else:
-            lines.append("💀 **DEFEAT!** The party falls...")
-            return "\n".join(lines)
-        
-        xp_awards = result.get('xp_awards', {})
-        gold_awards = result.get('gold_awards', {})
+        lines.append("⚔️ **VICTORY!** Combat concluded.")
+
+        xp_awards = result.get('xp_awarded', [])
+        gold_awards = result.get('gold_awarded', [])
         loot_distributed = result.get('loot_distributed', [])
-        total_xp = result.get('total_xp', 0)
-        total_gold = result.get('total_gold', 0)
+        total_xp = bonus_xp
+        total_gold = bonus_gold
         
         if xp_awards:
             lines.append(f"\n📈 **Experience Earned:** {total_xp} XP each")
-            for char_name, xp in xp_awards.items():
-                level_up = " 🎉 LEVEL UP!" if result.get('level_ups', {}).get(char_name) else ""
-                lines.append(f"  - {char_name}: +{xp} XP{level_up}")
+            for award in xp_awards:
+                level_up = " 🎉 LEVEL UP!" if award.get('leveled_up') else ""
+                lines.append(f"  - {award.get('name', 'Character')}: +{award.get('xp_gained', 0)} XP{level_up}")
         
         if gold_awards:
             lines.append(f"\n💰 **Gold Looted:** {total_gold} gold (split)")
-            for char_name, gold in gold_awards.items():
-                lines.append(f"  - {char_name}: +{gold} gold")
+            for award in gold_awards:
+                lines.append(f"  - {award.get('name', 'Character')}: +{award.get('gold_gained', 0)} gold")
         
         if loot_distributed:
             lines.append(f"\n🎁 **Items Found:**")
             for item in loot_distributed:
-                lines.append(f"  - {item.get('item_name', 'Unknown')} → {item.get('character_name', 'Party')}")
+                lines.append(f"  - {item.get('item_name', 'Unknown')} → {item.get('given_to', 'Party')}")
         
         # Sync damage back to characters
-        sync_result = result.get('damage_synced', {})
+        sync_result = result.get('hp_synced', [])
         if sync_result:
             lines.append(f"\n❤️ **Post-Combat HP:**")
-            for char_name, hp_data in sync_result.items():
-                lines.append(f"  - {char_name}: {hp_data.get('current_hp', 0)}/{hp_data.get('max_hp', 0)} HP")
+            for hp_data in sync_result:
+                char = await self.db.get_character(hp_data.get('character_id'))
+                name = char['name'] if char else f"Character #{hp_data.get('character_id')}"
+                lines.append(f"  - {name}: {hp_data.get('new_hp', 0)}/{hp_data.get('max_hp', 0)} HP")
         
         return "\n".join(lines)
     
@@ -2022,30 +2153,37 @@ Points of Interest: {pois}"""
         quest_id = args.get('quest_id')
         character_ids = args.get('character_ids', [])
         bonus_rewards = args.get('bonus_rewards', {})
+
+        if not character_ids:
+            return "Error: character_ids is required"
+
+        results = []
+        for character_id in character_ids:
+            result = await self.db.complete_quest_with_rewards(quest_id, character_id)
+            if result.get('error'):
+                return f"Error: {result['error']}"
+
+            if bonus_rewards.get('xp'):
+                xp_result = await self.db.add_experience(character_id, bonus_rewards['xp'])
+                result['xp_gained'] += bonus_rewards['xp']
+                result['leveled_up'] = result.get('leveled_up') or xp_result.get('leveled_up', False)
+                result['new_level'] = xp_result.get('new_level', result.get('new_level'))
+
+            if bonus_rewards.get('gold'):
+                await self.db.update_gold(character_id, bonus_rewards['gold'])
+                result['gold_gained'] += bonus_rewards['gold']
+
+            results.append(result)
         
-        result = await self.db.complete_quest_with_rewards(
-            quest_id=quest_id,
-            character_ids=character_ids,
-            bonus_xp=bonus_rewards.get('xp', 0),
-            bonus_gold=bonus_rewards.get('gold', 0)
-        )
-        
-        if result.get('error'):
-            return f"Error: {result['error']}"
-        
-        quest = result.get('quest', {})
-        xp_per_char = result.get('xp_per_character', 0)
-        gold_per_char = result.get('gold_per_character', 0)
-        rewarded_chars = result.get('rewarded_characters', [])
-        
+        quest = await self.db.get_quest(quest_id) or {}
         lines = [f"🎊 **QUEST COMPLETE: {quest.get('title', 'Unknown')}**"]
         lines.append(f"_{quest.get('description', '')}_")
         
-        if rewarded_chars:
+        if results:
             lines.append(f"\n🏆 **Rewards distributed:**")
-            for char in rewarded_chars:
+            for char in results:
                 level_up = " 🎉 LEVEL UP!" if char.get('leveled_up') else ""
-                lines.append(f"  - **{char['name']}**: +{xp_per_char} XP, +{gold_per_char} gold{level_up}")
+                lines.append(f"  - **{char.get('character_name', 'Character')}**: +{char.get('xp_gained', 0)} XP, +{char.get('gold_gained', 0)} gold{level_up}")
         
         return "\n".join(lines)
     
@@ -2054,17 +2192,22 @@ Points of Interest: {pois}"""
         session_id = args.get('session_id')
         
         result = await self.db.get_comprehensive_session_state(session_id)
-        
-        if result.get('error'):
-            return f"Error: {result['error']}"
-        
-        session = result.get('session', {})
-        party = result.get('party', [])
-        location = result.get('current_location')
-        npcs = result.get('npcs_present', [])
-        active_quest = result.get('active_quest')
-        events = result.get('active_events', [])
-        recent_story = result.get('recent_story', [])
+
+        if not result:
+            return "Error: Session not found"
+
+        session = result
+        party = result.get('characters_full', [])
+        game_state = result.get('game_state') or {}
+        location = None
+        location_name = game_state.get('current_location')
+        if location_name:
+            locations = await self.db.get_locations(session_id=session_id)
+            location = next((loc for loc in locations if loc.get('name') == location_name), None)
+        npcs = await self.db.get_npcs_by_location(session.get('guild_id'), location_name) if location_name else []
+        active_quest = await self.db.get_quest(session.get('current_quest_id')) if session.get('current_quest_id') else None
+        events = result.get('story_events', [])
+        recent_story = result.get('story_log', [])
         
         lines = [f"📋 **Session State: {session.get('name', 'Unknown')}**"]
         lines.append(f"Setting: {session.get('setting', 'Unknown')}")
@@ -2103,7 +2246,8 @@ Points of Interest: {pois}"""
         if recent_story:
             lines.append(f"\n📖 **Recent Events:**")
             for entry in recent_story[-3:]:  # Last 3 entries
-                lines.append(f"  - {entry.get('entry_text', '')[:80]}...")
+                preview = entry.get('content') or entry.get('entry_text') or ''
+                lines.append(f"  - {preview[:80]}...")
         
         return "\n".join(lines)
     

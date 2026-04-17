@@ -3858,7 +3858,7 @@ class Database:
             results['restored'].append(f"HP restored to {character['max_hp']}")
         
         # Restore spell slots
-        await self.restore_spell_slots(character_id, full=True)
+        await self.restore_spell_slots(character_id)
         results['restored'].append("All spell slots restored")
         
         # Restore abilities

@@ -112,6 +112,19 @@ class TestCharacterTools:
         assert "LEVEL UP" in result
         assert "level 2" in result.lower()
 
+    async def test_award_experience_alias(self, tool_executor_with_character, mock_context):
+        """Test legacy award_experience alias routes to add_experience."""
+        executor, db, char_id = tool_executor_with_character
+
+        result = await executor.execute_tool(
+            "award_experience",
+            {"character_id": char_id, "xp": 50, "reason": "story milestone"},
+            mock_context,
+        )
+
+        assert "50 XP" in result
+        assert "story milestone" in result
+
     async def test_update_character_stats(self, tool_executor_with_character, mock_context):
         """Test updating character stats"""
         executor, db, char_id = tool_executor_with_character
@@ -536,7 +549,10 @@ class TestQuestTools:
             {
                 "title": "The Dark Cave",
                 "description": "Explore the mysterious cave",
-                "objectives": ["Find the entrance", "Defeat the guardian"],
+                "objectives": [
+                    {"description": "Find the entrance", "optional": False},
+                    "Defeat the guardian",
+                ],
                 "rewards": {"gold": 100, "xp": 50},
                 "difficulty": "medium"
             },
@@ -545,6 +561,25 @@ class TestQuestTools:
         
         # Should confirm quest creation
         assert "quest" in result.lower() or "created" in result.lower()
+
+        quests = await tool_executor.db.get_available_quests(mock_context['guild_id'])
+        quest = next(q for q in quests if q['title'] == "The Dark Cave")
+        assert quest['objectives'][0]['description'] == "Find the entrance"
+        assert quest['objectives'][1]['description'] == "Defeat the guardian"
+
+    async def test_create_quest_requires_valid_objective(self, tool_executor, mock_context):
+        """Test create_quest rejects empty objective input."""
+        result = await tool_executor.execute_tool(
+            "create_quest",
+            {
+                "title": "Bad Quest",
+                "description": "No real objective",
+                "objectives": [{"optional": True}, "   "],
+            },
+            mock_context,
+        )
+
+        assert "valid quest objective" in result.lower()
 
     async def test_get_quests(self, tool_executor, mock_context):
         """Test getting available quests"""
@@ -698,3 +733,62 @@ class TestToolErrorHandling:
         
         # Should handle gracefully
         assert "Error" in result or "not found" in result.lower()
+
+
+# =============================================================================
+# HARDENING REGRESSION TESTS
+# =============================================================================
+
+class TestHardeningRegressions:
+    """Focused tests for hardened tool/database contracts."""
+
+    async def test_short_rest_uses_db_return_safely(self, tool_executor_with_character, mock_context):
+        """short_rest should format output from the DB contract without crashing."""
+        executor, db, char_id = tool_executor_with_character
+        await db.update_character(char_id, hp=5, mana=1)
+
+        result = await executor.execute_tool(
+            "short_rest",
+            {"character_id": char_id},
+            mock_context,
+        )
+
+        assert "short rest" in result.lower()
+        assert "Recovered" in result
+
+    async def test_get_comprehensive_session_state_handles_real_db_shape(self, tool_executor, mock_context):
+        """Comprehensive session state should handle the DB's flattened payload."""
+        session_id = await tool_executor.db.create_session(
+            guild_id=mock_context['guild_id'],
+            name="State Test",
+            dm_user_id=mock_context['user_id'],
+            description="State coverage",
+        )
+        await tool_executor.db.start_session(session_id)
+
+        result = await tool_executor.execute_tool(
+            "get_comprehensive_session_state",
+            {"session_id": session_id},
+            mock_context,
+        )
+
+        assert "Session State" in result
+        assert "State Test" in result
+
+    async def test_end_combat_with_rewards_uses_current_db_contract(self, tool_executor_with_character, mock_context):
+        """Combat reward wrapper should use the DB's current kwargs and return shape."""
+        executor, db, char_id = tool_executor_with_character
+        mock_context['user_id'] = 12345
+        mock_context['guild_id'] = 67890
+
+        await db.create_session(guild_id=67890, name="Combat Rewards", dm_user_id=12345)
+        await executor.execute_tool("start_combat", {}, mock_context)
+
+        result = await executor.execute_tool(
+            "end_combat_with_rewards",
+            {"victory": True, "bonus_xp": 25, "bonus_gold": 10},
+            mock_context,
+        )
+
+        assert "VICTORY" in result
+        assert "Error" not in result

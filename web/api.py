@@ -28,6 +28,7 @@ from src.llm import LLMClient
 from src.prompts import Prompts
 from src.tool_schemas import ToolSchemas
 from src.tools import ToolExecutor
+from src.content_packs import DEFAULT_CONTENT_PACK_ID, load_content_file
 
 logger = logging.getLogger('rpg.api')
 
@@ -944,34 +945,37 @@ async def delete_story_event(event_id: int):
 # ============================================================================
 
 @app.get("/api/templates/npcs")
-async def get_npc_templates():
+async def get_npc_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get NPC generation templates"""
-    import json
-    template_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "data", "game_data", "npc_templates.json"
-    )
     try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except:
+        return load_content_file("npc_templates.json", content_pack_id)
+    except Exception:
         return {"templates": {}}
 
 # ============================================================================
 # GAME DATA ENDPOINTS - Classes, Races, Skills, Items, Spells
 # ============================================================================
 
-def load_game_data(filename: str) -> Dict[str, Any]:
+def load_game_data(filename: str, content_pack_id: str = DEFAULT_CONTENT_PACK_ID, use_content_pack: bool = True) -> Dict[str, Any]:
     """Load game data from JSON file"""
-    filepath = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "data", "game_data", filename
-    )
     try:
+        if use_content_pack and "/" not in filename:
+            return load_content_file(filename, content_pack_id)
+
+        filepath = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "data", "game_data", filename
+        )
         with open(filepath, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/api/content-packs")
+async def get_content_packs():
+    """List available content packs."""
+    return load_game_data("manifests/content_packs.json", use_content_pack=False)
 
 def save_game_data(filename: str, data: Dict[str, Any]) -> bool:
     """Save game data to JSON file"""
@@ -989,9 +993,9 @@ def save_game_data(filename: str, data: Dict[str, Any]) -> bool:
 # --- CLASSES ---
 
 @app.get("/api/gamedata/classes")
-async def get_classes():
+async def get_classes(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all character classes"""
-    data = load_game_data("classes.json")
+    data = load_game_data("classes.json", content_pack_id=content_pack_id)
     return {"classes": data.get("classes", {})}
 
 @app.get("/api/gamedata/classes/{class_id}")
@@ -1093,9 +1097,9 @@ async def update_all_classes(classes_data: Dict[str, Any]):
 # --- RACES ---
 
 @app.get("/api/gamedata/races")
-async def get_races():
+async def get_races(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all races"""
-    data = load_game_data("races.json")
+    data = load_game_data("races.json", content_pack_id=content_pack_id)
     return {"races": data.get("races", {})}
 
 @app.get("/api/gamedata/races/{race_id}")
@@ -1191,9 +1195,9 @@ async def update_all_races(races_data: Dict[str, Any]):
 # --- SKILLS ---
 
 @app.get("/api/gamedata/skills")
-async def get_skills():
+async def get_skills(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all skills and skill trees"""
-    data = load_game_data("skills.json")
+    data = load_game_data("skills.json", content_pack_id=content_pack_id)
     return data
 
 @app.get("/api/gamedata/skills/trees")
@@ -1281,9 +1285,9 @@ async def get_status_effects():
 # --- ITEMS ---
 
 @app.get("/api/gamedata/items")
-async def get_items(category: Optional[str] = None):
+async def get_items(category: Optional[str] = None, content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all items, optionally filtered by category"""
-    data = load_game_data("items.json")
+    data = load_game_data("items.json", content_pack_id=content_pack_id)
     
     if category:
         return {"items": {category: data.get(category, [])}, "category": category}
@@ -1374,9 +1378,9 @@ async def delete_item(category: str, item_id: str):
 # --- SPELLS ---
 
 @app.get("/api/gamedata/spells")
-async def get_spells(school: Optional[str] = None, level: Optional[int] = None):
+async def get_spells(school: Optional[str] = None, level: Optional[int] = None, content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get all spells, optionally filtered"""
-    data = load_game_data("spells.json")
+    data = load_game_data("spells.json", content_pack_id=content_pack_id)
     spells = data.get("spells", {})
     
     if school or level is not None:

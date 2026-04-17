@@ -1,0 +1,1351 @@
+{
+    "skill_trees": {
+        "warrior": {
+            "id": "warrior",
+            "name": "Warrior Skills",
+            "description": "Master of martial combat and physical prowess",
+            "branches": {
+                "combat": {
+                    "name": "Combat Mastery",
+                    "description": "Offensive combat techniques",
+                    "skills": [
+                        "power_strike",
+                        "cleave",
+                        "whirlwind",
+                        "execute",
+                        "berserker_rage"
+                    ]
+                },
+                "defense": {
+                    "name": "Iron Defense",
+                    "description": "Defensive techniques and survivability",
+                    "skills": [
+                        "shield_wall",
+                        "parry",
+                        "taunt",
+                        "last_stand",
+                        "indomitable"
+                    ]
+                },
+                "tactics": {
+                    "name": "Battle Tactics",
+                    "description": "Strategic combat abilities",
+                    "skills": [
+                        "charge",
+                        "battle_cry",
+                        "intimidating_shout",
+                        "rally",
+                        "commanders_presence"
+                    ]
+                }
+            }
+        },
+        "mage": {
+            "id": "mage",
+            "name": "Mage Skills",
+            "description": "Arcane mastery and spell enhancement",
+            "branches": {
+                "destruction": {
+                    "name": "Destruction",
+                    "description": "Enhance destructive spell power",
+                    "skills": [
+                        "empowered_spells",
+                        "chain_casting",
+                        "spell_penetration",
+                        "arcane_blast",
+                        "meteor_strike"
+                    ]
+                },
+                "control": {
+                    "name": "Arcane Control",
+                    "description": "Spell manipulation and utility",
+                    "skills": [
+                        "mana_shield",
+                        "spell_echo",
+                        "time_warp",
+                        "arcane_mastery",
+                        "spell_steal"
+                    ]
+                },
+                "knowledge": {
+                    "name": "Arcane Knowledge",
+                    "description": "Passive enhancements and mana management",
+                    "skills": [
+                        "mana_flow",
+                        "arcane_intellect",
+                        "spell_efficiency",
+                        "ley_line_tap",
+                        "grand_arcanist"
+                    ]
+                }
+            }
+        },
+        "rogue": {
+            "id": "rogue",
+            "name": "Rogue Skills",
+            "description": "Stealth, precision, and cunning",
+            "branches": {
+                "assassination": {
+                    "name": "Assassination",
+                    "description": "Deadly precision strikes",
+                    "skills": [
+                        "backstab",
+                        "poison_blade",
+                        "marked_for_death",
+                        "assassinate",
+                        "death_mark"
+                    ]
+                },
+                "subtlety": {
+                    "name": "Subtlety",
+                    "description": "Stealth and evasion",
+                    "skills": [
+                        "shadow_step",
+                        "vanish",
+                        "smoke_bomb",
+                        "shadow_dance",
+                        "cloak_of_shadows"
+                    ]
+                },
+                "outlaw": {
+                    "name": "Outlaw",
+                    "description": "Combat tricks and dirty fighting",
+                    "skills": [
+                        "cheap_shot",
+                        "blade_flurry",
+                        "evasion",
+                        "adrenaline_rush",
+                        "killing_spree"
+                    ]
+                }
+            }
+        },
+        "cleric": {
+            "id": "cleric",
+            "name": "Cleric Skills",
+            "description": "Divine power and holy magic",
+            "branches": {
+                "holy": {
+                    "name": "Holy Light",
+                    "description": "Healing and protection",
+                    "skills": [
+                        "divine_favor",
+                        "holy_shield",
+                        "prayer_of_healing",
+                        "guardian_spirit",
+                        "divine_intervention"
+                    ]
+                },
+                "discipline": {
+                    "name": "Discipline",
+                    "description": "Preventive healing and barriers",
+                    "skills": [
+                        "power_word_shield",
+                        "penance",
+                        "pain_suppression",
+                        "spirit_shell",
+                        "rapture"
+                    ]
+                },
+                "smite": {
+                    "name": "Holy Wrath",
+                    "description": "Offensive divine magic",
+                    "skills": [
+                        "smite",
+                        "holy_fire",
+                        "chastise",
+                        "divine_star",
+                        "wrath_of_heaven"
+                    ]
+                }
+            }
+        },
+        "ranger": {
+            "id": "ranger",
+            "name": "Ranger Skills",
+            "description": "Nature affinity and ranged combat",
+            "branches": {
+                "marksmanship": {
+                    "name": "Marksmanship",
+                    "description": "Ranged weapon mastery",
+                    "skills": [
+                        "aimed_shot",
+                        "multi_shot",
+                        "rapid_fire",
+                        "headshot",
+                        "sniper"
+                    ]
+                },
+                "beast_mastery": {
+                    "name": "Beast Mastery",
+                    "description": "Animal companions and bonds",
+                    "skills": [
+                        "call_pet",
+                        "beast_bond",
+                        "pack_tactics",
+                        "bestial_wrath",
+                        "stampede"
+                    ]
+                },
+                "survival": {
+                    "name": "Survival",
+                    "description": "Traps and wilderness skills",
+                    "skills": [
+                        "trap_laying",
+                        "camouflage",
+                        "serpent_sting",
+                        "explosive_trap",
+                        "aspect_of_the_wild"
+                    ]
+                }
+            }
+        },
+        "paladin": {
+            "id": "paladin",
+            "name": "Paladin Skills",
+            "description": "Holy warrior combining might and faith",
+            "branches": {
+                "retribution": {
+                    "name": "Retribution",
+                    "description": "Holy offensive power",
+                    "skills": [
+                        "crusader_strike",
+                        "templar_verdict",
+                        "blade_of_justice",
+                        "divine_storm",
+                        "final_verdict"
+                    ]
+                },
+                "protection": {
+                    "name": "Protection",
+                    "description": "Divine defense and shields",
+                    "skills": [
+                        "avengers_shield",
+                        "consecration",
+                        "blessing_of_protection",
+                        "ardent_defender",
+                        "divine_bulwark"
+                    ]
+                },
+                "devotion": {
+                    "name": "Holy Devotion",
+                    "description": "Healing and support",
+                    "skills": [
+                        "holy_light",
+                        "beacon_of_light",
+                        "aura_mastery",
+                        "blessing_of_sacrifice",
+                        "lay_on_hands"
+                    ]
+                }
+            }
+        },
+        "bard": {
+            "id": "bard",
+            "name": "Bard Skills",
+            "description": "Music, magic, and inspiration",
+            "branches": {
+                "valor": {
+                    "name": "College of Valor",
+                    "description": "Combat inspiration and bravery",
+                    "skills": [
+                        "combat_inspiration",
+                        "war_song",
+                        "battle_hymn",
+                        "heroic_ballad",
+                        "song_of_victory"
+                    ]
+                },
+                "lore": {
+                    "name": "College of Lore",
+                    "description": "Knowledge and magical secrets",
+                    "skills": [
+                        "cutting_words",
+                        "additional_secrets",
+                        "peerless_skill",
+                        "magical_secrets",
+                        "master_of_lore"
+                    ]
+                },
+                "glamour": {
+                    "name": "College of Glamour",
+                    "description": "Enchantment and charm",
+                    "skills": [
+                        "enthralling_performance",
+                        "mantle_of_inspiration",
+                        "unbreakable_majesty",
+                        "mantle_of_majesty",
+                        "glamour_mastery"
+                    ]
+                }
+            }
+        },
+        "warlock": {
+            "id": "warlock",
+            "name": "Warlock Skills",
+            "description": "Dark pacts and eldritch power",
+            "branches": {
+                "affliction": {
+                    "name": "Affliction",
+                    "description": "Curses and damage over time",
+                    "skills": [
+                        "agony",
+                        "corruption",
+                        "unstable_affliction",
+                        "soul_rot",
+                        "dark_soul"
+                    ]
+                },
+                "demonology": {
+                    "name": "Demonology",
+                    "description": "Demon summoning and control",
+                    "skills": [
+                        "summon_imp",
+                        "summon_voidwalker",
+                        "demonic_empowerment",
+                        "hand_of_guldan",
+                        "summon_infernal"
+                    ]
+                },
+                "destruction": {
+                    "name": "Destruction",
+                    "description": "Chaotic fire and shadow",
+                    "skills": [
+                        "immolate",
+                        "conflagrate",
+                        "chaos_bolt",
+                        "rain_of_fire",
+                        "channel_demonfire"
+                    ]
+                }
+            }
+        },
+        "druid": {
+            "id": "druid",
+            "name": "Druid Skills",
+            "description": "Nature magic and shapeshifting",
+            "branches": {
+                "balance": {
+                    "name": "Balance",
+                    "description": "Nature and astral magic",
+                    "skills": [
+                        "moonfire",
+                        "sunfire",
+                        "starsurge",
+                        "starfall",
+                        "celestial_alignment"
+                    ]
+                },
+                "feral": {
+                    "name": "Feral",
+                    "description": "Cat form and melee combat",
+                    "skills": [
+                        "cat_form",
+                        "rake",
+                        "rip",
+                        "ferocious_bite",
+                        "berserk"
+                    ]
+                },
+                "restoration": {
+                    "name": "Restoration",
+                    "description": "Nature healing",
+                    "skills": [
+                        "rejuvenation",
+                        "wild_growth",
+                        "swiftmend",
+                        "tree_of_life",
+                        "tranquility"
+                    ]
+                }
+            }
+        }
+    },
+    "skills": {
+        "power_strike": {
+            "id": "power_strike",
+            "name": "Power Strike",
+            "description": "A powerful melee attack that deals 150% weapon damage.",
+            "class": "warrior",
+            "branch": "combat",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 6,
+            "resource_cost": {"type": "stamina", "amount": 10},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "damage_modifier": 1.5,
+                "damage_type": "physical"
+            },
+            "scaling": {
+                "per_level": {"damage_modifier": 0.05}
+            }
+        },
+        "cleave": {
+            "id": "cleave",
+            "name": "Cleave",
+            "description": "Swing your weapon in an arc, hitting up to 3 enemies.",
+            "class": "warrior",
+            "branch": "combat",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["power_strike"],
+            "cooldown": 8,
+            "resource_cost": {"type": "stamina", "amount": 15},
+            "effect": {
+                "type": "damage",
+                "target": "cone",
+                "max_targets": 3,
+                "damage_modifier": 1.0,
+                "damage_type": "physical"
+            }
+        },
+        "whirlwind": {
+            "id": "whirlwind",
+            "name": "Whirlwind",
+            "description": "Spin rapidly, dealing damage to all nearby enemies.",
+            "class": "warrior",
+            "branch": "combat",
+            "tier": 3,
+            "level_required": 5,
+            "prerequisites": ["cleave"],
+            "cooldown": 12,
+            "resource_cost": {"type": "stamina", "amount": 25},
+            "effect": {
+                "type": "damage",
+                "target": "aoe",
+                "radius": 10,
+                "damage_modifier": 0.8,
+                "damage_type": "physical"
+            }
+        },
+        "execute": {
+            "id": "execute",
+            "name": "Execute",
+            "description": "A devastating attack that deals massive damage to low-health targets.",
+            "class": "warrior",
+            "branch": "combat",
+            "tier": 4,
+            "level_required": 7,
+            "prerequisites": ["whirlwind"],
+            "cooldown": 20,
+            "resource_cost": {"type": "stamina", "amount": 35},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "damage_modifier": 3.0,
+                "damage_type": "physical",
+                "condition": {"target_hp_below": 0.2}
+            }
+        },
+        "berserker_rage": {
+            "id": "berserker_rage",
+            "name": "Berserker Rage",
+            "description": "Enter a berserker state, increasing damage dealt by 30% for 15 seconds.",
+            "class": "warrior",
+            "branch": "combat",
+            "tier": 5,
+            "level_required": 10,
+            "prerequisites": ["execute"],
+            "cooldown": 60,
+            "resource_cost": {"type": "stamina", "amount": 0},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 15,
+                "buffs": [
+                    {"stat": "damage", "modifier": 1.3},
+                    {"stat": "attack_speed", "modifier": 1.2}
+                ]
+            }
+        },
+        "shield_wall": {
+            "id": "shield_wall",
+            "name": "Shield Wall",
+            "description": "Raise your shield, reducing all damage taken by 40% for 8 seconds.",
+            "class": "warrior",
+            "branch": "defense",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 30,
+            "resource_cost": {"type": "stamina", "amount": 10},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 8,
+                "buffs": [
+                    {"stat": "damage_reduction", "value": 0.4}
+                ]
+            }
+        },
+        "parry": {
+            "id": "parry",
+            "name": "Parry",
+            "description": "Deflect the next melee attack and counter for 75% weapon damage.",
+            "class": "warrior",
+            "branch": "defense",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["shield_wall"],
+            "cooldown": 10,
+            "resource_cost": {"type": "stamina", "amount": 5},
+            "effect": {
+                "type": "defensive",
+                "target": "self",
+                "blocks_next_attack": true,
+                "counter_damage_modifier": 0.75
+            }
+        },
+        "taunt": {
+            "id": "taunt",
+            "name": "Taunt",
+            "description": "Force an enemy to attack you for 6 seconds.",
+            "class": "warrior",
+            "branch": "defense",
+            "tier": 3,
+            "level_required": 5,
+            "prerequisites": ["parry"],
+            "cooldown": 8,
+            "resource_cost": {"type": "stamina", "amount": 5},
+            "effect": {
+                "type": "debuff",
+                "target": "single",
+                "duration": 6,
+                "forces_target": true
+            }
+        },
+        "last_stand": {
+            "id": "last_stand",
+            "name": "Last Stand",
+            "description": "Temporarily increase your maximum HP by 30% for 15 seconds.",
+            "class": "warrior",
+            "branch": "defense",
+            "tier": 4,
+            "level_required": 7,
+            "prerequisites": ["taunt"],
+            "cooldown": 90,
+            "resource_cost": {"type": "stamina", "amount": 0},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 15,
+                "buffs": [
+                    {"stat": "max_hp", "modifier": 1.3}
+                ]
+            }
+        },
+        "indomitable": {
+            "id": "indomitable",
+            "name": "Indomitable",
+            "description": "Become immune to crowd control effects for 8 seconds.",
+            "class": "warrior",
+            "branch": "defense",
+            "tier": 5,
+            "level_required": 10,
+            "prerequisites": ["last_stand"],
+            "cooldown": 120,
+            "resource_cost": {"type": "stamina", "amount": 0},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 8,
+                "immunity": ["stun", "fear", "slow", "root"]
+            }
+        },
+        "charge": {
+            "id": "charge",
+            "name": "Charge",
+            "description": "Rush toward an enemy, stunning them for 1 second.",
+            "class": "warrior",
+            "branch": "tactics",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 15,
+            "resource_cost": {"type": "stamina", "amount": 10},
+            "effect": {
+                "type": "mobility",
+                "target": "single",
+                "range": 25,
+                "stun_duration": 1
+            }
+        },
+        "battle_cry": {
+            "id": "battle_cry",
+            "name": "Battle Cry",
+            "description": "Let out a war cry, increasing your critical strike chance by 15% for 10 seconds.",
+            "class": "warrior",
+            "branch": "tactics",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["charge"],
+            "cooldown": 45,
+            "resource_cost": {"type": "stamina", "amount": 5},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 10,
+                "buffs": [
+                    {"stat": "crit_chance", "value": 0.15}
+                ]
+            }
+        },
+        "intimidating_shout": {
+            "id": "intimidating_shout",
+            "name": "Intimidating Shout",
+            "description": "Cause nearby enemies to cower in fear for 4 seconds.",
+            "class": "warrior",
+            "branch": "tactics",
+            "tier": 3,
+            "level_required": 5,
+            "prerequisites": ["battle_cry"],
+            "cooldown": 60,
+            "resource_cost": {"type": "stamina", "amount": 15},
+            "effect": {
+                "type": "debuff",
+                "target": "aoe",
+                "radius": 10,
+                "duration": 4,
+                "fear": true
+            }
+        },
+        "rally": {
+            "id": "rally",
+            "name": "Rally",
+            "description": "Inspire your allies, increasing their damage by 10% for 15 seconds.",
+            "class": "warrior",
+            "branch": "tactics",
+            "tier": 4,
+            "level_required": 7,
+            "prerequisites": ["intimidating_shout"],
+            "cooldown": 90,
+            "resource_cost": {"type": "stamina", "amount": 20},
+            "effect": {
+                "type": "buff",
+                "target": "party",
+                "duration": 15,
+                "buffs": [
+                    {"stat": "damage", "modifier": 1.1}
+                ]
+            }
+        },
+        "commanders_presence": {
+            "id": "commanders_presence",
+            "name": "Commander's Presence",
+            "description": "Passive aura that increases all allies' armor by 10%.",
+            "class": "warrior",
+            "branch": "tactics",
+            "tier": 5,
+            "level_required": 10,
+            "prerequisites": ["rally"],
+            "cooldown": 0,
+            "resource_cost": null,
+            "passive": true,
+            "effect": {
+                "type": "aura",
+                "target": "party",
+                "radius": 30,
+                "buffs": [
+                    {"stat": "armor", "modifier": 1.1}
+                ]
+            }
+        },
+        "empowered_spells": {
+            "id": "empowered_spells",
+            "name": "Empowered Spells",
+            "description": "Your damaging spells deal 10% more damage.",
+            "class": "mage",
+            "branch": "destruction",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 0,
+            "resource_cost": null,
+            "passive": true,
+            "effect": {
+                "type": "passive",
+                "spell_damage_modifier": 1.1
+            }
+        },
+        "chain_casting": {
+            "id": "chain_casting",
+            "name": "Chain Casting",
+            "description": "After casting a spell, your next spell costs 25% less mana if cast within 5 seconds.",
+            "class": "mage",
+            "branch": "destruction",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["empowered_spells"],
+            "cooldown": 0,
+            "resource_cost": null,
+            "passive": true,
+            "effect": {
+                "type": "passive",
+                "mana_cost_reduction": 0.25,
+                "duration": 5
+            }
+        },
+        "spell_penetration": {
+            "id": "spell_penetration",
+            "name": "Spell Penetration",
+            "description": "Your spells ignore 15% of enemy magic resistance.",
+            "class": "mage",
+            "branch": "destruction",
+            "tier": 3,
+            "level_required": 5,
+            "prerequisites": ["chain_casting"],
+            "cooldown": 0,
+            "resource_cost": null,
+            "passive": true,
+            "effect": {
+                "type": "passive",
+                "magic_penetration": 0.15
+            }
+        },
+        "arcane_blast": {
+            "id": "arcane_blast",
+            "name": "Arcane Blast",
+            "description": "Blast the target with raw arcane energy.",
+            "class": "mage",
+            "branch": "destruction",
+            "tier": 4,
+            "level_required": 7,
+            "prerequisites": ["spell_penetration"],
+            "cooldown": 4,
+            "resource_cost": {"type": "mana", "amount": 30},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "base_damage": "3d8",
+                "damage_type": "arcane"
+            }
+        },
+        "meteor_strike": {
+            "id": "meteor_strike",
+            "name": "Meteor Strike",
+            "description": "Call down a meteor, devastating an area.",
+            "class": "mage",
+            "branch": "destruction",
+            "tier": 5,
+            "level_required": 10,
+            "prerequisites": ["arcane_blast"],
+            "cooldown": 120,
+            "resource_cost": {"type": "mana", "amount": 80},
+            "effect": {
+                "type": "damage",
+                "target": "aoe",
+                "radius": 15,
+                "base_damage": "10d6",
+                "damage_type": "fire"
+            }
+        },
+        "mana_shield": {
+            "id": "mana_shield",
+            "name": "Mana Shield",
+            "description": "Convert damage taken to mana drain instead.",
+            "class": "mage",
+            "branch": "control",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 30,
+            "resource_cost": {"type": "mana", "amount": 10},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 30,
+                "absorbs_damage_to_mana": true,
+                "conversion_rate": 1.5
+            }
+        },
+        "backstab": {
+            "id": "backstab",
+            "name": "Backstab",
+            "description": "Attack from behind for 200% weapon damage. Requires stealth or target facing away.",
+            "class": "rogue",
+            "branch": "assassination",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 6,
+            "resource_cost": {"type": "energy", "amount": 35},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "damage_modifier": 2.0,
+                "damage_type": "physical",
+                "requires_position": "behind"
+            }
+        },
+        "poison_blade": {
+            "id": "poison_blade",
+            "name": "Poison Blade",
+            "description": "Coat your weapons with poison, dealing damage over time.",
+            "class": "rogue",
+            "branch": "assassination",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["backstab"],
+            "cooldown": 60,
+            "resource_cost": {"type": "energy", "amount": 20},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 300,
+                "on_hit": {
+                    "type": "dot",
+                    "damage": "1d4",
+                    "duration": 12,
+                    "damage_type": "poison"
+                }
+            }
+        },
+        "shadow_step": {
+            "id": "shadow_step",
+            "name": "Shadow Step",
+            "description": "Teleport behind your target.",
+            "class": "rogue",
+            "branch": "subtlety",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 20,
+            "resource_cost": {"type": "energy", "amount": 15},
+            "effect": {
+                "type": "mobility",
+                "target": "single",
+                "teleport_behind": true,
+                "range": 25
+            }
+        },
+        "vanish": {
+            "id": "vanish",
+            "name": "Vanish",
+            "description": "Instantly enter stealth, dropping all threat.",
+            "class": "rogue",
+            "branch": "subtlety",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["shadow_step"],
+            "cooldown": 90,
+            "resource_cost": {"type": "energy", "amount": 0},
+            "effect": {
+                "type": "stealth",
+                "target": "self",
+                "drops_threat": true,
+                "stealth_level": 2
+            }
+        },
+        "divine_favor": {
+            "id": "divine_favor",
+            "name": "Divine Favor",
+            "description": "Your next healing spell is 50% more effective.",
+            "class": "cleric",
+            "branch": "holy",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 30,
+            "resource_cost": {"type": "mana", "amount": 15},
+            "effect": {
+                "type": "buff",
+                "target": "self",
+                "duration": 15,
+                "next_heal_modifier": 1.5
+            }
+        },
+        "holy_shield": {
+            "id": "holy_shield",
+            "name": "Holy Shield",
+            "description": "Shield an ally, absorbing damage.",
+            "class": "cleric",
+            "branch": "holy",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["divine_favor"],
+            "cooldown": 12,
+            "resource_cost": {"type": "mana", "amount": 25},
+            "effect": {
+                "type": "shield",
+                "target": "single",
+                "duration": 15,
+                "absorb_amount": "level * 10 + wisdom_mod * 5"
+            }
+        },
+        "smite": {
+            "id": "smite",
+            "name": "Smite",
+            "description": "Strike an enemy with holy energy.",
+            "class": "cleric",
+            "branch": "smite",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 4,
+            "resource_cost": {"type": "mana", "amount": 15},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "base_damage": "2d6",
+                "damage_type": "radiant"
+            }
+        },
+        "aimed_shot": {
+            "id": "aimed_shot",
+            "name": "Aimed Shot",
+            "description": "A carefully aimed shot that deals 175% weapon damage.",
+            "class": "ranger",
+            "branch": "marksmanship",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 10,
+            "resource_cost": {"type": "focus", "amount": 30},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "damage_modifier": 1.75,
+                "damage_type": "physical"
+            }
+        },
+        "multi_shot": {
+            "id": "multi_shot",
+            "name": "Multi-Shot",
+            "description": "Fire arrows at multiple targets.",
+            "class": "ranger",
+            "branch": "marksmanship",
+            "tier": 2,
+            "level_required": 3,
+            "prerequisites": ["aimed_shot"],
+            "cooldown": 8,
+            "resource_cost": {"type": "focus", "amount": 25},
+            "effect": {
+                "type": "damage",
+                "target": "multi",
+                "max_targets": 5,
+                "damage_modifier": 0.8,
+                "damage_type": "physical"
+            }
+        },
+        "call_pet": {
+            "id": "call_pet",
+            "name": "Call Pet",
+            "description": "Summon your animal companion to fight alongside you.",
+            "class": "ranger",
+            "branch": "beast_mastery",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 30,
+            "resource_cost": {"type": "focus", "amount": 20},
+            "effect": {
+                "type": "summon",
+                "target": "self",
+                "summon_type": "beast_companion",
+                "duration": 0,
+                "permanent": true
+            }
+        },
+        "trap_laying": {
+            "id": "trap_laying",
+            "name": "Trap Laying",
+            "description": "Place a trap that damages enemies who trigger it.",
+            "class": "ranger",
+            "branch": "survival",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 20,
+            "resource_cost": {"type": "focus", "amount": 15},
+            "effect": {
+                "type": "trap",
+                "target": "ground",
+                "trigger_radius": 5,
+                "damage": "2d8",
+                "damage_type": "physical"
+            }
+        },
+        "crusader_strike": {
+            "id": "crusader_strike",
+            "name": "Crusader Strike",
+            "description": "Strike the target with holy power.",
+            "class": "paladin",
+            "branch": "retribution",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 6,
+            "resource_cost": {"type": "holy_power", "amount": 0, "generates": 1},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "damage_modifier": 1.3,
+                "damage_type": "physical",
+                "bonus_holy_damage": "1d4"
+            }
+        },
+        "consecration": {
+            "id": "consecration",
+            "name": "Consecration",
+            "description": "Consecrate the ground, damaging enemies standing on it.",
+            "class": "paladin",
+            "branch": "protection",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 20,
+            "resource_cost": {"type": "mana", "amount": 30},
+            "effect": {
+                "type": "ground_effect",
+                "target": "aoe",
+                "radius": 8,
+                "duration": 12,
+                "tick_damage": "1d6",
+                "damage_type": "radiant"
+            }
+        },
+        "combat_inspiration": {
+            "id": "combat_inspiration",
+            "name": "Combat Inspiration",
+            "description": "Inspire an ally with a rousing performance, granting bonus damage.",
+            "class": "bard",
+            "branch": "valor",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 10,
+            "resource_cost": {"type": "inspiration_dice", "amount": 1},
+            "effect": {
+                "type": "buff",
+                "target": "single_ally",
+                "duration": 60,
+                "buffs": [
+                    {"stat": "damage", "modifier": 1.15}
+                ]
+            }
+        },
+        "cutting_words": {
+            "id": "cutting_words",
+            "name": "Cutting Words",
+            "description": "Distract an enemy with mocking words, reducing their attack roll.",
+            "class": "bard",
+            "branch": "lore",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 10,
+            "resource_cost": {"type": "inspiration_dice", "amount": 1},
+            "effect": {
+                "type": "debuff",
+                "target": "single",
+                "duration": 6,
+                "debuffs": [
+                    {"stat": "attack_roll", "value": -3}
+                ]
+            }
+        },
+        "eldritch_blast_empowered": {
+            "id": "eldritch_blast_empowered",
+            "name": "Empowered Eldritch Blast",
+            "description": "Your Eldritch Blast pushes targets 10 feet.",
+            "class": "warlock",
+            "branch": "destruction",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 0,
+            "resource_cost": null,
+            "passive": true,
+            "effect": {
+                "type": "passive",
+                "modifies": "eldritch_blast",
+                "pushback": 10
+            }
+        },
+        "summon_imp": {
+            "id": "summon_imp",
+            "name": "Summon Imp",
+            "description": "Summon a fiery imp to fight for you.",
+            "class": "warlock",
+            "branch": "demonology",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 60,
+            "resource_cost": {"type": "mana", "amount": 40},
+            "effect": {
+                "type": "summon",
+                "target": "self",
+                "summon_type": "imp",
+                "duration": 300
+            }
+        },
+        "moonfire": {
+            "id": "moonfire",
+            "name": "Moonfire",
+            "description": "Burns the enemy for Arcane damage and additional damage over time.",
+            "class": "druid",
+            "branch": "balance",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 0,
+            "resource_cost": {"type": "mana", "amount": 10},
+            "effect": {
+                "type": "damage",
+                "target": "single",
+                "base_damage": "1d6",
+                "damage_type": "arcane",
+                "dot": {
+                    "damage": "1d4",
+                    "duration": 18,
+                    "tick_interval": 3
+                }
+            }
+        },
+        "cat_form": {
+            "id": "cat_form",
+            "name": "Cat Form",
+            "description": "Shapeshift into a cat, increasing movement speed and enabling melee combo attacks.",
+            "class": "druid",
+            "branch": "feral",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 0,
+            "resource_cost": {"type": "mana", "amount": 0},
+            "effect": {
+                "type": "shapeshift",
+                "target": "self",
+                "form": "cat",
+                "stat_changes": [
+                    {"stat": "speed", "modifier": 1.3},
+                    {"stat": "damage", "modifier": 1.1}
+                ],
+                "resource_type": "energy"
+            }
+        },
+        "rejuvenation": {
+            "id": "rejuvenation",
+            "name": "Rejuvenation",
+            "description": "Heals the target over time.",
+            "class": "druid",
+            "branch": "restoration",
+            "tier": 1,
+            "level_required": 1,
+            "prerequisites": [],
+            "cooldown": 0,
+            "resource_cost": {"type": "mana", "amount": 15},
+            "effect": {
+                "type": "heal",
+                "target": "single",
+                "hot": {
+                    "healing": "1d4 + wisdom_mod",
+                    "duration": 15,
+                    "tick_interval": 3
+                }
+            }
+        }
+    },
+    "passive_abilities": {
+        "second_wind": {
+            "id": "second_wind",
+            "name": "Second Wind",
+            "description": "Once per short rest, regain HP equal to 1d10 + your level.",
+            "class": "warrior",
+            "level_granted": 1,
+            "effect": {
+                "type": "self_heal",
+                "uses": 1,
+                "recharge": "short_rest",
+                "healing": "1d10 + level"
+            }
+        },
+        "fighting_style": {
+            "id": "fighting_style",
+            "name": "Fighting Style",
+            "description": "Choose a fighting style specialization.",
+            "class": "warrior",
+            "level_granted": 1,
+            "effect": {
+                "type": "choice",
+                "options": ["defense", "dueling", "great_weapon", "protection"]
+            }
+        },
+        "action_surge": {
+            "id": "action_surge",
+            "name": "Action Surge",
+            "description": "Take one additional action on your turn. Recharges on short rest.",
+            "class": "warrior",
+            "level_granted": 2,
+            "effect": {
+                "type": "extra_action",
+                "uses": 1,
+                "recharge": "short_rest"
+            }
+        },
+        "sneak_attack": {
+            "id": "sneak_attack",
+            "name": "Sneak Attack",
+            "description": "Deal extra damage when you have advantage or an ally is near your target.",
+            "class": "rogue",
+            "level_granted": 1,
+            "effect": {
+                "type": "bonus_damage",
+                "damage": "level_based",
+                "scaling": {"1": "1d6", "3": "2d6", "5": "3d6", "7": "4d6", "9": "5d6"}
+            }
+        },
+        "cunning_action": {
+            "id": "cunning_action",
+            "name": "Cunning Action",
+            "description": "Use bonus action to Dash, Disengage, or Hide.",
+            "class": "rogue",
+            "level_granted": 2,
+            "effect": {
+                "type": "bonus_action_options",
+                "options": ["dash", "disengage", "hide"]
+            }
+        },
+        "arcane_recovery": {
+            "id": "arcane_recovery",
+            "name": "Arcane Recovery",
+            "description": "Once per day during a short rest, recover expended spell slots.",
+            "class": "mage",
+            "level_granted": 1,
+            "effect": {
+                "type": "resource_recovery",
+                "resource": "spell_slots",
+                "amount": "level / 2 (rounded up)",
+                "uses": 1,
+                "recharge": "long_rest"
+            }
+        },
+        "bardic_inspiration": {
+            "id": "bardic_inspiration",
+            "name": "Bardic Inspiration",
+            "description": "Grant allies inspiration dice to add to their rolls.",
+            "class": "bard",
+            "level_granted": 1,
+            "effect": {
+                "type": "buff_resource",
+                "dice": "d6",
+                "uses": "charisma_mod",
+                "recharge": "long_rest"
+            }
+        }
+    },
+    "status_effects": {
+        "buffs": {
+            "bless": {
+                "id": "bless",
+                "name": "Blessed",
+                "description": "Add 1d4 to attack rolls and saving throws.",
+                "duration": 60,
+                "effect": {"attack_bonus": "1d4", "save_bonus": "1d4"},
+                "icon": "✨"
+            },
+            "haste": {
+                "id": "haste",
+                "name": "Hasted",
+                "description": "Double speed, +2 AC, advantage on DEX saves, extra action.",
+                "duration": 60,
+                "effect": {"speed_modifier": 2, "ac_bonus": 2, "extra_action": true},
+                "icon": "⚡"
+            },
+            "shield_of_faith": {
+                "id": "shield_of_faith",
+                "name": "Shield of Faith",
+                "description": "+2 AC from divine protection.",
+                "duration": 600,
+                "effect": {"ac_bonus": 2},
+                "icon": "🛡️"
+            },
+            "rage": {
+                "id": "rage",
+                "name": "Raging",
+                "description": "Bonus damage, resistance to physical damage.",
+                "duration": 60,
+                "effect": {"damage_bonus": 2, "physical_resistance": true},
+                "icon": "😤"
+            },
+            "invisibility": {
+                "id": "invisibility",
+                "name": "Invisible",
+                "description": "Cannot be seen. Ends if you attack or cast a spell.",
+                "duration": 3600,
+                "effect": {"invisible": true, "attack_advantage": true},
+                "icon": "👻"
+            },
+            "heroism": {
+                "id": "heroism",
+                "name": "Heroic",
+                "description": "Immune to frightened, gain temp HP each turn.",
+                "duration": 60,
+                "effect": {"fear_immunity": true, "temp_hp_per_turn": 5},
+                "icon": "🦸"
+            }
+        },
+        "debuffs": {
+            "poisoned": {
+                "id": "poisoned",
+                "name": "Poisoned",
+                "description": "Disadvantage on attack rolls and ability checks.",
+                "duration": 60,
+                "effect": {"attack_disadvantage": true, "ability_disadvantage": true},
+                "icon": "🤢"
+            },
+            "stunned": {
+                "id": "stunned",
+                "name": "Stunned",
+                "description": "Cannot move, speak, or take actions.",
+                "duration": 6,
+                "effect": {"incapacitated": true, "auto_fail_str_dex_saves": true},
+                "icon": "💫"
+            },
+            "frightened": {
+                "id": "frightened",
+                "name": "Frightened",
+                "description": "Disadvantage on ability checks and attacks while source is visible.",
+                "duration": 60,
+                "effect": {"attack_disadvantage": true, "cannot_approach_source": true},
+                "icon": "😱"
+            },
+            "blinded": {
+                "id": "blinded",
+                "name": "Blinded",
+                "description": "Cannot see. Auto-fail sight checks. Attack disadvantage.",
+                "duration": 60,
+                "effect": {"attack_disadvantage": true, "attacked_with_advantage": true},
+                "icon": "🙈"
+            },
+            "slowed": {
+                "id": "slowed",
+                "name": "Slowed",
+                "description": "Speed halved, -2 AC and DEX saves.",
+                "duration": 60,
+                "effect": {"speed_modifier": 0.5, "ac_penalty": 2, "dex_save_penalty": 2},
+                "icon": "🐌"
+            },
+            "burning": {
+                "id": "burning",
+                "name": "Burning",
+                "description": "Taking fire damage over time.",
+                "duration": 18,
+                "effect": {"dot_damage": "1d6", "damage_type": "fire", "tick_interval": 6},
+                "icon": "🔥"
+            },
+            "hexed": {
+                "id": "hexed",
+                "name": "Hexed",
+                "description": "Take bonus necrotic damage from attacker's hits.",
+                "duration": 3600,
+                "effect": {"bonus_damage_taken": "1d6", "ability_check_disadvantage": true},
+                "icon": "🔮"
+            }
+        }
+    }
+}

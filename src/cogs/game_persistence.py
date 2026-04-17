@@ -253,6 +253,10 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
     @app_commands.guild_only()
     async def resume_game(self, interaction: discord.Interaction, session_id: Optional[int] = None):
         """Resume a game with full context restoration"""
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and session_id is not None:
+            return await sessions_cog.resume_session.callback(sessions_cog, interaction, session_id)
+
         await interaction.response.defer()
         
         if session_id:

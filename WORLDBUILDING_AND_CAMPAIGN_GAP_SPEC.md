@@ -700,6 +700,13 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: snapshot DB methods implemented in `src/database.py`
 - ✅ COMPLETE: broken API routes for session characters, NPC listing, event resolve, and location connect repaired in `web/api.py`
 - ✅ COMPLETE: quest stage consumers switched off direct `quest['current_stage']` reads in `src/chat_handler.py` and `src/cogs/dm_chat.py`
+- ✅ COMPLETE: additive `fantasy_core` content-pack scaffold created under `data/game_data/packs/fantasy/core`
+- ✅ COMPLETE: content-pack manifest and loader added in `data/game_data/manifests/content_packs.json` and `src/content_packs.py`
+- ✅ COMPLETE: pack-aware read paths added for core game data in `web/api.py` and `src/tools.py`
+- ✅ COMPLETE: canonical `/session resume` command added in `src/cogs/sessions.py`
+- ✅ COMPLETE: DB-backed session channel binding helpers added in `src/database.py`
+- ✅ COMPLETE: `DMChat` now prefers DB-backed session-channel binding over in-memory history
+- ⚠️ PARTIAL: `/game begin` and `/resume` compatibility delegation is improved, but full lifecycle consolidation is not complete yet
 - ⚠️ PARTIAL: snapshot UI/API contract is now backed by DB methods, but full snapshot restore semantics remain limited to v1 game-state restoration
 - ⚠️ PARTIAL: persistent Discord channel/session rebinding is not fully implemented yet
 

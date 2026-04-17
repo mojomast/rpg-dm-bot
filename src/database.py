@@ -2440,6 +2440,53 @@ class Database:
             """, (now, session_id))
             await db.commit()
             return True
+
+    async def bind_session_channel(self, session_id: int, channel_id: int, set_primary: bool = False) -> bool:
+        """Persist the active channel binding for a session."""
+        session = await self.get_session(session_id)
+        if not session:
+            return False
+
+        updates = {
+            'last_active_channel_id': channel_id,
+            'last_played': datetime.utcnow().isoformat(),
+        }
+        if set_primary or not session.get('primary_channel_id'):
+            updates['primary_channel_id'] = channel_id
+        return await self.update_session(session_id, **updates)
+
+    async def get_session_by_channel(
+        self,
+        guild_id: int,
+        channel_id: int,
+        statuses: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve a session by channel binding, preferring most recent active binding."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            query = """
+                SELECT * FROM sessions
+                WHERE guild_id = ?
+                  AND (last_active_channel_id = ? OR primary_channel_id = ?)
+            """
+            params: List[Any] = [guild_id, channel_id, channel_id]
+
+            if statuses:
+                placeholders = ', '.join('?' for _ in statuses)
+                query += f" AND status IN ({placeholders})"
+                params.extend(statuses)
+
+            query += " ORDER BY CASE WHEN last_active_channel_id = ? THEN 0 ELSE 1 END, last_played DESC, id DESC LIMIT 1"
+            params.append(channel_id)
+
+            cursor = await db.execute(query, params)
+            row = await cursor.fetchone()
+            if row:
+                session = dict(row)
+                session['world_state'] = json.loads(session['world_state']) if session.get('world_state') else {}
+                return session
+            return None
     
     async def end_session(self, session_id: int) -> bool:
         """End a session (set to inactive)"""

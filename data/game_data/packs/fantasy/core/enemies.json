@@ -1,0 +1,336 @@
+{
+    "enemies": {
+        "goblin": {
+            "id": "goblin",
+            "name": "Goblin",
+            "description": "A small, green-skinned creature with pointy ears and sharp teeth.",
+            "hp": 7,
+            "ac": 12,
+            "stats": {
+                "strength": 8,
+                "dexterity": 14,
+                "constitution": 10,
+                "intelligence": 10,
+                "wisdom": 8,
+                "charisma": 8
+            },
+            "attacks": [
+                {"name": "Scimitar", "damage": "1d6+2", "type": "melee"},
+                {"name": "Shortbow", "damage": "1d6+2", "type": "ranged"}
+            ],
+            "xp_reward": 25,
+            "gold_reward": "1d6",
+            "loot_table": ["dagger_simple"],
+            "challenge_rating": 0.25
+        },
+        "goblin_boss": {
+            "id": "goblin_boss",
+            "name": "Goblin Boss",
+            "description": "A larger, meaner goblin that commands others.",
+            "hp": 21,
+            "ac": 14,
+            "stats": {
+                "strength": 10,
+                "dexterity": 14,
+                "constitution": 12,
+                "intelligence": 12,
+                "wisdom": 10,
+                "charisma": 12
+            },
+            "attacks": [
+                {"name": "Scimitar", "damage": "1d6+2", "type": "melee", "multiattack": 2}
+            ],
+            "xp_reward": 100,
+            "gold_reward": "3d6",
+            "loot_table": ["sword_iron", "potion_health_minor"],
+            "challenge_rating": 1
+        },
+        "skeleton": {
+            "id": "skeleton",
+            "name": "Skeleton",
+            "description": "An animated pile of bones wielding rusty weapons.",
+            "hp": 13,
+            "ac": 13,
+            "stats": {
+                "strength": 10,
+                "dexterity": 14,
+                "constitution": 15,
+                "intelligence": 6,
+                "wisdom": 8,
+                "charisma": 5
+            },
+            "attacks": [
+                {"name": "Shortsword", "damage": "1d6+2", "type": "melee"},
+                {"name": "Shortbow", "damage": "1d6+2", "type": "ranged"}
+            ],
+            "vulnerabilities": ["bludgeoning"],
+            "immunities": ["poison"],
+            "xp_reward": 50,
+            "gold_reward": "1d4",
+            "loot_table": [],
+            "challenge_rating": 0.25
+        },
+        "zombie": {
+            "id": "zombie",
+            "name": "Zombie",
+            "description": "A shambling corpse that hungers for the living.",
+            "hp": 22,
+            "ac": 8,
+            "stats": {
+                "strength": 13,
+                "dexterity": 6,
+                "constitution": 16,
+                "intelligence": 3,
+                "wisdom": 6,
+                "charisma": 5
+            },
+            "attacks": [
+                {"name": "Slam", "damage": "1d6+1", "type": "melee"}
+            ],
+            "special_abilities": ["undead_fortitude"],
+            "immunities": ["poison"],
+            "xp_reward": 50,
+            "gold_reward": "0",
+            "loot_table": [],
+            "challenge_rating": 0.25
+        },
+        "wolf": {
+            "id": "wolf",
+            "name": "Wolf",
+            "description": "A fierce gray wolf with gleaming eyes.",
+            "hp": 11,
+            "ac": 13,
+            "stats": {
+                "strength": 12,
+                "dexterity": 15,
+                "constitution": 12,
+                "intelligence": 3,
+                "wisdom": 12,
+                "charisma": 6
+            },
+            "attacks": [
+                {"name": "Bite", "damage": "2d4+2", "type": "melee", "special": "knockdown"}
+            ],
+            "xp_reward": 50,
+            "gold_reward": "0",
+            "loot_table": [],
+            "challenge_rating": 0.25
+        },
+        "dire_wolf": {
+            "id": "dire_wolf",
+            "name": "Dire Wolf",
+            "description": "A massive wolf the size of a horse.",
+            "hp": 37,
+            "ac": 14,
+            "stats": {
+                "strength": 17,
+                "dexterity": 15,
+                "constitution": 15,
+                "intelligence": 3,
+                "wisdom": 12,
+                "charisma": 7
+            },
+            "attacks": [
+                {"name": "Bite", "damage": "2d6+3", "type": "melee", "special": "knockdown"}
+            ],
+            "xp_reward": 200,
+            "gold_reward": "0",
+            "loot_table": [],
+            "challenge_rating": 1
+        },
+        "orc": {
+            "id": "orc",
+            "name": "Orc",
+            "description": "A muscular, tusked warrior with green-gray skin.",
+            "hp": 15,
+            "ac": 13,
+            "stats": {
+                "strength": 16,
+                "dexterity": 12,
+                "constitution": 16,
+                "intelligence": 7,
+                "wisdom": 11,
+                "charisma": 10
+            },
+            "attacks": [
+                {"name": "Greataxe", "damage": "1d12+3", "type": "melee"},
+                {"name": "Javelin", "damage": "1d6+3", "type": "ranged"}
+            ],
+            "special_abilities": ["aggressive"],
+            "xp_reward": 100,
+            "gold_reward": "2d6",
+            "loot_table": ["axe_battle"],
+            "challenge_rating": 0.5
+        },
+        "orc_warchief": {
+            "id": "orc_warchief",
+            "name": "Orc Warchief",
+            "description": "A massive orc covered in war paint and scars.",
+            "hp": 93,
+            "ac": 16,
+            "stats": {
+                "strength": 18,
+                "dexterity": 12,
+                "constitution": 18,
+                "intelligence": 11,
+                "wisdom": 11,
+                "charisma": 16
+            },
+            "attacks": [
+                {"name": "Greataxe", "damage": "1d12+4", "type": "melee", "multiattack": 2}
+            ],
+            "special_abilities": ["aggressive", "gruumsh_fury"],
+            "xp_reward": 1100,
+            "gold_reward": "6d6",
+            "loot_table": ["axe_battle", "potion_health", "ring_protection"],
+            "challenge_rating": 4
+        },
+        "bandit": {
+            "id": "bandit",
+            "name": "Bandit",
+            "description": "A rough-looking human in worn leather armor.",
+            "hp": 11,
+            "ac": 12,
+            "stats": {
+                "strength": 11,
+                "dexterity": 12,
+                "constitution": 12,
+                "intelligence": 10,
+                "wisdom": 10,
+                "charisma": 10
+            },
+            "attacks": [
+                {"name": "Scimitar", "damage": "1d6+1", "type": "melee"},
+                {"name": "Light Crossbow", "damage": "1d8+1", "type": "ranged"}
+            ],
+            "xp_reward": 25,
+            "gold_reward": "2d6",
+            "loot_table": ["dagger_simple", "potion_health_minor"],
+            "challenge_rating": 0.125
+        },
+        "bandit_captain": {
+            "id": "bandit_captain",
+            "name": "Bandit Captain",
+            "description": "A scarred veteran who leads the bandits.",
+            "hp": 65,
+            "ac": 15,
+            "stats": {
+                "strength": 15,
+                "dexterity": 16,
+                "constitution": 14,
+                "intelligence": 14,
+                "wisdom": 11,
+                "charisma": 14
+            },
+            "attacks": [
+                {"name": "Scimitar", "damage": "1d6+3", "type": "melee", "multiattack": 3}
+            ],
+            "xp_reward": 450,
+            "gold_reward": "5d10",
+            "loot_table": ["sword_steel", "armor_chain", "potion_health"],
+            "challenge_rating": 2
+        },
+        "giant_spider": {
+            "id": "giant_spider",
+            "name": "Giant Spider",
+            "description": "A spider the size of a dog with glistening fangs.",
+            "hp": 26,
+            "ac": 14,
+            "stats": {
+                "strength": 14,
+                "dexterity": 16,
+                "constitution": 12,
+                "intelligence": 2,
+                "wisdom": 11,
+                "charisma": 4
+            },
+            "attacks": [
+                {"name": "Bite", "damage": "1d8+3", "type": "melee", "special": "poison"}
+            ],
+            "special_abilities": ["spider_climb", "web_sense", "web_walker"],
+            "xp_reward": 200,
+            "gold_reward": "0",
+            "loot_table": [],
+            "challenge_rating": 1
+        },
+        "troll": {
+            "id": "troll",
+            "name": "Troll",
+            "description": "A tall, lanky creature with rubbery green skin.",
+            "hp": 84,
+            "ac": 15,
+            "stats": {
+                "strength": 18,
+                "dexterity": 13,
+                "constitution": 20,
+                "intelligence": 7,
+                "wisdom": 9,
+                "charisma": 7
+            },
+            "attacks": [
+                {"name": "Claw", "damage": "2d6+4", "type": "melee", "multiattack": 2},
+                {"name": "Bite", "damage": "1d6+4", "type": "melee"}
+            ],
+            "special_abilities": ["regeneration"],
+            "vulnerabilities": ["fire", "acid"],
+            "xp_reward": 1800,
+            "gold_reward": "4d6",
+            "loot_table": ["potion_health_greater"],
+            "challenge_rating": 5
+        },
+        "young_dragon": {
+            "id": "young_dragon",
+            "name": "Young Dragon",
+            "description": "A dragon in its youth, still deadly beyond measure.",
+            "hp": 136,
+            "ac": 18,
+            "stats": {
+                "strength": 19,
+                "dexterity": 10,
+                "constitution": 17,
+                "intelligence": 12,
+                "wisdom": 11,
+                "charisma": 15
+            },
+            "attacks": [
+                {"name": "Bite", "damage": "2d10+4", "type": "melee"},
+                {"name": "Claw", "damage": "2d6+4", "type": "melee", "multiattack": 2}
+            ],
+            "special_abilities": ["breath_weapon", "frightful_presence"],
+            "immunities": ["fire"],
+            "xp_reward": 5900,
+            "gold_reward": "10d10",
+            "loot_table": ["gem_dragon", "sword_steel", "ring_protection", "potion_health_greater"],
+            "challenge_rating": 8
+        }
+    },
+    "special_abilities": {
+        "undead_fortitude": {
+            "description": "When reduced to 0 HP, make CON save DC 5 + damage taken. On success, drop to 1 HP instead."
+        },
+        "aggressive": {
+            "description": "Can move up to its speed toward a hostile creature it can see as a bonus action."
+        },
+        "gruumsh_fury": {
+            "description": "Deals extra 1d8 damage when HP is below half."
+        },
+        "spider_climb": {
+            "description": "Can climb difficult surfaces without needing an ability check."
+        },
+        "web_sense": {
+            "description": "Knows the exact location of any creature touching its web."
+        },
+        "web_walker": {
+            "description": "Ignores movement restrictions caused by webbing."
+        },
+        "regeneration": {
+            "description": "Regains 10 HP at the start of its turn unless it took fire or acid damage."
+        },
+        "breath_weapon": {
+            "description": "30 ft cone of fire, 12d6 damage, DC 15 DEX save for half."
+        },
+        "frightful_presence": {
+            "description": "Creatures within 120 ft must succeed DC 14 WIS save or be frightened."
+        }
+    }
+}

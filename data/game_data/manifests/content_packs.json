@@ -1,0 +1,12 @@
+{
+  "default_pack": "fantasy_core",
+  "packs": {
+    "fantasy_core": {
+      "id": "fantasy_core",
+      "theme": "fantasy",
+      "path": "packs/fantasy/core",
+      "label": "Fantasy Core",
+      "status": "active"
+    }
+  }
+}

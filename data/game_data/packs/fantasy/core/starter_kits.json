@@ -1,0 +1,162 @@
+{
+    "starting_gold": 100,
+    "class_kits": {
+        "warrior": {
+            "name": "Warrior's Arsenal",
+            "description": "Heavy armor and weapons for frontline combat",
+            "items": [
+                {"id": "sword_iron", "name": "Iron Sword", "type": "weapon", "equipped": true},
+                {"id": "armor_chain", "name": "Chain Mail", "type": "armor", "equipped": true},
+                {"id": "shield_wooden", "name": "Wooden Shield", "type": "armor", "equipped": true},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3},
+                {"id": "rations", "name": "Trail Rations", "type": "consumable", "quantity": 5}
+            ],
+            "gold_remaining": 15
+        },
+        "mage": {
+            "name": "Mage's Essentials",
+            "description": "Arcane implements and protective robes",
+            "items": [
+                {"id": "staff_wooden", "name": "Wooden Staff", "type": "weapon", "equipped": true},
+                {"id": "robe_mage", "name": "Mage's Robe", "type": "armor", "equipped": true},
+                {"id": "dagger_simple", "name": "Simple Dagger", "type": "weapon"},
+                {"id": "potion_mana_minor", "name": "Minor Mana Potion", "type": "consumable", "quantity": 2},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 20
+        },
+        "rogue": {
+            "name": "Rogue's Tools",
+            "description": "Light armor and precision weapons for stealth",
+            "items": [
+                {"id": "dagger_simple", "name": "Simple Dagger", "type": "weapon", "equipped": true, "quantity": 2},
+                {"id": "armor_leather", "name": "Leather Armor", "type": "armor", "equipped": true},
+                {"id": "bow_short", "name": "Shortbow", "type": "weapon"},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 5},
+                {"id": "rations", "name": "Trail Rations", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 25
+        },
+        "cleric": {
+            "name": "Cleric's Vestments",
+            "description": "Holy implements and protective gear",
+            "items": [
+                {"id": "staff_wooden", "name": "Wooden Staff", "type": "weapon", "equipped": true},
+                {"id": "armor_chain", "name": "Chain Mail", "type": "armor", "equipped": true},
+                {"id": "shield_wooden", "name": "Wooden Shield", "type": "armor", "equipped": true},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 3},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 20
+        },
+        "ranger": {
+            "name": "Ranger's Pack",
+            "description": "Versatile equipment for wilderness survival",
+            "items": [
+                {"id": "bow_short", "name": "Shortbow", "type": "weapon", "equipped": true},
+                {"id": "sword_rusty", "name": "Rusty Sword", "type": "weapon"},
+                {"id": "armor_leather", "name": "Leather Armor", "type": "armor", "equipped": true},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "rations", "name": "Trail Rations", "type": "consumable", "quantity": 10},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 20
+        },
+        "paladin": {
+            "name": "Paladin's Oath",
+            "description": "Heavy armor and holy weapons",
+            "items": [
+                {"id": "sword_iron", "name": "Iron Sword", "type": "weapon", "equipped": true},
+                {"id": "armor_chain", "name": "Chain Mail", "type": "armor", "equipped": true},
+                {"id": "shield_wooden", "name": "Wooden Shield", "type": "armor", "equipped": true},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 10
+        },
+        "bard": {
+            "name": "Bard's Collection",
+            "description": "Light armor and versatile equipment",
+            "items": [
+                {"id": "sword_rusty", "name": "Rusty Sword", "type": "weapon", "equipped": true},
+                {"id": "armor_leather", "name": "Leather Armor", "type": "armor", "equipped": true},
+                {"id": "dagger_simple", "name": "Simple Dagger", "type": "weapon"},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "potion_mana_minor", "name": "Minor Mana Potion", "type": "consumable", "quantity": 1},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 25
+        },
+        "warlock": {
+            "name": "Warlock's Pact",
+            "description": "Dark implements for eldritch power",
+            "items": [
+                {"id": "staff_wooden", "name": "Wooden Staff", "type": "weapon", "equipped": true},
+                {"id": "armor_leather", "name": "Leather Armor", "type": "armor", "equipped": true},
+                {"id": "dagger_simple", "name": "Simple Dagger", "type": "weapon"},
+                {"id": "potion_mana_minor", "name": "Minor Mana Potion", "type": "consumable", "quantity": 2},
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "type": "consumable", "quantity": 2},
+                {"id": "torch", "name": "Torch", "type": "consumable", "quantity": 3}
+            ],
+            "gold_remaining": 20
+        }
+    },
+    "shop_categories": {
+        "weapons": {
+            "name": "⚔️ Weapons",
+            "emoji": "⚔️",
+            "items": [
+                {"id": "sword_rusty", "name": "Rusty Sword", "price": 10, "damage": "1d6"},
+                {"id": "sword_iron", "name": "Iron Sword", "price": 50, "damage": "1d8"},
+                {"id": "dagger_simple", "name": "Simple Dagger", "price": 5, "damage": "1d4"},
+                {"id": "staff_wooden", "name": "Wooden Staff", "price": 15, "damage": "1d6"},
+                {"id": "bow_short", "name": "Shortbow", "price": 25, "damage": "1d6"},
+                {"id": "bow_long", "name": "Longbow", "price": 75, "damage": "1d8"},
+                {"id": "axe_battle", "name": "Battle Axe", "price": 100, "damage": "1d10"}
+            ]
+        },
+        "armor": {
+            "name": "🛡️ Armor",
+            "emoji": "🛡️",
+            "items": [
+                {"id": "armor_leather", "name": "Leather Armor", "price": 30, "ac": "+2 AC"},
+                {"id": "armor_chain", "name": "Chain Mail", "price": 75, "ac": "+4 AC"},
+                {"id": "robe_mage", "name": "Mage's Robe", "price": 60, "ac": "+1 AC, +3 Spell Power"},
+                {"id": "shield_wooden", "name": "Wooden Shield", "price": 15, "ac": "+1 AC"},
+                {"id": "shield_iron", "name": "Iron Shield", "price": 50, "ac": "+2 AC"}
+            ]
+        },
+        "potions": {
+            "name": "🧪 Potions",
+            "emoji": "🧪",
+            "items": [
+                {"id": "potion_health_minor", "name": "Minor Health Potion", "price": 25, "effect": "Heal 2d4+2"},
+                {"id": "potion_health", "name": "Health Potion", "price": 50, "effect": "Heal 4d4+4"},
+                {"id": "potion_mana_minor", "name": "Minor Mana Potion", "price": 25, "effect": "+10 Mana"},
+                {"id": "potion_mana", "name": "Mana Potion", "price": 50, "effect": "+25 Mana"},
+                {"id": "antidote", "name": "Antidote", "price": 35, "effect": "Cure Poison"}
+            ]
+        },
+        "supplies": {
+            "name": "🎒 Supplies",
+            "emoji": "🎒",
+            "items": [
+                {"id": "torch", "name": "Torch", "price": 1, "effect": "Light source"},
+                {"id": "rations", "name": "Trail Rations", "price": 2, "effect": "1 day food"}
+            ]
+        }
+    },
+    "recommended_purchases": {
+        "warrior": ["sword_iron", "armor_chain", "shield_wooden", "potion_health_minor"],
+        "mage": ["staff_wooden", "robe_mage", "potion_mana_minor", "potion_health_minor"],
+        "rogue": ["dagger_simple", "armor_leather", "bow_short", "potion_health_minor"],
+        "cleric": ["staff_wooden", "armor_chain", "shield_wooden", "potion_health_minor"],
+        "ranger": ["bow_short", "armor_leather", "sword_rusty", "rations"],
+        "paladin": ["sword_iron", "armor_chain", "shield_wooden", "potion_health_minor"],
+        "bard": ["sword_rusty", "armor_leather", "potion_health_minor", "potion_mana_minor"],
+        "warlock": ["staff_wooden", "armor_leather", "potion_mana_minor", "potion_health_minor"]
+    }
+}

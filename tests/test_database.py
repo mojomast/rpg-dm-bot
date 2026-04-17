@@ -173,6 +173,35 @@ class TestCharacters:
         assert char['hp'] == 0
 
 
+class TestSessionChannelBinding:
+    async def test_bind_session_channel_sets_last_active_and_primary(self, db):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Bound Session",
+            dm_user_id=12345,
+        )
+
+        ok = await db.bind_session_channel(session_id, 555, set_primary=True)
+        assert ok is True
+
+        session = await db.get_session(session_id)
+        assert session['last_active_channel_id'] == 555
+        assert session['primary_channel_id'] == 555
+
+    async def test_get_session_by_channel_prefers_bound_session(self, db):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name="Lookup Session",
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active')
+        await db.bind_session_channel(session_id, 777, set_primary=True)
+
+        session = await db.get_session_by_channel(67890, 777, statuses=['active'])
+        assert session is not None
+        assert session['id'] == session_id
+
+
 # =============================================================================
 # INVENTORY TESTS
 # =============================================================================

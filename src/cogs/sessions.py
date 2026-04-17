@@ -166,6 +166,27 @@ class Sessions(commands.Cog):
     def db(self):
         return self.bot.db
 
+    async def _begin_session_lifecycle(self, interaction: discord.Interaction, session_id: int, resume: bool = False):
+        """Delegate to GameMaster's canonical lifecycle helper when available."""
+        game_master = self.bot.get_cog('GameMaster')
+        if game_master and hasattr(game_master, 'begin_game'):
+            return await game_master.begin_game(interaction, session_id, resume=resume)
+
+        session = await self._get_guild_session(interaction.guild.id, session_id)
+        if not session:
+            await interaction.response.send_message("❌ Session not found!", ephemeral=True)
+            return
+
+        await self.db.update_session(session_id, status='active')
+        dm_chat = self.bot.get_cog('DMChat')
+        if dm_chat:
+            await dm_chat.bind_session_channel(interaction.guild.id, interaction.channel.id, session_id, set_primary=not resume)
+
+        if resume:
+            await interaction.response.send_message(f"▶️ Resumed **{session['name']}** in this channel.")
+        else:
+            await interaction.response.send_message(f"⚔️ Started **{session['name']}** in this channel.")
+
     async def _get_guild_session(self, guild_id: int, session_id: int) -> Optional[dict]:
         """Fetch a session only if it belongs to the current guild."""
         session = await self.db.get_session(session_id)
@@ -390,23 +411,7 @@ class Sessions(commands.Cog):
             )
             return
         
-        await self.db.update_session(session_id, status='active')
-        
-        players = await self.db.get_session_players(session_id)
-        
-        embed = discord.Embed(
-            title=f"⚔️ {session['name']} Has Begun!",
-            description="The adventure starts now! May fortune favor the brave.",
-            color=discord.Color.gold()
-        )
-        
-        embed.add_field(
-            name="Party Size",
-            value=f"{len(players)} adventurers",
-            inline=True
-        )
-        
-        await interaction.response.send_message(embed=embed)
+        await self._begin_session_lifecycle(interaction, session_id, resume=False)
     
     @session_group.command(name="pause", description="Pause a session (DM only)")
     @app_commands.describe(session_id="The ID of the session to pause")
@@ -428,11 +433,32 @@ class Sessions(commands.Cog):
             )
             return
         
-        await self.db.update_session(session_id, status='paused')
+        await self.db.update_session(
+            session_id,
+            status='paused',
+            last_active_channel_id=interaction.channel.id,
+            last_played=discord.utils.utcnow().isoformat()
+        )
         
         await interaction.response.send_message(
             f"⏸️ **{session['name']}** has been paused."
         )
+
+    @session_group.command(name="resume", description="Resume a paused session in this channel (DM only)")
+    @app_commands.describe(session_id="The ID of the session to resume")
+    async def resume_session(self, interaction: discord.Interaction, session_id: int):
+        """Resume a paused or inactive session in the current channel."""
+        session = await self._get_guild_session(interaction.guild.id, session_id)
+
+        if not session:
+            await interaction.response.send_message("❌ Session not found!", ephemeral=True)
+            return
+
+        if session['dm_user_id'] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the DM can resume the session!", ephemeral=True)
+            return
+
+        await self._begin_session_lifecycle(interaction, session_id, resume=True)
     
     @session_group.command(name="end", description="End a session (DM only)")
     @app_commands.describe(session_id="The ID of the session to end")

@@ -1,0 +1,197 @@
+{
+    "classes": {
+        "warrior": {
+            "id": "warrior",
+            "name": "Warrior",
+            "description": "A master of martial combat, skilled with a variety of weapons and armor.",
+            "hit_die": "d10",
+            "primary_stat": "strength",
+            "saving_throws": ["strength", "constitution"],
+            "starting_hp": 10,
+            "hp_per_level": 6,
+            "starting_equipment": ["sword_iron", "armor_chain", "shield_basic"],
+            "abilities": {
+                "1": ["second_wind", "fighting_style"],
+                "2": ["action_surge"],
+                "3": ["martial_archetype"],
+                "5": ["extra_attack"]
+            }
+        },
+        "mage": {
+            "id": "mage",
+            "name": "Mage",
+            "description": "A wielder of arcane magic, capable of bending reality to their will.",
+            "hit_die": "d6",
+            "primary_stat": "intelligence",
+            "saving_throws": ["intelligence", "wisdom"],
+            "starting_hp": 6,
+            "hp_per_level": 4,
+            "starting_equipment": ["staff_basic", "robe_apprentice"],
+            "spell_slots": {
+                "1": [2],
+                "2": [3],
+                "3": [4, 2],
+                "4": [4, 3],
+                "5": [4, 3, 2]
+            },
+            "abilities": {
+                "1": ["spellcasting", "arcane_recovery"],
+                "2": ["arcane_tradition"],
+                "5": ["potent_cantrip"]
+            }
+        },
+        "rogue": {
+            "id": "rogue",
+            "name": "Rogue",
+            "description": "A skilled trickster and striker, excelling at stealth and precision.",
+            "hit_die": "d8",
+            "primary_stat": "dexterity",
+            "saving_throws": ["dexterity", "intelligence"],
+            "starting_hp": 8,
+            "hp_per_level": 5,
+            "starting_equipment": ["dagger_fine", "armor_leather", "thieves_tools"],
+            "abilities": {
+                "1": ["sneak_attack", "thieves_cant", "expertise"],
+                "2": ["cunning_action"],
+                "3": ["roguish_archetype"],
+                "5": ["uncanny_dodge"]
+            }
+        },
+        "cleric": {
+            "id": "cleric",
+            "name": "Cleric",
+            "description": "A holy warrior empowered by divine magic and faith.",
+            "hit_die": "d8",
+            "primary_stat": "wisdom",
+            "saving_throws": ["wisdom", "charisma"],
+            "starting_hp": 8,
+            "hp_per_level": 5,
+            "starting_equipment": ["mace_basic", "armor_chain", "shield_basic", "holy_symbol"],
+            "spell_slots": {
+                "1": [2],
+                "2": [3],
+                "3": [4, 2],
+                "4": [4, 3],
+                "5": [4, 3, 2]
+            },
+            "abilities": {
+                "1": ["spellcasting", "divine_domain"],
+                "2": ["channel_divinity", "turn_undead"],
+                "5": ["destroy_undead"]
+            }
+        },
+        "ranger": {
+            "id": "ranger",
+            "name": "Ranger",
+            "description": "A wilderness warrior skilled in tracking, survival, and ranged combat.",
+            "hit_die": "d10",
+            "primary_stat": "dexterity",
+            "saving_throws": ["strength", "dexterity"],
+            "starting_hp": 10,
+            "hp_per_level": 6,
+            "starting_equipment": ["bow_long", "sword_short", "armor_leather"],
+            "spell_slots": {
+                "2": [2],
+                "3": [3],
+                "4": [3],
+                "5": [4, 2]
+            },
+            "abilities": {
+                "1": ["favored_enemy", "natural_explorer"],
+                "2": ["spellcasting", "fighting_style"],
+                "3": ["ranger_archetype", "primeval_awareness"],
+                "5": ["extra_attack"]
+            }
+        },
+        "paladin": {
+            "id": "paladin",
+            "name": "Paladin",
+            "description": "A holy knight bound by sacred oaths, combining martial prowess with divine magic.",
+            "hit_die": "d10",
+            "primary_stat": "strength",
+            "secondary_stat": "charisma",
+            "saving_throws": ["wisdom", "charisma"],
+            "starting_hp": 10,
+            "hp_per_level": 6,
+            "starting_equipment": ["sword_long", "armor_chain", "shield_basic", "holy_symbol"],
+            "spell_slots": {
+                "2": [2],
+                "3": [3],
+                "4": [3],
+                "5": [4, 2]
+            },
+            "abilities": {
+                "1": ["divine_sense", "lay_on_hands"],
+                "2": ["spellcasting", "fighting_style", "divine_smite"],
+                "3": ["sacred_oath", "channel_divinity"],
+                "5": ["extra_attack"]
+            }
+        },
+        "bard": {
+            "id": "bard",
+            "name": "Bard",
+            "description": "A charismatic performer whose music carries magical power.",
+            "hit_die": "d8",
+            "primary_stat": "charisma",
+            "saving_throws": ["dexterity", "charisma"],
+            "starting_hp": 8,
+            "hp_per_level": 5,
+            "starting_equipment": ["rapier_basic", "armor_leather", "lute"],
+            "spell_slots": {
+                "1": [2],
+                "2": [3],
+                "3": [4, 2],
+                "4": [4, 3],
+                "5": [4, 3, 2]
+            },
+            "abilities": {
+                "1": ["spellcasting", "bardic_inspiration"],
+                "2": ["jack_of_all_trades", "song_of_rest"],
+                "3": ["bard_college", "expertise"],
+                "5": ["font_of_inspiration"]
+            }
+        }
+    },
+    "abilities": {
+        "second_wind": {
+            "name": "Second Wind",
+            "description": "Regain 1d10 + level HP as a bonus action once per short rest."
+        },
+        "fighting_style": {
+            "name": "Fighting Style",
+            "description": "Choose a specialized combat technique for bonuses."
+        },
+        "action_surge": {
+            "name": "Action Surge",
+            "description": "Take an additional action once per short rest."
+        },
+        "extra_attack": {
+            "name": "Extra Attack",
+            "description": "Attack twice when taking the Attack action."
+        },
+        "sneak_attack": {
+            "name": "Sneak Attack",
+            "description": "Deal extra damage when you have advantage or an ally is near."
+        },
+        "cunning_action": {
+            "name": "Cunning Action",
+            "description": "Dash, Disengage, or Hide as a bonus action."
+        },
+        "spellcasting": {
+            "name": "Spellcasting",
+            "description": "Cast spells using spell slots."
+        },
+        "divine_smite": {
+            "name": "Divine Smite",
+            "description": "Expend spell slot to deal extra radiant damage on a hit."
+        },
+        "bardic_inspiration": {
+            "name": "Bardic Inspiration",
+            "description": "Grant an ally a d6 bonus die to add to a roll."
+        },
+        "lay_on_hands": {
+            "name": "Lay on Hands",
+            "description": "Heal with a pool of 5 × paladin level HP per long rest."
+        }
+    }
+}

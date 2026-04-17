@@ -1268,7 +1268,7 @@ class GameMaster(commands.Cog):
         
         await self.begin_game(interaction, session_id)
     
-    async def begin_game(self, interaction: discord.Interaction, session_id: int):
+    async def begin_game(self, interaction: discord.Interaction, session_id: int, resume: bool = False):
         """Actually begin the game with DM narration"""
         session = await self._get_guild_session(interaction.guild.id, session_id)
         
@@ -1294,13 +1294,18 @@ class GameMaster(commands.Cog):
         
         await interaction.response.defer()
         
-        # Mark session as active
-        await self.db.update_session(session_id, status='active')
+        # Mark session as active and bind this channel
+        await self.db.update_session(
+            session_id,
+            status='active',
+            last_active_channel_id=interaction.channel.id,
+            last_played=datetime.utcnow().isoformat(),
+        )
         
         # Clear chat history for this channel to start fresh with new game
         dm_chat_cog = self.bot.get_cog('DMChat')
         if dm_chat_cog:
-            dm_chat_cog.start_new_session(interaction.channel.id, session_id, interaction.guild.id)
+            await dm_chat_cog.bind_session_channel(interaction.guild.id, interaction.channel.id, session_id, set_primary=not resume)
         
         # Build detailed party info for the DM including backstories
         party_info = []
@@ -1383,18 +1388,20 @@ class GameMaster(commands.Cog):
         }
         
         # Save game state to database for persistence
-        await self.db.save_game_state(
-            session_id=session_id,
-            current_scene="Opening Scene",
-            current_location="Starting Location",
-            dm_notes=f"Adventure '{session['name']}' has begun. {session['description']}",
-            game_data={
+        state_updates = {
+            'dm_notes': f"Adventure '{session['name']}' has begun. {session['description']}",
+            'game_data': {
                 'party_info': [{'name': c['name'], 'race': c['race'], 'char_class': c['char_class'], 
                                'level': c['level'], 'backstory': c.get('backstory')} for c in party_info],
                 'session_name': session['name'],
                 'session_description': session['description']
             }
-        )
+        }
+        if not resume:
+            state_updates['current_scene'] = 'Opening Scene'
+            state_updates['current_location'] = 'Starting Location'
+
+        await self.db.save_game_state(session_id=session_id, **state_updates)
         
         # DM the session creator
         try:
@@ -1489,7 +1496,12 @@ class GameMaster(commands.Cog):
             )
             return
         
-        await self.db.update_session(session_id, status='paused')
+        await self.db.update_session(
+            session_id,
+            status='paused',
+            last_active_channel_id=interaction.channel.id,
+            last_played=datetime.utcnow().isoformat(),
+        )
         
         await interaction.response.send_message(
             f"⏸️ **{session['name']}** has been paused.\n"

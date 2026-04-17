@@ -455,6 +455,11 @@ class DMChat(commands.Cog):
         self.histories[self._history_key(guild_id, channel_id)] = {'session_id': session_id, 'messages': []}
         logger.info(f"Started new session {session_id} for channel {channel_id}, cleared history")
 
+    async def bind_session_channel(self, guild_id: int, channel_id: int, session_id: int, set_primary: bool = False):
+        """Persist and cache the active channel binding for a session."""
+        await self.db.bind_session_channel(session_id, channel_id, set_primary=set_primary)
+        self.histories[self._history_key(guild_id, channel_id)] = {'session_id': session_id, 'messages': []}
+
     async def resolve_session(self, guild_id: int, user_id: int = None, channel_id: int = None):
         """Resolve the active session for this channel/user context."""
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
@@ -500,14 +505,21 @@ class DMChat(commands.Cog):
         2. User's active session from database
         3. First active session for the guild (fallback)
         """
-        # FIRST: Check if this channel has a session set (most reliable for new games)
+        # FIRST: Check persisted DB-backed channel binding
+        if channel_id:
+            channel_session = await self.db.get_session_by_channel(guild_id, channel_id, statuses=['active', 'paused', 'inactive'])
+            if channel_session:
+                logger.debug(f"Using DB channel-bound session {channel_session['id']} for channel {channel_id}")
+                return channel_session['id']
+
+        # SECOND: Check in-memory channel history cache
         if channel_id:
             channel_session = self.get_channel_session_id(guild_id, channel_id)
             if channel_session:
                 logger.debug(f"Using channel's stored session {channel_session} for channel {channel_id}")
                 return channel_session
         
-        # SECOND: Try to get the session the user is actually in
+        # THIRD: Try to get the session the user is actually in
         if user_id:
             user_session = await self.db.get_user_active_session(guild_id, user_id)
             if user_session:
@@ -540,6 +552,8 @@ class DMChat(commands.Cog):
         channel_id = channel.id
         first_user_id = messages[0]['user_id']
         session_id = await self.get_active_session_id(guild_id, first_user_id, channel_id)
+        if session_id:
+            await self.db.bind_session_channel(session_id, channel_id)
         self.last_activity[channel_id] = datetime.utcnow()
 
         history = self.get_history(guild_id, channel_id, session_id)
@@ -571,6 +585,8 @@ class DMChat(commands.Cog):
         guild_id = guild.id
         user_id = author.id
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
+        if session_id:
+            await self.db.bind_session_channel(session_id, channel_id)
         self.last_activity[channel_id] = datetime.utcnow()
 
         history = self.get_history(guild_id, channel_id, session_id)

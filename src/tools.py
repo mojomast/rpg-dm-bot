@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 import json
 import logging
 
+from src.content_packs import load_content_file, load_session_content_file
 from src.tool_schemas import TOOLS_SCHEMA, get_tool_names
 from src.mechanics_tracker import get_tracker, MechanicType
 
@@ -97,6 +98,11 @@ class ToolExecutor:
     def __init__(self, db):
         self.db = db
         self.dice = DiceRoller()
+
+    async def _load_theme_content(self, context: Dict[str, Any], filename: str) -> Dict[str, Any]:
+        """Load static content from the active session's content pack, defaulting to fantasy_core."""
+        session = await self._get_session_for_context(context)
+        return load_session_content_file(session, filename)
 
     async def _get_context_character(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Prefer an explicit character in context before active-character lookup."""
@@ -1195,9 +1201,6 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _cast_spell(self, context: Dict, args: Dict) -> str:
         """Cast a spell for a character"""
-        import json
-        import os
-        
         char_id = args.get('character_id')
         spell_id = args.get('spell_id')
         slot_level = args.get('slot_level')
@@ -1207,10 +1210,8 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             return "Error: character_id and spell_id required"
         
         # Load spell data
-        spells_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'game_data', 'spells.json')
         try:
-            with open(spells_file, 'r', encoding='utf-8') as f:
-                spells_data = json.load(f)
+            spells_data = await self._load_theme_content(context, 'spells.json')
         except FileNotFoundError:
             return "Error: Spell data not found"
         
@@ -1398,9 +1399,6 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
     
     async def _use_ability(self, args: Dict) -> str:
         """Use a class ability"""
-        import json
-        import os
-        
         char_id = args.get('character_id')
         ability_id = args.get('ability_id')
         target = args.get('target')
@@ -1425,10 +1423,14 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
         char_name = char['name'] if char else "Character"
         
         # Load ability data for effects
-        classes_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'game_data', 'classes.json')
         try:
-            with open(classes_file, 'r', encoding='utf-8') as f:
-                classes_data = json.load(f)
+            character = await self.db.get_character(char_id)
+            session = await self._get_session_for_context({
+                'session_id': character.get('session_id') if character else None,
+                'guild_id': character.get('guild_id') if character else None,
+                'user_id': character.get('user_id') if character else None,
+            })
+            classes_data = load_session_content_file(session, 'classes.json')
         except FileNotFoundError:
             classes_data = {}
         
@@ -2478,9 +2480,9 @@ Points of Interest: {pois}"""
         
         # Load NPC templates
         try:
-            with open('data/game_data/npc_templates.json', 'r') as f:
-                templates = json.load(f)
-        except:
+            templates_data = await self._load_theme_content(context, 'npc_templates.json')
+            templates = templates_data.get('templates', templates_data)
+        except Exception:
             templates = {}
         
         created_npcs = []
@@ -2804,9 +2806,9 @@ Points of Interest: {pois}"""
         party_size = party_size or 4
         
         try:
-            with open('data/game_data/enemies.json', 'r') as f:
-                enemies_data = json.load(f)
-        except:
+            enemies_payload = await self._load_theme_content(context, 'enemies.json')
+            enemies_data = enemies_payload.get('enemies', enemies_payload)
+        except Exception:
             enemies_data = {}
         
         lines = [f"⚔️ **Generated Encounter**"]
@@ -2962,9 +2964,8 @@ Points of Interest: {pois}"""
         party_level = party_level or 1
         
         try:
-            with open('data/game_data/items.json', 'r') as f:
-                items_data = json.load(f)
-        except:
+            items_data = await self._load_theme_content(context, 'items.json')
+        except Exception:
             items_data = {}
         
         gold_ranges = {

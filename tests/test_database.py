@@ -890,6 +890,19 @@ class TestMemoryAndConversation:
         assert messages[0]['role'] == "user"
         assert messages[1]['role'] == "assistant"
 
+    async def test_conversation_history_by_session(self, db_with_session):
+        """Test loading recent conversation history by session and user."""
+        db, session_id = db_with_session
+
+        await db.save_message(12345, 67890, 11111, "user", "First", session_id=session_id)
+        await db.save_message(12345, 67890, 22222, "assistant", "Second", session_id=session_id)
+        await db.save_message(12345, 67890, 33333, "user", "Third", session_id=session_id)
+        await db.save_message(12345, 67890, 44444, "user", "Other session", session_id=session_id + 1)
+
+        messages = await db.get_recent_messages_by_session(12345, session_id, limit=20)
+
+        assert [message['content'] for message in messages] == ["First", "Second", "Third"]
+
     async def test_web_identity_storage(self, db):
         """Test creating and validating a web identity."""
         identity = "123e4567-e89b-12d3-a456-426614174000"

@@ -280,6 +280,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     guild_id INTEGER NOT NULL,
+                    session_id INTEGER,
                     channel_id INTEGER NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
@@ -640,6 +641,17 @@ class Database:
             
             if 'combat_stats' not in columns:
                 await db.execute("ALTER TABLE npcs ADD COLUMN combat_stats TEXT DEFAULT '{}'")
+                await db.commit()
+        except Exception:
+            pass
+
+        # Migration 4: Add session_id to conversation_history if it doesn't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(conversation_history)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'session_id' not in columns:
+                await db.execute("ALTER TABLE conversation_history ADD COLUMN session_id INTEGER")
                 await db.commit()
         except Exception:
             pass
@@ -2447,20 +2459,20 @@ class Database:
     # ========================================================================
     
     async def save_message(self, user_id: int, guild_id: int, channel_id: int,
-                           role: str, content: str) -> int:
+                           role: str, content: str, session_id: int = None) -> int:
         """Save a message to conversation history"""
         now = datetime.utcnow().isoformat()
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO conversation_history (user_id, guild_id, channel_id, role, content, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, guild_id, channel_id, role, content, now))
+                INSERT INTO conversation_history (user_id, guild_id, session_id, channel_id, role, content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, guild_id, session_id, channel_id, role, content, now))
             await db.commit()
             return cursor.lastrowid
     
     async def get_recent_messages(self, user_id: int, guild_id: int, channel_id: int,
-                                 limit: int = 10) -> List[Dict[str, Any]]:
+                                  limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent messages from conversation history"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -2469,6 +2481,19 @@ class Database:
                 WHERE user_id = ? AND guild_id = ? AND channel_id = ?
                 ORDER BY created_at DESC LIMIT ?
             """, (user_id, guild_id, channel_id, limit))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in reversed(rows)]
+
+    async def get_recent_messages_by_session(self, user_id: int, session_id: int,
+                                             limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent messages for a user within a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM conversation_history
+                WHERE user_id = ? AND session_id = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (user_id, session_id, limit))
             rows = await cursor.fetchall()
             return [dict(row) for row in reversed(rows)]
 

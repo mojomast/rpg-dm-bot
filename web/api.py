@@ -389,17 +389,40 @@ async def chat_with_dm(
         character_id=character['id'] if character else None,
     )
 
+    persisted_history = await db.get_recent_messages_by_session(web_user_id, request.session_id, limit=20)
+    history = [
+        {
+            "role": message["role"],
+            "content": message["content"],
+        }
+        for message in persisted_history
+    ]
+
     result = await handler.process_single_message(
         guild_id=session['guild_id'],
         channel_id=synthetic_channel_id,
         actor=actor,
         user_message=request.message,
-        history=[msg.dict() for msg in request.chat_history],
+        history=history,
         session_id=request.session_id,
     )
 
-    await db.save_message(web_user_id, session['guild_id'], synthetic_channel_id, 'user', result['user_message']['content'])
-    await db.save_message(web_user_id, session['guild_id'], synthetic_channel_id, 'assistant', result['assistant_message']['content'])
+    await db.save_message(
+        web_user_id,
+        session['guild_id'],
+        synthetic_channel_id,
+        'user',
+        result['user_message']['content'],
+        session_id=request.session_id,
+    )
+    await db.save_message(
+        web_user_id,
+        session['guild_id'],
+        synthetic_channel_id,
+        'assistant',
+        result['assistant_message']['content'],
+        session_id=request.session_id,
+    )
 
     updated_state = await db.get_full_session_state(request.session_id)
     return ChatResponse(

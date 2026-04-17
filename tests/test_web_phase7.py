@@ -290,10 +290,36 @@ async def test_canonical_location_connections_crud_endpoints(db):
     updated = await db.get_location_connection(created['id'])
     assert updated['direction'] == 'south'
     assert updated['hidden'] == 1
+    assert updated['to_location_id'] == target_id
 
     deleted = await api_module.delete_location_connection(created['id'])
     assert deleted['message'] == 'Location connection deleted'
     assert await db.get_location_connection(created['id']) is None
+
+
+@pytest.mark.asyncio
+async def test_canonical_location_connection_update_can_change_target(db):
+    api_module.db = db
+
+    session_id = await db.create_session(guild_id=67890, name='Connection Retarget', dm_user_id=12345)
+    origin_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='Bridge')
+    old_target_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='North Road')
+    new_target_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='South Road')
+
+    created = await api_module.create_location_connection(api_module.LocationConnectionCreate(
+        from_location_id=origin_id,
+        to_location_id=old_target_id,
+        direction='road',
+    ))
+
+    await api_module.update_location_connection(
+        created['id'],
+        api_module.LocationConnectionUpdate(to_location_id=new_target_id, travel_time=2),
+    )
+
+    updated = await db.get_location_connection(created['id'])
+    assert updated['to_location_id'] == new_target_id
+    assert updated['travel_time'] == 2
 
 
 @pytest.mark.asyncio
@@ -326,6 +352,43 @@ async def test_npc_create_and_update_use_canonical_location_id(db):
     updated_npc = await db.get_npc(created['id'])
     assert updated_npc['location_id'] == inn_id
     assert updated_npc['location'] == 'Copper Cup Inn'
+
+
+@pytest.mark.asyncio
+async def test_spawn_monster_template_endpoint_adds_enemy_participants(db):
+    api_module.db = db
+    api_module.tools = api_module.ToolExecutor(db)
+
+    session_id = await db.create_session(
+        guild_id=67890,
+        name='Monster Spawn Session',
+        dm_user_id=12345,
+        description='Template spawn test',
+    )
+    await db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+    combat_id = await db.create_combat(guild_id=67890, channel_id=555, session_id=session_id)
+
+    result = await api_module.spawn_combat_template_enemy(
+        combat_id,
+        api_module.CombatMonsterSpawn(template_id='goblin', count=2),
+    )
+
+    assert len(result['combatant_ids']) == 2
+    participants = await db.get_combatants(combat_id)
+    enemies = [participant for participant in participants if participant['participant_type'] == 'enemy']
+    assert len(enemies) == 2
+    assert enemies[0]['armor_class'] == 12
+    assert enemies[0]['combat_stats']['template_id'] == 'goblin'
+
+
+@pytest.mark.asyncio
+async def test_enemy_templates_endpoint_lists_content_pack_monsters():
+    response = await api_module.get_enemy_templates()
+
+    assert response['templates']
+    goblin = next(template for template in response['templates'] if template['id'] == 'goblin')
+    assert goblin['name'] == 'Goblin'
+    assert goblin['ac'] == 12
 
 
 @pytest.mark.asyncio

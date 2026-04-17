@@ -190,6 +190,8 @@ const api = {
     createLocationConnection: (data: any) => apiCall<{ id: number }>('/location-connections', { method: 'POST', body: JSON.stringify(data) }),
     updateLocationConnection: (id: number, data: any) => apiCall<any>(`/location-connections/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteLocationConnection: (id: number) => apiCall<any>(`/location-connections/${id}`, { method: 'DELETE' }),
+    getMonsterTemplates: (contentPackId?: string) => apiCall<any>(`/templates/enemies${contentPackId ? `?content_pack_id=${encodeURIComponent(contentPackId)}` : ''}`),
+    spawnMonsterTemplate: (combatId: number, data: any) => apiCall<any>(`/combat/${combatId}/spawn-template`, { method: 'POST', body: JSON.stringify(data) }),
     connectLocations: (fromId: number, toId: number, direction?: string, travelTime?: number, hidden?: boolean) => {
         let url = `/locations/${fromId}/connect/${toId}`;
         const params = new URLSearchParams();
@@ -1043,6 +1045,9 @@ async function updateCharacter(event: Event): Promise<void> {
 
 let currentCharacterIdForInventory: number | null = null;
 let npcLocationOptionsLoaded = false;
+let currentLocationConnectionMode: 'create' | 'edit' = 'create';
+let currentCombatSessionId: number | null = null;
+let currentMonsterTemplates: any[] = [];
 
 async function populateNPCLocationOptions(selectedLocationId?: number | null): Promise<void> {
     const data = await api.getLocations();
@@ -3036,6 +3041,9 @@ function renderCombatPanel(combat: any): string {
     return `
         <div class="detail-stack">
             <div class="detail-list-item"><strong>Status</strong><span>Round ${combat.round_number || 1}, Turn ${combat.current_turn || 0}</span></div>
+            <div class="detail-actions">
+                <button class="btn btn-small btn-primary" onclick="openMonsterSpawnEditor(${combat.id}, ${combat.session_id || 0})">👹 Spawn Monster</button>
+            </div>
             <div class="detail-list">
                 ${(combat.participants || []).map((participant: any, index: number) => {
                     const hpPercent = Math.max(0, Math.min(100, Math.round(((participant.current_hp || 0) / Math.max(1, participant.max_hp || 1)) * 100)));
@@ -3111,7 +3119,7 @@ function renderLocationConnectionsPanel(connections: any[]): string {
                     <div class="direction">${escapeHtml(connection.direction || 'path')}</div>
                     <div class="target">${escapeHtml(connection.to_name || connection.name || 'Unknown')}</div>
                     <div class="meta">${escapeHtml(connection.location_type || 'unknown')} • ${connection.travel_time || 1} travel unit(s)</div>
-                    ${connection.connection_id ? `<div class="entity-actions"><button class="btn btn-small btn-danger" onclick="deleteLocationConnection(${connection.connection_id}, ${connection.from_location_id || 0})">Delete</button></div>` : ''}
+                    ${connection.connection_id ? `<div class="entity-actions"><button class="btn btn-small btn-secondary" onclick="editLocationConnection(${connection.connection_id}, ${connection.from_location_id || 0})">Edit</button><button class="btn btn-small btn-danger" onclick="deleteLocationConnection(${connection.connection_id}, ${connection.from_location_id || 0})">Delete</button></div>` : ''}
                 </div>
             `).join('')}
             </div>
@@ -3132,14 +3140,51 @@ async function openLocationConnectionEditor(locationId: number): Promise<void> {
             .map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`)
             .join('') || '<option value="">No destinations available</option>';
 
+        currentLocationConnectionMode = 'create';
         (document.getElementById('location-connection-from-id') as HTMLInputElement).value = String(locationId);
+        (document.getElementById('location-connection-id') as HTMLInputElement).value = '';
         (document.getElementById('location-connection-direction') as HTMLInputElement).value = 'path';
         (document.getElementById('location-connection-travel-time') as HTMLInputElement).value = '1';
         (document.getElementById('location-connection-hidden') as HTMLInputElement).checked = false;
         document.querySelector('#location-connection-modal .modal-header h2')!.textContent = `🧭 Add Connection from ${location.name}`;
+        (document.getElementById('location-connection-submit') as HTMLButtonElement).textContent = 'Create Connection';
         openModal('location-connection-modal');
     } catch (error) {
         showToast('Failed to open location connection editor', 'error');
+    }
+}
+
+async function editLocationConnection(connectionId: number, locationId: number): Promise<void> {
+    try {
+        const [connectionData, locationsData, location] = await Promise.all([
+            api.listLocationConnections(locationId),
+            api.getLocations(),
+            api.getLocation(locationId),
+        ]);
+        const connection = (connectionData.connections || []).find((item: any) => item.id === connectionId);
+        if (!connection) {
+            showToast('Connection not found', 'error');
+            return;
+        }
+
+        const targetSelect = document.getElementById('location-connection-target') as HTMLSelectElement;
+        targetSelect.innerHTML = (locationsData.locations || [])
+            .filter((loc: any) => loc.id !== locationId)
+            .map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`)
+            .join('') || '<option value="">No destinations available</option>';
+
+        currentLocationConnectionMode = 'edit';
+        (document.getElementById('location-connection-from-id') as HTMLInputElement).value = String(connection.from_location_id || locationId);
+        (document.getElementById('location-connection-id') as HTMLInputElement).value = String(connection.id);
+        targetSelect.value = String(connection.to_location_id);
+        (document.getElementById('location-connection-direction') as HTMLInputElement).value = connection.direction || 'path';
+        (document.getElementById('location-connection-travel-time') as HTMLInputElement).value = String(connection.travel_time || 1);
+        (document.getElementById('location-connection-hidden') as HTMLInputElement).checked = Boolean(connection.hidden);
+        document.querySelector('#location-connection-modal .modal-header h2')!.textContent = `🧭 Edit Connection from ${location.name}`;
+        (document.getElementById('location-connection-submit') as HTMLButtonElement).textContent = 'Save Connection';
+        openModal('location-connection-modal');
+    } catch (error) {
+        showToast('Failed to load location connection', 'error');
     }
 }
 
@@ -3147,6 +3192,7 @@ async function saveLocationConnection(event: Event): Promise<void> {
     event.preventDefault();
 
     const fromId = parseInt((document.getElementById('location-connection-from-id') as HTMLInputElement).value);
+    const connectionId = parseInt((document.getElementById('location-connection-id') as HTMLInputElement).value);
     const toId = parseInt((document.getElementById('location-connection-target') as HTMLSelectElement).value);
     const direction = (document.getElementById('location-connection-direction') as HTMLInputElement).value || 'path';
     const travelTime = parseInt((document.getElementById('location-connection-travel-time') as HTMLInputElement).value) || 1;
@@ -3158,19 +3204,28 @@ async function saveLocationConnection(event: Event): Promise<void> {
     }
 
     try {
-        await api.createLocationConnection({
-            from_location_id: fromId,
-            to_location_id: toId,
-            direction,
-            travel_time: travelTime,
-            hidden,
-            bidirectional: true,
-        });
+        if (currentLocationConnectionMode === 'edit' && connectionId) {
+            await api.updateLocationConnection(connectionId, {
+                to_location_id: toId,
+                direction,
+                travel_time: travelTime,
+                hidden,
+            });
+        } else {
+            await api.createLocationConnection({
+                from_location_id: fromId,
+                to_location_id: toId,
+                direction,
+                travel_time: travelTime,
+                hidden,
+                bidirectional: true,
+            });
+        }
         closeModal('location-connection-modal');
-        showToast('Location connection created', 'success');
+        showToast(currentLocationConnectionMode === 'edit' ? 'Location connection updated' : 'Location connection created', 'success');
         await showLocationDetails(fromId);
     } catch (error) {
-        showToast('Failed to create location connection', 'error');
+        showToast(currentLocationConnectionMode === 'edit' ? 'Failed to update location connection' : 'Failed to create location connection', 'error');
     }
 }
 
@@ -3183,6 +3238,76 @@ async function deleteLocationConnection(connectionId: number, locationId: number
         await showLocationDetails(locationId);
     } catch (error) {
         showToast('Failed to delete location connection', 'error');
+    }
+}
+
+function renderMonsterTemplatePreview(templateId: string): void {
+    const container = document.getElementById('combat-monster-preview');
+    if (!container) {
+        return;
+    }
+
+    const template = currentMonsterTemplates.find((item: any) => item.id === templateId);
+    if (!template) {
+        container.innerHTML = '<p class="empty-hint">Choose a monster template to preview it.</p>';
+        return;
+    }
+
+    container.innerHTML = renderSimpleList([
+        {
+            title: template.name || template.id || 'Monster',
+            meta: `HP ${template.hp || '?'} • AC ${template.ac || template.armor_class || '?'} • CR ${template.challenge_rating ?? '?'}`,
+        },
+    ]);
+}
+
+async function openMonsterSpawnEditor(combatId: number, sessionId: number): Promise<void> {
+    try {
+        currentCombatSessionId = sessionId || null;
+        const [combat, templatesData] = await Promise.all([
+            api.getCombat(combatId),
+            api.getMonsterTemplates(),
+        ]);
+
+        currentMonsterTemplates = templatesData.templates || [];
+        const select = document.getElementById('combat-monster-template') as HTMLSelectElement;
+        select.innerHTML = currentMonsterTemplates.map((template: any) => `
+            <option value="${escapeHtml(template.id)}">${escapeHtml(template.name || template.id)} (${template.challenge_rating ?? '?'})</option>
+        `).join('') || '<option value="">No monster templates available</option>';
+
+        (document.getElementById('combat-monster-combat-id') as HTMLInputElement).value = String(combat.id);
+        (document.getElementById('combat-monster-count') as HTMLInputElement).value = '1';
+        renderMonsterTemplatePreview(select.value);
+        openModal('combat-monster-modal');
+    } catch (error) {
+        showToast('Failed to load monster templates', 'error');
+    }
+}
+
+async function spawnMonsterTemplate(event: Event): Promise<void> {
+    event.preventDefault();
+
+    const combatId = parseInt((document.getElementById('combat-monster-combat-id') as HTMLInputElement).value);
+    const templateId = (document.getElementById('combat-monster-template') as HTMLSelectElement).value;
+    const count = parseInt((document.getElementById('combat-monster-count') as HTMLInputElement).value) || 1;
+
+    if (!combatId || !templateId) {
+        showToast('Choose a monster template', 'error');
+        return;
+    }
+
+    try {
+        await api.spawnMonsterTemplate(combatId, {
+            template_id: templateId,
+            count,
+        });
+        closeModal('combat-monster-modal');
+        showToast('Monster spawned into combat', 'success');
+        if (currentCombatSessionId) {
+            await viewSession(currentCombatSessionId);
+        }
+    } catch (error) {
+        showToast('Failed to spawn monster', 'error');
     }
 }
 

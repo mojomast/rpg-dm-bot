@@ -735,6 +735,8 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: story item and story event web/API contracts now accept canonical editor payloads and normalize legacy status/discovery aliases across `web/frontend/src/main.ts`, `web/frontend/index.html`, `web/api.py`, and `src/database.py`
 - ✅ COMPLETE: canonical `GET/POST/PATCH/DELETE /api/location-connections` now exists in `web/api.py` with DB-backed CRUD and compatibility wrappers preserved for the legacy location-scoped connect routes
 - ✅ COMPLETE: NPC admin now uses canonical `location_id` assignment with synced display names and location occupant visibility across `src/database.py`, `web/api.py`, `web/frontend/src/main.ts`, and `web/frontend/index.html`
+- ✅ COMPLETE: web location admin now supports editing existing canonical location connections through the shared connection modal and canonical PATCH flow in `web/frontend/src/main.ts`, `web/frontend/index.html`, and `web/api.py`
+- ✅ COMPLETE: web/admin combat now supports template-backed monster spawning from content-pack `enemies.json` using shared canonical combatant normalization in `src/tools.py`, `web/api.py`, and `web/frontend/src/main.ts`
 - ✅ COMPLETE: Discord runtime pack-awareness is complete for GM interview creation, spell reads, skill reads, inventory/item flows, and core tool/web reads for the current v1 slice set
 - ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
 - ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics

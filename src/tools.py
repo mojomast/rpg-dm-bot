@@ -563,6 +563,65 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             armor_class=armor_class,
             combat_stats=stats,
         )
+
+    async def load_enemy_template(self, template_id: str, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Load a monster template from the active content pack."""
+        enemies_payload = await self._load_theme_content(context or {}, 'enemies.json')
+        enemies = enemies_payload.get('enemies', {}) if isinstance(enemies_payload, dict) else {}
+        template = enemies.get(template_id)
+        if not template:
+            return None
+        return dict(template)
+
+    async def list_enemy_templates(self, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """List available monster templates from the active content pack."""
+        enemies_payload = await self._load_theme_content(context or {}, 'enemies.json')
+        enemies = enemies_payload.get('enemies', {}) if isinstance(enemies_payload, dict) else {}
+        templates = []
+        for template_id, template in enemies.items():
+            row = dict(template)
+            row.setdefault('id', template_id)
+            templates.append(row)
+        return sorted(templates, key=lambda item: item.get('name') or item.get('id') or '')
+
+    async def spawn_enemy_template_combatants(
+        self,
+        encounter_id: int,
+        template_id: str,
+        count: int = 1,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> List[int]:
+        """Spawn one or more combatants from a content-pack enemy template."""
+        template = await self.load_enemy_template(template_id, context)
+        if not template:
+            raise ValueError('Enemy template not found')
+
+        count = max(1, int(count or 1))
+        hp = int(template.get('hp') or 1)
+        armor_class = int(template.get('ac') or template.get('armor_class') or 10)
+        stats = dict(template.get('stats') or {})
+        stats.setdefault('template_id', template.get('id') or template_id)
+        stats.setdefault('description', template.get('description'))
+        stats.setdefault('attacks', template.get('attacks', []))
+        stats.setdefault('challenge_rating', template.get('challenge_rating'))
+        stats.setdefault('xp_reward', template.get('xp_reward'))
+        stats.setdefault('loot_table', template.get('loot_table', []))
+
+        created_ids = []
+        base_name = template.get('name') or template_id.replace('_', ' ').title()
+        for index in range(count):
+            name = base_name if count == 1 else f"{base_name} {index + 1}"
+            combatant_id = await self.add_enemy_combatant(
+                encounter_id,
+                name,
+                hp,
+                initiative_bonus=0,
+                stats=stats,
+                armor_class=armor_class,
+            )
+            created_ids.append(combatant_id)
+
+        return created_ids
     
     async def _start_combat(self, context: Dict, args: Dict) -> str:
         """Start a combat encounter"""

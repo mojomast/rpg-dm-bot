@@ -959,3 +959,41 @@ class TestTravelTools:
         assert "not directly connected" in result
         state = await db.get_game_state(session_id)
         assert state['current_location_id'] == town_id
+
+
+class TestMonsterTemplateTools:
+    async def test_spawn_enemy_template_combatants_uses_pack_stats(self, tool_executor, db, mock_context):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name='Template Combat',
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+        encounter_id = await db.create_combat(guild_id=67890, channel_id=999, session_id=session_id)
+
+        created_ids = await tool_executor.spawn_enemy_template_combatants(
+            encounter_id,
+            'goblin',
+            count=2,
+            context={'session_id': session_id, 'guild_id': 67890},
+        )
+
+        assert len(created_ids) == 2
+        participants = await db.get_combatants(encounter_id)
+        enemies = [participant for participant in participants if participant['participant_type'] == 'enemy']
+        assert len(enemies) == 2
+        assert enemies[0]['armor_class'] == 12
+        assert enemies[0]['combat_stats']['template_id'] == 'goblin'
+
+    async def test_list_enemy_templates_returns_sorted_templates(self, tool_executor, db):
+        session_id = await db.create_session(
+            guild_id=67890,
+            name='Template Listing',
+            dm_user_id=12345,
+        )
+        await db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+
+        templates = await tool_executor.list_enemy_templates({'session_id': session_id, 'guild_id': 67890})
+
+        assert templates
+        assert any(template['id'] == 'goblin' for template in templates)

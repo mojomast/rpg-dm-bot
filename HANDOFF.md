@@ -2,7 +2,7 @@
 
 **Date:** April 17, 2026  
 **Project:** RPG Dungeon Master Discord Bot  
-**Status:** Recent hardening complete, with canonical location-connections and NPC location admin landed; larger campaign architecture still partial
+**Status:** Recent hardening complete, with location-connection editing and template-backed monster spawning landed; larger campaign architecture still partial
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
@@ -183,6 +183,44 @@ npm run build
 
 Results:
 - 78 focused tests passed
+- frontend TypeScript build passed
+
+### Location Connection Editing and Monster Template Spawn (same day follow-up)
+
+This pass completed the next requested pair after canonical location-connections: editable connection management in the web UI, then a bounded monster foundation slice via template-backed combat spawning.
+
+#### Changes Made
+
+**`web/frontend/src/main.ts` + `web/frontend/index.html`:**
+- Reused the location connection modal for both create and edit flows against the canonical connection resource
+- Added explicit edit controls for existing location connections in the location detail view
+- Added a compact combat monster-spawn modal to the session combat viewer
+- Added monster template preview and spawn actions for active combat
+
+**`src/tools.py`:**
+- Added shared enemy-template loading/listing helpers backed by the active content pack
+- Added canonical template-to-combatant spawn normalization so web/admin monster spawns reuse the same enemy combatant path
+
+**`web/api.py`:**
+- Added `GET /api/templates/enemies`
+- Added `POST /api/combat/{combat_id}/spawn-template`
+- Kept combat template spawning bound to session/content-pack context
+
+**Tests:**
+- Added API regression coverage for location connection retarget/edit behavior
+- Added tool/API regression coverage for template-backed monster listing and combat spawning
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_web_phase7.py tests/test_tools.py -q
+npm run build
+```
+
+Results:
+- 67 focused tests passed
 - frontend TypeScript build passed
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion

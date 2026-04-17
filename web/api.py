@@ -156,6 +156,11 @@ class LocationConnectionUpdate(BaseModel):
     hidden: Optional[bool] = None
     bidirectional: Optional[bool] = None
 
+
+class CombatMonsterSpawn(BaseModel):
+    template_id: str
+    count: int = 1
+
 class StoryItemCreate(BaseModel):
     guild_id: int
     name: str
@@ -1146,6 +1151,21 @@ async def get_npc_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     except Exception:
         return {"templates": {}}
 
+
+@app.get("/api/templates/enemies")
+async def get_enemy_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
+    """Get monster templates for combat spawning."""
+    try:
+        data = load_content_file("enemies.json", content_pack_id)
+        templates = []
+        for template_id, template in data.get('enemies', {}).items():
+            row = dict(template)
+            row.setdefault('id', template_id)
+            templates.append(row)
+        return {"templates": sorted(templates, key=lambda item: item.get('name') or item.get('id') or '')}
+    except Exception:
+        return {"templates": []}
+
 # ============================================================================
 # GAME DATA ENDPOINTS - Classes, Races, Skills, Items, Spells
 # ============================================================================
@@ -1697,6 +1717,34 @@ async def get_combat(combat_id: int):
         participants = [dict(row) for row in await cursor.fetchall()]
         combat['participants'] = participants
     return combat
+
+
+@app.post("/api/combat/{combat_id}/spawn-template")
+async def spawn_combat_template_enemy(combat_id: int, spawn: CombatMonsterSpawn):
+    """Spawn one or more monster-template combatants into an encounter."""
+    combat = await get_combat(combat_id)
+    if not combat:
+        raise HTTPException(status_code=404, detail="Combat not found")
+
+    session = await db.get_session(combat['session_id']) if combat.get('session_id') else None
+    context = {
+        'session_id': combat.get('session_id'),
+        'guild_id': combat.get('guild_id'),
+    }
+    if session:
+        context['content_pack_id'] = session.get('content_pack_id')
+
+    try:
+        created_ids = await tools.spawn_enemy_template_combatants(
+            combat['id'],
+            spawn.template_id,
+            count=spawn.count,
+            context=context,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"combatant_ids": created_ids, "message": "Monster spawned"}
 
 # ============================================================================
 # CHARACTER SPELLS & ABILITIES ENDPOINTS

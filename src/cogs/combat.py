@@ -175,7 +175,7 @@ class Combat(commands.Cog):
     async def start_combat(self, interaction: discord.Interaction):
         """Start a new combat encounter"""
         # Check for existing combat
-        existing = await self.db.get_active_combat(interaction.channel.id)
+        existing = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if existing:
             await interaction.response.send_message(
                 "❌ Combat is already active in this channel! Use `/combat end` to finish it.",
@@ -219,7 +219,7 @@ class Combat(commands.Cog):
     @combat_group.command(name="join", description="Join the current combat")
     async def join_combat(self, interaction: discord.Interaction):
         """Join active combat with your character"""
-        combat = await self.db.get_active_combat(interaction.channel.id)
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if not combat:
             await interaction.response.send_message(
                 "❌ No active combat in this channel!",
@@ -268,7 +268,7 @@ class Combat(commands.Cog):
         count: int = 1
     ):
         """Spawn enemies in combat"""
-        combat = await self.db.get_active_combat(interaction.channel.id)
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if not combat:
             await interaction.response.send_message(
                 "❌ No active combat! Use `/combat start` first.",
@@ -297,7 +297,7 @@ class Combat(commands.Cog):
     @combat_group.command(name="initiative", description="Roll initiative for all combatants")
     async def roll_initiative(self, interaction: discord.Interaction):
         """Roll initiative and set turn order"""
-        combat = await self.db.get_active_combat(interaction.channel.id)
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if not combat:
             await interaction.response.send_message(
                 "❌ No active combat!",
@@ -350,7 +350,7 @@ class Combat(commands.Cog):
     @app_commands.describe(target="Name of the target to attack")
     async def attack(self, interaction: discord.Interaction, target: str):
         """Attack a target"""
-        combat = await self.db.get_active_combat(interaction.channel.id)
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if not combat:
             await interaction.response.send_message(
                 "❌ No active combat!",
@@ -428,7 +428,7 @@ class Combat(commands.Cog):
     @combat_group.command(name="status", description="View current combat status")
     async def combat_status(self, interaction: discord.Interaction):
         """Show combat status"""
-        combat = await self.db.get_active_combat(interaction.channel.id)
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if not combat:
             await interaction.response.send_message(
                 "❌ No active combat in this channel!",
@@ -472,7 +472,7 @@ class Combat(commands.Cog):
     @combat_group.command(name="end", description="End the current combat")
     async def end_combat(self, interaction: discord.Interaction):
         """End the combat encounter"""
-        combat = await self.db.get_active_combat(interaction.channel.id)
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
         if not combat:
             await interaction.response.send_message(
                 "❌ No active combat to end!",

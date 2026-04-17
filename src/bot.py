@@ -7,7 +7,6 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-from dotenv import load_dotenv
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -39,16 +38,10 @@ logging.getLogger('rpg.llm').setLevel(logging.DEBUG)
 logger = logging.getLogger('rpg')
 logger.info(f"Logging to file: {log_filename}")
 
-# Load environment variables
-load_dotenv()
-
 TOKEN = os.getenv('DISCORD_TOKEN')
 REQUESTY_API_KEY = os.getenv('REQUESTY_API_KEY')
-DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/rpg.db')
+DATABASE_PATH = os.getenv('DATABASE_URL') or os.getenv('DATABASE_PATH', 'data/rpg.db')
 LLM_MODEL = os.getenv('LLM_MODEL', 'openai/gpt-4o-mini')
-
-if not TOKEN:
-    raise ValueError("DISCORD_TOKEN not found in environment variables!")
 
 if not REQUESTY_API_KEY:
     logger.warning("REQUESTY_API_KEY not found - AI DM features will be disabled")

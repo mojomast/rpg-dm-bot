@@ -198,7 +198,12 @@ CURRENT STAGE: {current_stage['title']}
 {current_stage['description']}"""
                         )
 
-        combat = await self.db.get_active_combat(guild_id, channel_id)
+        if channel_id:
+            combat = await self.db.get_active_combat(guild_id, channel_id)
+        elif session and session.get("id"):
+            combat = await self.db.get_active_combat_by_session(session["id"])
+        else:
+            combat = None
         if combat:
             participants = await self.db.get_combat_participants(combat["id"])
             context_parts.append("\nACTIVE COMBAT:")

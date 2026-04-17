@@ -1938,6 +1938,24 @@ class Database:
                 combat['combat_log'] = json.loads(combat['combat_log'])
                 return combat
             return None
+
+    async def get_active_combat_by_session(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Get the active combat encounter for a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM combat_encounters
+                WHERE session_id = ? AND status = 'active'
+                ORDER BY created_at DESC LIMIT 1
+            """, (session_id,))
+            row = await cursor.fetchone()
+            if row:
+                combat = dict(row)
+                combat['initiative_order'] = json.loads(combat['initiative_order'])
+                combat['combatants'] = json.loads(combat['combatants'])
+                combat['combat_log'] = json.loads(combat['combat_log'])
+                return combat
+            return None
     
     async def add_combatant(self, encounter_id: int, participant_type: str,
                            participant_id: int, name: str, hp: int, max_hp: int,

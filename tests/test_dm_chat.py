@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.chat_handler import ChatHandler
 from src.cogs.dm_chat import DMChat
 
 
@@ -48,3 +49,50 @@ class TestDMChatHelpers:
         assert target.messages[0][1] == {}
         assert target.messages[1][1] == {}
         assert target.messages[2][1] == {"view": view}
+
+
+class StubChatContextDb:
+    async def get_active_character(self, user_id, guild_id):
+        return None
+
+    async def get_session(self, session_id):
+        return {"id": session_id, "guild_id": 123, "name": "Test Session", "description": "Test adventure"}
+
+    async def get_session_players(self, session_id):
+        return []
+
+    async def get_game_state(self, session_id):
+        return None
+
+    async def get_active_events(self, session_id):
+        return []
+
+    async def get_active_combat(self, guild_id=None, channel_id=None):
+        return None
+
+    async def get_active_combat_by_session(self, session_id):
+        return {"id": 77, "current_turn": 2}
+
+    async def get_combat_participants(self, encounter_id):
+        return [{"character_id": 99, "current_hp": 14, "initiative": 12}]
+
+    async def get_character(self, character_id):
+        return {"id": character_id, "name": "Aria", "hp": 14, "max_hp": 20}
+
+
+class TestChatHandlerContext:
+    @pytest.mark.asyncio
+    async def test_get_game_context_uses_session_combat_when_channel_missing(self):
+        handler = ChatHandler(
+            StubChatContextDb(),
+            llm=None,
+            prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+            tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+            tools=None,
+        )
+
+        context = await handler.get_game_context(guild_id=123, user_id=456, channel_id=0, session_id=10)
+
+        assert "ACTIVE COMBAT:" in context
+        assert "Turn: 2" in context
+        assert "Aria: 14 HP, Initiative 12" in context

@@ -538,6 +538,22 @@ class TestCombat:
         assert combat['status'] == 'active'
         assert combat['round_number'] == 1
 
+    async def test_get_active_combat_by_session(self, db_with_session):
+        """Test getting active combat by session for web chat contexts."""
+        db, session_id = db_with_session
+
+        combat_id = await db.create_combat(
+            guild_id=67890,
+            channel_id=11111,
+            session_id=session_id,
+        )
+
+        combat = await db.get_active_combat_by_session(session_id)
+
+        assert combat is not None
+        assert combat['id'] == combat_id
+        assert combat['session_id'] == session_id
+
     async def test_add_combatant(self, db):
         """Test adding combatants to combat"""
         combat_id = await db.create_combat(67890, 11111)

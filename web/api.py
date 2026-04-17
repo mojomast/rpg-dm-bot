@@ -4,7 +4,7 @@ FastAPI server for the web management frontend.
 Provides REST endpoints for sessions, locations, NPCs, items, events, and saves.
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -20,7 +20,7 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.database import Database
 from src.chat_handler import ChatActor, ChatHandler
-from src.chat_web_identity import web_user_id_from_uuid
+from src.chat_web_identity import generate_web_identity_uuid, hash_ip_address, web_user_id_from_uuid
 from src.llm import LLMClient
 from src.prompts import Prompts
 from src.tool_schemas import ToolSchemas
@@ -212,7 +212,6 @@ class ChatHistoryMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: int
-    user_id: str
     message: str
     character_id: Optional[int] = None
     chat_history: List[ChatHistoryMessage] = []
@@ -225,6 +224,10 @@ class ChatResponse(BaseModel):
     updated_state: Dict[str, Any]
     options: List[str]
     session_id: int
+
+
+class ChatIdentityResponse(BaseModel):
+    user_id: str
 
 # ============================================================================
 # STARTUP / SHUTDOWN
@@ -338,17 +341,31 @@ async def update_session(session_id: int, session: SessionUpdate):
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_with_dm(request: ChatRequest):
+@app.post("/api/chat/identity", response_model=ChatIdentityResponse)
+async def create_chat_identity(http_request: Request):
+    """Issue a server-generated browser chat identity."""
+    forwarded_for = http_request.headers.get("x-forwarded-for")
+    client_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else (http_request.client.host if http_request.client else None)
+    identity = generate_web_identity_uuid()
+    await db.create_web_identity(identity, hash_ip_address(client_ip))
+    return ChatIdentityResponse(user_id=identity)
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat_with_dm(request: ChatRequest, x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity")):
     """Send a message to the AI DM and get a response."""
     handler = get_chat_handler()
     session = await db.get_session(request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    web_user_id = web_user_id_from_uuid(request.user_id)
-    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{request.session_id}:user:{request.user_id}")
+    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
+        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+
+    web_user_id = web_user_id_from_uuid(x_web_identity)
+    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{request.session_id}:user:{x_web_identity}")
     character = await db.get_character(request.character_id) if request.character_id else None
-    actor_name = character['name'] if character else f"Web Player {request.user_id[:8]}"
+    actor_name = character['name'] if character else f"Web Player {x_web_identity[:8]}"
     actor = ChatActor(
         user_id=web_user_id,
         display_name=actor_name,

@@ -890,6 +890,15 @@ class TestMemoryAndConversation:
         assert messages[0]['role'] == "user"
         assert messages[1]['role'] == "assistant"
 
+    async def test_web_identity_storage(self, db):
+        """Test creating and validating a web identity."""
+        identity = "123e4567-e89b-12d3-a456-426614174000"
+
+        await db.create_web_identity(identity, "hashed-ip")
+
+        assert await db.web_identity_exists(identity) is True
+        assert await db.web_identity_exists("missing") is False
+
     async def test_story_log(self, db_with_session):
         """Test adding and retrieving story log entries"""
         db, session_id = db_with_session

@@ -286,6 +286,17 @@ class Database:
                     created_at TEXT NOT NULL
                 )
             """)
+
+            # ================================================================
+            # WEB IDENTITIES TABLE
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS web_identities (
+                    uuid TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    ip_hash TEXT
+                )
+            """)
             
             # ================================================================
             # STORY LOG TABLE (campaign history)
@@ -2436,7 +2447,7 @@ class Database:
     # ========================================================================
     
     async def save_message(self, user_id: int, guild_id: int, channel_id: int,
-                          role: str, content: str) -> int:
+                           role: str, content: str) -> int:
         """Save a message to conversation history"""
         now = datetime.utcnow().isoformat()
         
@@ -2460,6 +2471,27 @@ class Database:
             """, (user_id, guild_id, channel_id, limit))
             rows = await cursor.fetchall()
             return [dict(row) for row in reversed(rows)]
+
+    async def create_web_identity(self, uuid_value: str, ip_hash: Optional[str] = None) -> str:
+        """Persist a server-issued browser identity."""
+        now = datetime.utcnow().isoformat()
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT OR REPLACE INTO web_identities (uuid, created_at, ip_hash)
+                VALUES (?, ?, ?)
+            """, (uuid_value, now, ip_hash))
+            await db.commit()
+            return uuid_value
+
+    async def web_identity_exists(self, uuid_value: str) -> bool:
+        """Check whether a browser identity exists."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM web_identities WHERE uuid = ? LIMIT 1",
+                (uuid_value,),
+            )
+            return await cursor.fetchone() is not None
     
     # ========================================================================
     # STORY LOG METHODS

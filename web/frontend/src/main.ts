@@ -37,10 +37,12 @@ interface ChatApiResponse {
 
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+    };
     const defaultOptions: RequestInit = {
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers,
     };
 
     const response = await fetch(url, { ...defaultOptions, ...options });
@@ -63,7 +65,14 @@ const api = {
     getSession: (id: number) => apiCall<any>(`/sessions/${id}`),
     createSession: (data: any) => apiCall<{ id: number }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
     updateSession: (id: number, data: any) => apiCall<any>(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    chatWithDM: (data: any) => apiCall<ChatApiResponse>('/chat', { method: 'POST', body: JSON.stringify(data) }),
+    createChatIdentity: () => apiCall<{ user_id: string }>('/chat/identity', { method: 'POST' }),
+    chatWithDM: (data: any, webIdentity: string) => apiCall<ChatApiResponse>('/chat', {
+        method: 'POST',
+        headers: {
+            'X-Web-Identity': webIdentity,
+        },
+        body: JSON.stringify(data),
+    }),
 
     // Locations
     getLocations: () => apiCall<{ locations: any[] }>('/locations'),
@@ -2867,20 +2876,22 @@ class ChatInterface {
     private latestState: any = null;
 
     constructor() {
-        this.userId = this.getOrCreateUserId();
+        this.userId = '';
     }
 
-    private getOrCreateUserId(): string {
+    private async getOrCreateUserId(): Promise<string> {
         const key = 'rpgdm-web-user-id';
         let existing = localStorage.getItem(key);
         if (!existing) {
-            existing = crypto.randomUUID();
+            const response = await api.createChatIdentity();
+            existing = response.user_id;
             localStorage.setItem(key, existing);
         }
         return existing;
     }
 
     async initialize(): Promise<void> {
+        this.userId = await this.getOrCreateUserId();
         const sessionsData = await api.getSessions();
         const sessionSelect = document.getElementById('chat-session-select') as HTMLSelectElement | null;
         const form = document.getElementById('chat-form') as HTMLFormElement | null;
@@ -2959,11 +2970,10 @@ class ChatInterface {
         try {
             const response = await api.chatWithDM({
                 session_id: this.sessionId,
-                user_id: this.userId,
                 character_id: this.characterId,
                 message,
                 chat_history: priorHistory,
-            });
+            }, this.userId);
 
             if (response.mechanics_text) {
                 this.chatHistory.push({ role: 'mechanics', content: response.mechanics_text });

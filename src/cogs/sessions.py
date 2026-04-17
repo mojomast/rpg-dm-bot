@@ -187,6 +187,89 @@ class Sessions(commands.Cog):
         else:
             await interaction.response.send_message(f"⚔️ Started **{session['name']}** in this channel.")
 
+    async def send_session_status(self, interaction: discord.Interaction, session_id: Optional[int] = None):
+        """Send canonical session status output."""
+        if session_id:
+            session = await self._get_guild_session(interaction.guild.id, session_id)
+            if not session:
+                await interaction.response.send_message("❌ Session not found!", ephemeral=True)
+                return
+            sessions = [session]
+        else:
+            sessions = await self.db.get_sessions(interaction.guild.id, status='active')
+            if not sessions:
+                sessions = await self.db.get_sessions(interaction.guild.id, status='paused')
+            if not sessions:
+                sessions = await self.db.get_sessions(interaction.guild.id)
+
+        if not sessions:
+            await interaction.response.send_message(
+                "📜 No sessions found! Create one with `/session create`",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(title="🎲 Session Status", color=discord.Color.blue())
+
+        for session in sessions[:5]:
+            players = await self.db.get_session_players(session['id'])
+            dm = interaction.guild.get_member(session['dm_user_id'])
+            status_emoji = {"active": "🟢", "paused": "🟡", "inactive": "⚪", "completed": "✅"}.get(session['status'], "⚪")
+
+            player_names = []
+            for player in players:
+                if not player.get('character_id'):
+                    continue
+                char = await self.db.get_character(player['character_id'])
+                if char:
+                    player_names.append(f"{char['name']} (Lv.{char['level']})")
+
+            embed.add_field(
+                name=f"{status_emoji} {session['name']} (ID: {session['id']})",
+                value=(
+                    f"**Status:** {session['status'].title()}\n"
+                    f"**DM:** {dm.display_name if dm else 'Unknown'}\n"
+                    f"**Players:** {', '.join(player_names) or 'None'}\n"
+                    f"**Capacity:** {len(players)}/{session['max_players']}"
+                ),
+                inline=False,
+            )
+
+        await interaction.response.send_message(embed=embed)
+
+    async def end_session_lifecycle(self, interaction: discord.Interaction, session_id: int):
+        """End a session via the canonical session surface."""
+        session = await self._get_guild_session(interaction.guild.id, session_id)
+
+        if not session:
+            await interaction.response.send_message("❌ Session not found!", ephemeral=True)
+            return
+
+        if session['dm_user_id'] != interaction.user.id and not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "❌ Only the DM or an admin can end this session!",
+                ephemeral=True,
+            )
+            return
+
+        await self.db.update_session(session_id, status='completed')
+
+        game_master = self.bot.get_cog('GameMaster')
+        if game_master and getattr(game_master, 'active_games', None) is not None:
+            game_master.active_games.pop(session_id, None)
+
+        embed = discord.Embed(
+            title=f"🏁 {session['name']} Has Ended",
+            description="Thank you for playing! The adventure has concluded.",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(
+            name="What's Next?",
+            value="Create a new campaign with `/session create` when you're ready for another adventure!",
+            inline=False,
+        )
+        await interaction.response.send_message(embed=embed)
+
     async def _get_guild_session(self, guild_id: int, session_id: int) -> Optional[dict]:
         """Fetch a session only if it belongs to the current guild."""
         session = await self.db.get_session(session_id)
@@ -464,31 +547,13 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to end")
     async def end_session(self, interaction: discord.Interaction, session_id: int):
         """End a session"""
-        session = await self._get_guild_session(interaction.guild.id, session_id)
-        
-        if not session:
-            await interaction.response.send_message(
-                "❌ Session not found!",
-                ephemeral=True
-            )
-            return
-        
-        if session['dm_user_id'] != interaction.user.id:
-            await interaction.response.send_message(
-                "❌ Only the DM can end the session!",
-                ephemeral=True
-            )
-            return
-        
-        await self.db.update_session(session_id, status='completed')
-        
-        embed = discord.Embed(
-            title=f"🏁 {session['name']} Has Ended",
-            description="Thank you for playing! Until next time, adventurers.",
-            color=discord.Color.blue()
-        )
-        
-        await interaction.response.send_message(embed=embed)
+        await self.end_session_lifecycle(interaction, session_id)
+
+    @session_group.command(name="status", description="Check session status")
+    @app_commands.describe(session_id="The session ID to check (optional)")
+    async def session_status(self, interaction: discord.Interaction, session_id: Optional[int] = None):
+        """Show session status."""
+        await self.send_session_status(interaction, session_id)
     
     @session_group.command(name="set_quest", description="Set the active quest for a session (DM only)")
     @app_commands.describe(

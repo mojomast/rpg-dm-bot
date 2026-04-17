@@ -581,7 +581,7 @@ class QuickStartView(discord.ui.View):
         
         embed.add_field(
             name="2️⃣ Join or Start a Game",
-            value="Start a new game with `/game start` or join an existing one with `/game join`",
+            value="Create a new session with `/session create`, start it with `/session start`, or join an existing one with `/game join`",
             inline=False
         )
         
@@ -1440,6 +1440,10 @@ class GameMaster(commands.Cog):
                 ephemeral=True
             )
             return
+
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'send_session_status'):
+            return await sessions_cog.send_session_status(interaction, session_id)
         
         if session_id:
             session = await self._get_guild_session(interaction.guild.id, session_id)
@@ -1530,6 +1534,10 @@ class GameMaster(commands.Cog):
     @app_commands.describe(session_id="The session ID to end")
     async def end_game(self, interaction: discord.Interaction, session_id: int):
         """End a game"""
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'end_session_lifecycle'):
+            return await sessions_cog.end_session_lifecycle(interaction, session_id)
+
         session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
@@ -1992,7 +2000,7 @@ class GameMaster(commands.Cog):
             value=(
                 "Return to the server and:\n"
                 "• Join a game with `/game join [id]`\n"
-                "• Start your own with `/game start`\n"
+                "• Start your own with `/session create`\n"
                 "• View your sheet with `/character sheet`\n"
                 "• Check inventory with `/inventory`"
             ),

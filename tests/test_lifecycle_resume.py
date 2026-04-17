@@ -7,6 +7,7 @@ import pytest
 
 from src.cogs.game_master import GameMaster
 from src.cogs.game_persistence import GamePersistence
+from src.cogs.sessions import Sessions
 
 
 @pytest.mark.asyncio
@@ -104,3 +105,48 @@ async def test_game_pause_command_delegates_to_sessions_cog(mock_interaction):
     await GameMaster.pause_game.callback(cog, mock_interaction, 88)
 
     sessions_cog.pause_session.callback.assert_awaited_once_with(sessions_cog, mock_interaction, 88)
+
+
+@pytest.mark.asyncio
+async def test_game_status_command_delegates_to_sessions_cog(mock_interaction):
+    sessions_cog = SimpleNamespace(send_session_status=AsyncMock())
+    bot = SimpleNamespace(db=None, llm=None, get_cog=lambda name: sessions_cog if name == 'Sessions' else None)
+    cog = GameMaster(bot)
+
+    await GameMaster.game_status.callback(cog, mock_interaction, 99)
+
+    sessions_cog.send_session_status.assert_awaited_once_with(mock_interaction, 99)
+
+
+@pytest.mark.asyncio
+async def test_game_end_command_delegates_to_sessions_cog(mock_interaction):
+    sessions_cog = SimpleNamespace(end_session_lifecycle=AsyncMock())
+    bot = SimpleNamespace(db=None, llm=None, get_cog=lambda name: sessions_cog if name == 'Sessions' else None)
+    cog = GameMaster(bot)
+
+    await GameMaster.end_game.callback(cog, mock_interaction, 101)
+
+    sessions_cog.end_session_lifecycle.assert_awaited_once_with(mock_interaction, 101)
+
+
+@pytest.mark.asyncio
+async def test_sessions_status_uses_canonical_session_listing(mock_interaction):
+    db = SimpleNamespace(
+        get_sessions=AsyncMock(return_value=[{
+            "id": 5,
+            "name": "Canon Session",
+            "status": "active",
+            "dm_user_id": 12345,
+            "max_players": 4,
+        }]),
+        get_session_players=AsyncMock(return_value=[]),
+        get_character=AsyncMock(),
+    )
+    bot = SimpleNamespace(db=db, get_cog=lambda _name: None)
+    cog = Sessions(bot)
+
+    await cog.send_session_status(mock_interaction, None)
+
+    mock_interaction.response.send_message.assert_awaited_once()
+    embed = mock_interaction.response.send_message.await_args.kwargs["embed"]
+    assert embed.title == "🎲 Session Status"

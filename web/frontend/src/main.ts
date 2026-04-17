@@ -180,11 +180,22 @@ const api = {
 
     // Location Connections
     getLocationConnections: (locationId: number) => apiCall<{ connections: any[] }>(`/locations/${locationId}/connections`),
-    connectLocations: (fromId: number, toId: number, direction?: string, bidirectional?: boolean) => {
+    listLocationConnections: (locationId?: number, sessionId?: number) => {
+        const params = new URLSearchParams();
+        if (locationId !== undefined) params.append('location_id', locationId.toString());
+        if (sessionId !== undefined) params.append('session_id', sessionId.toString());
+        const query = params.toString();
+        return apiCall<{ connections: any[] }>(`/location-connections${query ? `?${query}` : ''}`);
+    },
+    createLocationConnection: (data: any) => apiCall<{ id: number }>('/location-connections', { method: 'POST', body: JSON.stringify(data) }),
+    updateLocationConnection: (id: number, data: any) => apiCall<any>(`/location-connections/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteLocationConnection: (id: number) => apiCall<any>(`/location-connections/${id}`, { method: 'DELETE' }),
+    connectLocations: (fromId: number, toId: number, direction?: string, travelTime?: number, hidden?: boolean) => {
         let url = `/locations/${fromId}/connect/${toId}`;
         const params = new URLSearchParams();
         if (direction) params.append('direction', direction);
-        if (bidirectional !== undefined) params.append('bidirectional', bidirectional.toString());
+        if (travelTime !== undefined) params.append('travel_time', travelTime.toString());
+        if (hidden !== undefined) params.append('hidden', hidden.toString());
         if (params.toString()) url += '?' + params.toString();
         return apiCall<any>(url, { method: 'POST' });
     },
@@ -580,6 +591,9 @@ async function loadNPCs(): Promise<void> {
     container.innerHTML = '<div class="loading-spinner">Loading NPCs...</div>';
 
     try {
+        if (!npcLocationOptionsLoaded) {
+            await populateNPCLocationOptions();
+        }
         const data = await api.getNPCs();
         const npcs = data.npcs || [];
 
@@ -613,12 +627,14 @@ async function loadNPCs(): Promise<void> {
 async function createNPC(event: Event): Promise<void> {
     event.preventDefault();
 
+    const locationIdValue = (document.getElementById('npc-location') as HTMLSelectElement).value;
+
     const data = {
         name: (document.getElementById('npc-name') as HTMLInputElement).value,
         description: (document.getElementById('npc-desc') as HTMLTextAreaElement).value,
         personality: (document.getElementById('npc-personality') as HTMLTextAreaElement).value,
         npc_type: (document.getElementById('npc-type') as HTMLSelectElement).value,
-        location: (document.getElementById('npc-location') as HTMLInputElement).value,
+        location_id: locationIdValue ? parseInt(locationIdValue) : undefined,
         is_merchant: (document.getElementById('npc-merchant') as HTMLInputElement).checked,
         guild_id: 1,
         created_by: 1
@@ -629,6 +645,7 @@ async function createNPC(event: Event): Promise<void> {
         showToast('NPC created!', 'success');
         closeModal('npc-modal');
         (document.getElementById('npc-form') as HTMLFormElement).reset();
+        await populateNPCLocationOptions();
         loadNPCs();
     } catch (error) {
         showToast('Failed to create NPC', 'error');
@@ -664,7 +681,15 @@ async function loadItems(): Promise<void> {
             return;
         }
 
-        container.innerHTML = items.map((item: any) => `
+        container.innerHTML = items.map((item: any) => {
+            const meta: string[] = [
+                `📦 ${escapeHtml(item.item_type || 'misc')}`,
+            ];
+            if (item.discovery_conditions) {
+                meta.push(`🔎 ${escapeHtml(item.discovery_conditions)}`);
+            }
+
+            return `
             <div class="entity-card" data-id="${item.id}">
                 <div class="entity-header">
                     <span class="entity-title">${escapeHtml(item.name)}</span>
@@ -672,7 +697,7 @@ async function loadItems(): Promise<void> {
                 </div>
                 <p class="entity-desc">${escapeHtml(item.description || 'No description')}</p>
                 <div class="entity-meta">
-                    <span>📦 ${item.item_type}</span>
+                    ${meta.map((entry: string) => `<span>${entry}</span>`).join('')}
                 </div>
                 <div class="entity-actions">
                     ${!item.is_discovered ? `<button class="btn btn-small btn-primary" onclick="revealItem(${item.id})">👁️ Reveal</button>` : ''}
@@ -680,7 +705,8 @@ async function loadItems(): Promise<void> {
                     <button class="btn btn-small btn-danger" onclick="deleteItem(${item.id})">Delete</button>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     } catch (error) {
         container.innerHTML = '<div class="empty-state">Failed to load items</div>';
     }
@@ -738,7 +764,14 @@ async function loadEvents(): Promise<void> {
             return;
         }
 
-        container.innerHTML = events.map((ev: any) => `
+        container.innerHTML = events.map((ev: any) => {
+            const isTriggered = ev.status === 'triggered' || ev.status === 'active';
+            const meta: string[] = [`📋 ${escapeHtml(ev.event_type || 'story')}`];
+            if (ev.resolution_outcome) {
+                meta.push(`🏁 ${escapeHtml(ev.resolution_outcome)}`);
+            }
+
+            return `
             <div class="entity-card" data-id="${ev.id}">
                 <div class="entity-header">
                     <span class="entity-title">${escapeHtml(ev.name)}</span>
@@ -746,16 +779,17 @@ async function loadEvents(): Promise<void> {
                 </div>
                 <p class="entity-desc">${escapeHtml(ev.description || 'No description')}</p>
                 <div class="entity-meta">
-                    <span>📋 ${ev.event_type}</span>
+                    ${meta.map((entry: string) => `<span>${entry}</span>`).join('')}
                 </div>
                 <div class="entity-actions">
                     ${ev.status === 'pending' ? `<button class="btn btn-small btn-primary" onclick="triggerEvent(${ev.id})">⚡ Trigger</button>` : ''}
-                    ${ev.status === 'active' ? `<button class="btn btn-small btn-success" onclick="resolveEvent(${ev.id})">✅ Resolve</button>` : ''}
+                    ${isTriggered ? `<button class="btn btn-small btn-success" onclick="resolveEvent(${ev.id})">✅ Resolve</button>` : ''}
                     <button class="btn btn-small btn-secondary" onclick="editEvent(${ev.id})">Edit</button>
                     <button class="btn btn-small btn-danger" onclick="deleteEvent(${ev.id})">Delete</button>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     } catch (error) {
         container.innerHTML = '<div class="empty-state">Failed to load events</div>';
     }
@@ -1008,6 +1042,28 @@ async function updateCharacter(event: Event): Promise<void> {
 // ============================================================================
 
 let currentCharacterIdForInventory: number | null = null;
+let npcLocationOptionsLoaded = false;
+
+async function populateNPCLocationOptions(selectedLocationId?: number | null): Promise<void> {
+    const data = await api.getLocations();
+    const locations = data.locations || [];
+    const optionMarkup = ['<option value="">No assigned location</option>']
+        .concat(locations.map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`))
+        .join('');
+
+    const createSelect = document.getElementById('npc-location') as HTMLSelectElement | null;
+    if (createSelect) {
+        createSelect.innerHTML = optionMarkup;
+    }
+
+    const editSelect = document.getElementById('edit-npc-location') as HTMLSelectElement | null;
+    if (editSelect) {
+        editSelect.innerHTML = optionMarkup;
+        editSelect.value = selectedLocationId ? String(selectedLocationId) : '';
+    }
+
+    npcLocationOptionsLoaded = true;
+}
 
 async function showCharacterInventory(charId: number): Promise<void> {
     currentCharacterIdForInventory = charId;
@@ -1427,13 +1483,14 @@ async function updateLocation(event: Event): Promise<void> {
 async function editNPC(id: number): Promise<void> {
     try {
         const npc = await api.getNPC(id);
+        await populateNPCLocationOptions(npc.location_id ?? null);
         
         (document.getElementById('edit-npc-id') as HTMLInputElement).value = npc.id;
         (document.getElementById('edit-npc-name') as HTMLInputElement).value = npc.name || '';
         (document.getElementById('edit-npc-desc') as HTMLTextAreaElement).value = npc.description || '';
         (document.getElementById('edit-npc-personality') as HTMLTextAreaElement).value = npc.personality || '';
         (document.getElementById('edit-npc-type') as HTMLSelectElement).value = npc.npc_type || 'neutral';
-        (document.getElementById('edit-npc-location') as HTMLInputElement).value = npc.location || '';
+        (document.getElementById('edit-npc-location') as HTMLSelectElement).value = npc.location_id ? String(npc.location_id) : '';
         (document.getElementById('edit-npc-merchant') as HTMLInputElement).checked = npc.is_merchant || false;
         
         openModal('edit-npc-modal');
@@ -1444,6 +1501,7 @@ async function editNPC(id: number): Promise<void> {
 
 async function updateNPC(event: Event): Promise<void> {
     event.preventDefault();
+    const locationIdValue = (document.getElementById('edit-npc-location') as HTMLSelectElement).value;
     
     const id = parseInt((document.getElementById('edit-npc-id') as HTMLInputElement).value);
     const data = {
@@ -1451,7 +1509,7 @@ async function updateNPC(event: Event): Promise<void> {
         description: (document.getElementById('edit-npc-desc') as HTMLTextAreaElement).value,
         personality: (document.getElementById('edit-npc-personality') as HTMLTextAreaElement).value,
         npc_type: (document.getElementById('edit-npc-type') as HTMLSelectElement).value,
-        location: (document.getElementById('edit-npc-location') as HTMLInputElement).value,
+        location_id: locationIdValue ? parseInt(locationIdValue) : undefined,
         is_merchant: (document.getElementById('edit-npc-merchant') as HTMLInputElement).checked
     };
     
@@ -1459,6 +1517,7 @@ async function updateNPC(event: Event): Promise<void> {
         await api.updateNPC(id, data);
         showToast('NPC updated!', 'success');
         closeModal('edit-npc-modal');
+        await populateNPCLocationOptions();
         loadNPCs();
     } catch (error) {
         showToast('Failed to update NPC', 'error');
@@ -1490,7 +1549,10 @@ async function updateItem(event: Event): Promise<void> {
     const data = {
         name: (document.getElementById('edit-item-name') as HTMLInputElement).value,
         description: (document.getElementById('edit-item-desc') as HTMLTextAreaElement).value,
-        lore: (document.getElementById('edit-item-lore') as HTMLTextAreaElement).value
+        item_type: (document.getElementById('edit-item-type') as HTMLSelectElement).value,
+        lore: (document.getElementById('edit-item-lore') as HTMLTextAreaElement).value,
+        discovery_conditions: (document.getElementById('edit-item-discovery') as HTMLInputElement).value,
+        dm_notes: (document.getElementById('edit-item-notes') as HTMLTextAreaElement).value
     };
     
     try {
@@ -1525,7 +1587,9 @@ async function editEvent(id: number): Promise<void> {
         (document.getElementById('edit-event-type') as HTMLSelectElement).value = event.event_type || 'side_event';
         (document.getElementById('edit-event-trigger') as HTMLInputElement).value = event.trigger_conditions || '';
         (document.getElementById('edit-event-notes') as HTMLTextAreaElement).value = event.dm_notes || '';
-        (document.getElementById('edit-event-status') as HTMLSelectElement).value = event.status || 'pending';
+        (document.getElementById('edit-event-status') as HTMLSelectElement).value = event.status === 'active'
+            ? 'triggered'
+            : (event.status || 'pending');
         
         openModal('edit-event-modal');
     } catch (error) {
@@ -1540,7 +1604,9 @@ async function updateEvent(event: Event): Promise<void> {
     const data = {
         name: (document.getElementById('edit-event-name') as HTMLInputElement).value,
         description: (document.getElementById('edit-event-desc') as HTMLTextAreaElement).value,
+        event_type: (document.getElementById('edit-event-type') as HTMLSelectElement).value,
         trigger_conditions: (document.getElementById('edit-event-trigger') as HTMLInputElement).value,
+        dm_notes: (document.getElementById('edit-event-notes') as HTMLTextAreaElement).value,
         status: (document.getElementById('edit-event-status') as HTMLSelectElement).value
     };
     
@@ -3036,21 +3102,88 @@ function renderStatusEffectsPanel(statusEffects: any[]): string {
 }
 
 function renderLocationConnectionsPanel(connections: any[]): string {
-    if (connections.length === 0) {
-        return '<p class="empty-hint">No visible connections from this location.</p>';
-    }
-
     return `
-        <div class="location-connection-map">
+        <div class="detail-stack">
+            ${connections.length === 0 ? '<p class="empty-hint">No visible connections from this location.</p>' : ''}
+            <div class="location-connection-map">
             ${connections.map((connection: any) => `
                 <div class="connection-card">
                     <div class="direction">${escapeHtml(connection.direction || 'path')}</div>
                     <div class="target">${escapeHtml(connection.to_name || connection.name || 'Unknown')}</div>
                     <div class="meta">${escapeHtml(connection.location_type || 'unknown')} • ${connection.travel_time || 1} travel unit(s)</div>
+                    ${connection.connection_id ? `<div class="entity-actions"><button class="btn btn-small btn-danger" onclick="deleteLocationConnection(${connection.connection_id}, ${connection.from_location_id || 0})">Delete</button></div>` : ''}
                 </div>
             `).join('')}
+            </div>
         </div>
     `;
+}
+
+async function openLocationConnectionEditor(locationId: number): Promise<void> {
+    try {
+        const [location, locationsData] = await Promise.all([
+            api.getLocation(locationId),
+            api.getLocations(),
+        ]);
+
+        const targetSelect = document.getElementById('location-connection-target') as HTMLSelectElement;
+        targetSelect.innerHTML = (locationsData.locations || [])
+            .filter((loc: any) => loc.id !== locationId)
+            .map((loc: any) => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`)
+            .join('') || '<option value="">No destinations available</option>';
+
+        (document.getElementById('location-connection-from-id') as HTMLInputElement).value = String(locationId);
+        (document.getElementById('location-connection-direction') as HTMLInputElement).value = 'path';
+        (document.getElementById('location-connection-travel-time') as HTMLInputElement).value = '1';
+        (document.getElementById('location-connection-hidden') as HTMLInputElement).checked = false;
+        document.querySelector('#location-connection-modal .modal-header h2')!.textContent = `🧭 Add Connection from ${location.name}`;
+        openModal('location-connection-modal');
+    } catch (error) {
+        showToast('Failed to open location connection editor', 'error');
+    }
+}
+
+async function saveLocationConnection(event: Event): Promise<void> {
+    event.preventDefault();
+
+    const fromId = parseInt((document.getElementById('location-connection-from-id') as HTMLInputElement).value);
+    const toId = parseInt((document.getElementById('location-connection-target') as HTMLSelectElement).value);
+    const direction = (document.getElementById('location-connection-direction') as HTMLInputElement).value || 'path';
+    const travelTime = parseInt((document.getElementById('location-connection-travel-time') as HTMLInputElement).value) || 1;
+    const hidden = (document.getElementById('location-connection-hidden') as HTMLInputElement).checked;
+
+    if (!fromId || !toId) {
+        showToast('Choose a destination location', 'error');
+        return;
+    }
+
+    try {
+        await api.createLocationConnection({
+            from_location_id: fromId,
+            to_location_id: toId,
+            direction,
+            travel_time: travelTime,
+            hidden,
+            bidirectional: true,
+        });
+        closeModal('location-connection-modal');
+        showToast('Location connection created', 'success');
+        await showLocationDetails(fromId);
+    } catch (error) {
+        showToast('Failed to create location connection', 'error');
+    }
+}
+
+async function deleteLocationConnection(connectionId: number, locationId: number): Promise<void> {
+    if (!confirm('Delete this location connection?')) return;
+
+    try {
+        await api.deleteLocationConnection(connectionId);
+        showToast('Location connection deleted', 'success');
+        await showLocationDetails(locationId);
+    } catch (error) {
+        showToast('Failed to delete location connection', 'error');
+    }
 }
 
 async function showCharacterDetails(charId: number): Promise<void> {
@@ -3115,10 +3248,12 @@ async function showCharacterDetails(charId: number): Promise<void> {
 
 async function showLocationDetails(locationId: number): Promise<void> {
     try {
-        const [location, connectionData] = await Promise.all([
+        const [location, connectionData, npcsData] = await Promise.all([
             api.getLocation(locationId),
             api.getLocationConnections(locationId),
+            api.getNPCs(),
         ]);
+        const occupants = (npcsData.npcs || []).filter((npc: any) => npc.location_id === locationId);
 
         const content = `
             <div class="session-detail">
@@ -3131,7 +3266,18 @@ async function showLocationDetails(locationId: number): Promise<void> {
 
                 <div class="session-section">
                     <h3>🧭 Location Connection Map</h3>
+                    <div class="detail-actions">
+                        <button class="btn btn-small btn-primary" onclick="openLocationConnectionEditor(${locationId})">➕ Add Connection</button>
+                    </div>
                     ${renderLocationConnectionsPanel(connectionData.connections || [])}
+                </div>
+
+                <div class="session-section">
+                    <h3>👥 Occupants</h3>
+                    ${renderSimpleList(occupants.map((npc: any) => ({
+                        title: npc.name || 'Unknown NPC',
+                        meta: npc.npc_type || 'neutral',
+                    })))}
                 </div>
             </div>
         `;
@@ -3676,3 +3822,7 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).removePreviewItem = removePreviewItem;
 (window as any).addItem = addItem;
 (window as any).editSection = editSection;
+(window as any).saveCampaignPreviewEdit = saveCampaignPreviewEdit;
+(window as any).openLocationConnectionEditor = openLocationConnectionEditor;
+(window as any).saveLocationConnection = saveLocationConnection;
+(window as any).deleteLocationConnection = deleteLocationConnection;

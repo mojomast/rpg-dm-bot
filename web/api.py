@@ -124,6 +124,7 @@ class NPCCreate(BaseModel):
     personality: Optional[str] = None
     npc_type: str = "neutral"
     location: Optional[str] = None
+    location_id: Optional[int] = None
     is_merchant: bool = False
 
 class NPCUpdate(BaseModel):
@@ -132,7 +133,28 @@ class NPCUpdate(BaseModel):
     personality: Optional[str] = None
     npc_type: Optional[str] = None
     location: Optional[str] = None
+    location_id: Optional[int] = None
     is_merchant: Optional[bool] = None
+
+
+class LocationConnectionCreate(BaseModel):
+    from_location_id: int
+    to_location_id: int
+    direction: str = "path"
+    travel_time: int = 1
+    requirements: Optional[str] = None
+    hidden: bool = False
+    bidirectional: bool = True
+
+
+class LocationConnectionUpdate(BaseModel):
+    from_location_id: Optional[int] = None
+    to_location_id: Optional[int] = None
+    direction: Optional[str] = None
+    travel_time: Optional[int] = None
+    requirements: Optional[str] = None
+    hidden: Optional[bool] = None
+    bidirectional: Optional[bool] = None
 
 class StoryItemCreate(BaseModel):
     guild_id: int
@@ -148,8 +170,13 @@ class StoryItemCreate(BaseModel):
 class StoryItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    item_type: Optional[str] = None
     lore: Optional[str] = None
+    discovery_conditions: Optional[str] = None
+    dm_notes: Optional[str] = None
+    location_id: Optional[int] = None
     is_discovered: Optional[bool] = None
+    discovered: Optional[bool] = None
 
 class StoryEventCreate(BaseModel):
     guild_id: int
@@ -164,8 +191,12 @@ class StoryEventCreate(BaseModel):
 class StoryEventUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    event_type: Optional[str] = None
     status: Optional[str] = None
     trigger_conditions: Optional[str] = None
+    dm_notes: Optional[str] = None
+    location_id: Optional[int] = None
+    resolution_outcome: Optional[str] = None
 
 class SnapshotCreate(BaseModel):
     session_id: int
@@ -1722,8 +1753,56 @@ async def get_location_connections(location_id: int):
     connections = await db.get_nearby_locations(location_id)
     return {"connections": connections}
 
+
+@app.get("/api/location-connections")
+async def list_location_connections(location_id: Optional[int] = None, session_id: Optional[int] = None):
+    """List canonical location connection records."""
+    connections = await db.list_location_connections(location_id=location_id, session_id=session_id)
+    return {"connections": connections}
+
+
+@app.post("/api/location-connections")
+async def create_location_connection_resource(connection: LocationConnectionCreate):
+    """Create a canonical location connection."""
+    try:
+        connection_id = await db.create_location_connection(**connection.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"id": connection_id, "message": "Location connection created"}
+
+
+@app.patch("/api/location-connections/{connection_id}")
+async def update_location_connection_resource(connection_id: int, connection: LocationConnectionUpdate):
+    """Update a canonical location connection."""
+    updates = {k: v for k, v in connection.dict().items() if v is not None}
+    if not updates:
+        return {"message": "Location connection updated"}
+    try:
+        updated = await db.update_location_connection(connection_id, **updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Location connection not found")
+    return {"message": "Location connection updated"}
+
+
+@app.delete("/api/location-connections/{connection_id}")
+async def delete_location_connection_resource(connection_id: int):
+    """Delete a canonical location connection."""
+    deleted = await db.delete_location_connection(connection_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Location connection not found")
+    return {"message": "Location connection deleted"}
+
+
+# Preserve module-level names used by direct tests while keeping
+# distinct internal handler names from the legacy compatibility wrapper.
+create_location_connection = create_location_connection_resource
+update_location_connection = update_location_connection_resource
+delete_location_connection = delete_location_connection_resource
+
 @app.post("/api/locations/{from_id}/connect/{to_id}")
-async def create_location_connection(
+async def create_location_connection_legacy(
     from_id: int, 
     to_id: int,
     direction: str = "path",
@@ -1731,12 +1810,16 @@ async def create_location_connection(
     hidden: bool = False
 ):
     """Create a connection between two locations"""
-    await db.connect_locations(
-        from_id, to_id, 
-        direction=direction,
-        travel_time=travel_time,
-        hidden=hidden
-    )
+    try:
+        await db.create_location_connection(
+            from_location_id=from_id,
+            to_location_id=to_id,
+            direction=direction,
+            travel_time=travel_time,
+            hidden=hidden,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "Locations connected"}
 
 # ============================================================================

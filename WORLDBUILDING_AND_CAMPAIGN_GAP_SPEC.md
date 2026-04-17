@@ -731,6 +731,10 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: `/character create` now delegates to the canonical session-bound GM interview flow instead of maintaining a separate hardcoded race/class/stat allocation runtime in `src/cogs/characters.py`
 - ✅ COMPLETE: slash-command combat setup, party joining, and enemy spawn now delegate through the same canonical encounter/participant creation path used by tool-driven combat in `src/cogs/combat.py` and `src/tools.py`
 - ✅ COMPLETE: browser campaign creator review/edit actions in `web/frontend/src/main.ts` are real pre-finalize editing flows backed by editable client-side preview state and compatible finalize persistence in `web/api.py`
+- ✅ COMPLETE: web location admin now supports creating normalized location connections through the session detail UI using the canonical location connection API in `web/frontend/src/main.ts`, `web/frontend/index.html`, and `web/api.py`
+- ✅ COMPLETE: story item and story event web/API contracts now accept canonical editor payloads and normalize legacy status/discovery aliases across `web/frontend/src/main.ts`, `web/frontend/index.html`, `web/api.py`, and `src/database.py`
+- ✅ COMPLETE: canonical `GET/POST/PATCH/DELETE /api/location-connections` now exists in `web/api.py` with DB-backed CRUD and compatibility wrappers preserved for the legacy location-scoped connect routes
+- ✅ COMPLETE: NPC admin now uses canonical `location_id` assignment with synced display names and location occupant visibility across `src/database.py`, `web/api.py`, `web/frontend/src/main.ts`, and `web/frontend/index.html`
 - ✅ COMPLETE: Discord runtime pack-awareness is complete for GM interview creation, spell reads, skill reads, inventory/item flows, and core tool/web reads for the current v1 slice set
 - ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
 - ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics

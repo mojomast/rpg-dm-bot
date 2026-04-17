@@ -2,7 +2,7 @@
 
 **Date:** April 17, 2026  
 **Project:** RPG Dungeon Master Discord Bot  
-**Status:** Recent hardening complete, but campaign architecture still partial
+**Status:** Recent hardening complete, with canonical location-connections and NPC location admin landed; larger campaign architecture still partial
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
@@ -107,7 +107,83 @@ Results:
 
 #### Remaining Limitation
 
-- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; `/character create` also now routes into the same canonical character creation path. Combat setup/spawn drift and campaign creator review/edit placeholders are also closed. Remaining work is now the larger roadmap/admin systems and deeper canonicalization gaps.
+- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; `/character create` also now routes into the same canonical character creation path. Combat setup/spawn drift, campaign creator review/edit placeholders, web location connection admin, and story item/event editor contract drift are closed. Remaining work is now the larger roadmap/admin systems and deeper canonicalization gaps.
+
+### Additional Admin/Contract Cleanup (same day follow-up)
+
+This pass finished the next two in-progress web/admin slices after combat and preview-edit unification.
+
+#### Changes Made
+
+**`web/frontend/src/main.ts` + `web/frontend/index.html`:**
+- Completed the location connection modal flow so location detail panels can create canonical connections through the existing API
+- Expanded story item cards/editor submission to include canonical `item_type`, `discovery_conditions`, and `dm_notes`
+- Expanded story event cards/editor submission to include canonical `event_type` and `dm_notes`
+- Updated story event UI to treat `triggered` as the canonical active/resolvable status and display resolution outcomes
+
+**`src/database.py`:**
+- Hardened story event normalization so legacy editor statuses like `active` and `completed` map into canonical `triggered` and `resolved`
+- Updated active-event reads to return canonical triggered events instead of depending on legacy `active`
+
+**Tests:**
+- Added focused regression coverage for location connection API metadata round-tripping
+- Added story item alias/canonical update tests
+- Added story event canonical status/update/resolve tests
+- Added DB-level normalization tests for story item/event alias handling and active-event reads
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_database.py tests/test_web_phase7.py -q
+npm run build
+```
+
+Results:
+- 73 focused tests passed
+- frontend TypeScript build passed
+
+### Canonical Location Connections and NPC Location Admin (same day follow-up)
+
+This pass completed the next requested slice pair: the canonical location-connections API resource, then the best bounded NPC/location foundation slice from the faction/NPC/monster area.
+
+#### Changes Made
+
+**`src/database.py`:**
+- Added canonical location-connection CRUD helpers for create/get/list/update/delete
+- Hardened location connection validation for self-links, cross-session links, and duplicate edges
+- Added migration guards for older `location_connections` columns used by canonical CRUD
+- Updated NPC create/update flows so `location_id` is canonical and `location` text is synced from the referenced location
+
+**`web/api.py`:**
+- Added canonical `GET/POST/PATCH/DELETE /api/location-connections`
+- Kept legacy location-scoped connect routes as compatibility wrappers over the canonical DB helper
+- Expanded NPC create/update API contracts to accept `location_id`
+
+**`web/frontend/src/main.ts` + `web/frontend/index.html`:**
+- Switched location connection creation to the canonical resource endpoint
+- Added location connection deletion from the location detail view
+- Switched NPC create/edit forms from free-text location input to location-backed selects
+- Added occupant visibility in location details by showing NPCs assigned to that location
+
+**Tests:**
+- Added DB tests for canonical location-connection CRUD
+- Added DB tests for NPC `location_id` to `location` text synchronization
+- Added API tests for canonical location-connections CRUD and NPC location-based create/update flows
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/pytest tests/test_database.py tests/test_web_phase7.py -q
+npm run build
+```
+
+Results:
+- 78 focused tests passed
+- frontend TypeScript build passed
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion
 

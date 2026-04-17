@@ -220,6 +220,177 @@ async def test_finalize_campaign_preserves_links_after_client_side_additions(db)
 
 
 @pytest.mark.asyncio
+async def test_location_connections_endpoint_round_trips_connection_metadata(db):
+    api_module.db = db
+
+    session_id = await db.create_session(
+        guild_id=67890,
+        name="Connection Session",
+        dm_user_id=12345,
+    )
+    origin_id = await db.create_location(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Stonecross",
+        description="A crossroads town.",
+    )
+    destination_id = await db.create_location(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Barrow Fen",
+        description="Wetlands and burial mounds.",
+        location_type="wilderness",
+    )
+
+    await api_module.create_location_connection_legacy(
+        from_id=origin_id,
+        to_id=destination_id,
+        direction='east',
+        travel_time=3,
+        hidden=False,
+    )
+
+    response = await api_module.get_location_connections(origin_id)
+
+    assert len(response['connections']) == 1
+    assert response['connections'][0]['id'] == destination_id
+    assert response['connections'][0]['name'] == 'Barrow Fen'
+    assert response['connections'][0]['direction'] == 'east'
+    assert response['connections'][0]['travel_time'] == 3
+
+
+@pytest.mark.asyncio
+async def test_canonical_location_connections_crud_endpoints(db):
+    api_module.db = db
+
+    session_id = await db.create_session(guild_id=67890, name='Canonical Connections', dm_user_id=12345)
+    origin_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='Keep')
+    target_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='Roadhouse')
+
+    create_payload = api_module.LocationConnectionCreate(
+        from_location_id=origin_id,
+        to_location_id=target_id,
+        direction='west',
+        travel_time=4,
+        hidden=False,
+        bidirectional=True,
+    )
+    created = await api_module.create_location_connection(create_payload)
+
+    listing = await api_module.list_location_connections(location_id=origin_id)
+    assert len(listing['connections']) == 1
+    assert listing['connections'][0]['id'] == created['id']
+    assert listing['connections'][0]['from_location_name'] == 'Keep'
+    assert listing['connections'][0]['to_location_name'] == 'Roadhouse'
+
+    update_payload = api_module.LocationConnectionUpdate(direction='south', hidden=True)
+    await api_module.update_location_connection(created['id'], update_payload)
+    updated = await db.get_location_connection(created['id'])
+    assert updated['direction'] == 'south'
+    assert updated['hidden'] == 1
+
+    deleted = await api_module.delete_location_connection(created['id'])
+    assert deleted['message'] == 'Location connection deleted'
+    assert await db.get_location_connection(created['id']) is None
+
+
+@pytest.mark.asyncio
+async def test_npc_create_and_update_use_canonical_location_id(db):
+    api_module.db = db
+
+    session_id = await db.create_session(guild_id=67890, name='NPC Location Session', dm_user_id=12345)
+    square_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='Market Square')
+    inn_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name='Copper Cup Inn')
+
+    create_payload = api_module.NPCCreate(
+        guild_id=67890,
+        session_id=session_id,
+        name='Mira',
+        description='A broker of rumors.',
+        personality='Measured',
+        npc_type='neutral',
+        location_id=square_id,
+        created_by=12345,
+    )
+    created = await api_module.create_npc(create_payload)
+
+    created_npc = await db.get_npc(created['id'])
+    assert created_npc['location_id'] == square_id
+    assert created_npc['location'] == 'Market Square'
+
+    update_payload = api_module.NPCUpdate(location_id=inn_id)
+    await api_module.update_npc(created['id'], update_payload)
+
+    updated_npc = await db.get_npc(created['id'])
+    assert updated_npc['location_id'] == inn_id
+    assert updated_npc['location'] == 'Copper Cup Inn'
+
+
+@pytest.mark.asyncio
+async def test_story_item_update_endpoint_accepts_canonical_fields_and_aliases(db):
+    api_module.db = db
+
+    item_id = await db.create_story_item(
+        guild_id=67890,
+        session_id=None,
+        name='Frost Ledger',
+        created_by=12345,
+    )
+
+    payload = api_module.StoryItemUpdate(
+        name='Frost Ledger Revised',
+        item_type='clue',
+        discovery_conditions='Search the archive vault',
+        dm_notes='Points toward the cult treasury.',
+        discovered=True,
+    )
+
+    await api_module.update_story_item(item_id, payload)
+
+    item = await db.get_story_item(item_id)
+    assert item['name'] == 'Frost Ledger Revised'
+    assert item['item_type'] == 'clue'
+    assert item['discovery_conditions'] == 'Search the archive vault'
+    assert item['dm_notes'] == 'Points toward the cult treasury.'
+    assert item['is_discovered'] == 1
+
+
+@pytest.mark.asyncio
+async def test_story_event_update_and_resolve_endpoints_use_canonical_statuses(db):
+    api_module.db = db
+
+    event_id = await db.create_story_event(
+        guild_id=67890,
+        session_id=None,
+        name='Bell Tower Fire',
+        created_by=12345,
+    )
+
+    update_payload = api_module.StoryEventUpdate(
+        event_type='main_plot',
+        trigger_conditions='When the wardstones fail',
+        dm_notes='Escalates the city arc.',
+        status='active',
+    )
+    await api_module.update_story_event(event_id, update_payload)
+
+    triggered = await db.get_story_event(event_id)
+    assert triggered['event_type'] == 'main_plot'
+    assert triggered['trigger_conditions'] == 'When the wardstones fail'
+    assert triggered['dm_notes'] == 'Escalates the city arc.'
+    assert triggered['status'] == 'triggered'
+
+    await api_module.resolve_story_event(event_id, outcome='partial', notes='The fire spreads before containment.')
+
+    resolved = await db.get_story_event(event_id)
+    assert resolved['status'] == 'resolved'
+    assert resolved['resolution_outcome'] == 'partial'
+    assert resolved['dm_notes'] == 'The fire spreads before containment.'
+
+
+@pytest.mark.asyncio
 async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
     api_module.db = db
     api_module.chat_handler = SimpleNamespace(

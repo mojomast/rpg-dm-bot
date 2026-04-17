@@ -690,6 +690,25 @@ class Database:
                 await db.commit()
         except Exception:
             pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(location_connections)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'travel_time' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN travel_time INTEGER DEFAULT 1")
+                await db.commit()
+            if 'requirements' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN requirements TEXT")
+                await db.commit()
+            if 'hidden' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN hidden INTEGER DEFAULT 0")
+                await db.commit()
+            if 'bidirectional' not in columns:
+                await db.execute("ALTER TABLE location_connections ADD COLUMN bidirectional INTEGER DEFAULT 1")
+                await db.commit()
+        except Exception:
+            pass
         
         # Migration 3: Add NPC party member columns to npcs table if they don't exist
         try:
@@ -1846,18 +1865,24 @@ class Database:
     
     async def create_npc(self, guild_id: int, name: str, description: str,
                         personality: str, created_by: int, npc_type: str = "neutral",
-                        location: str = None, is_merchant: bool = False,
+                        location: str = None, location_id: int = None, is_merchant: bool = False,
                         merchant_inventory: List[Dict] = None, stats: Dict = None,
                         session_id: int = None) -> int:
         """Create a new NPC"""
         now = datetime.utcnow().isoformat()
+
+        if location_id is not None:
+            linked_location = await self.get_location(location_id)
+            if not linked_location:
+                raise ValueError("Location not found")
+            location = linked_location['name']
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO npcs (guild_id, session_id, name, description, personality,
-                    location, npc_type, is_merchant, merchant_inventory, stats, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (guild_id, session_id, name, description, personality, location, npc_type,
+                    location, location_id, npc_type, is_merchant, merchant_inventory, stats, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (guild_id, session_id, name, description, personality, location, location_id, npc_type,
                   1 if is_merchant else 0, json.dumps(merchant_inventory or []),
                   json.dumps(stats or {}), created_by, now))
             await db.commit()
@@ -2966,6 +2991,16 @@ class Database:
         """Update NPC fields"""
         if not kwargs:
             return False
+
+        if 'location_id' in kwargs:
+            location_id = kwargs['location_id']
+            if location_id is None:
+                kwargs['location'] = None
+            else:
+                linked_location = await self.get_location(location_id)
+                if not linked_location:
+                    raise ValueError("Location not found")
+                kwargs['location'] = linked_location['name']
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [npc_id]
@@ -3927,17 +3962,143 @@ class Database:
         direction: str,
         travel_time: int = 1,
         requirements: str = None,
-        hidden: bool = False
+        hidden: bool = False,
+        bidirectional: bool = True,
     ) -> int:
         """Create a connection between two locations"""
+        from_location = await self.get_location(from_location_id)
+        to_location = await self.get_location(to_location_id)
+        if not from_location or not to_location:
+            raise ValueError("Location not found")
+        if from_location_id == to_location_id:
+            raise ValueError("Cannot connect a location to itself")
+        if from_location.get('session_id') != to_location.get('session_id'):
+            raise ValueError("Locations must belong to the same session")
+        if from_location.get('guild_id') != to_location.get('guild_id'):
+            raise ValueError("Locations must belong to the same guild")
+
         async with aiosqlite.connect(self.db_path) as db:
+            try:
+                cursor = await db.execute("""
+                    INSERT INTO location_connections 
+                    (from_location_id, to_location_id, direction, travel_time, requirements, hidden, bidirectional)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (from_location_id, to_location_id, direction, travel_time, requirements, int(hidden), int(bidirectional)))
+                await db.commit()
+                return cursor.lastrowid
+            except aiosqlite.IntegrityError as exc:
+                raise ValueError("Location connection already exists") from exc
+
+    async def create_location_connection(
+        self,
+        from_location_id: int,
+        to_location_id: int,
+        direction: str = "path",
+        travel_time: int = 1,
+        requirements: str = None,
+        hidden: bool = False,
+        bidirectional: bool = True,
+    ) -> int:
+        """Canonical helper for location connection creation."""
+        return await self.connect_locations(
+            from_location_id,
+            to_location_id,
+            direction=direction,
+            travel_time=travel_time,
+            requirements=requirements,
+            hidden=hidden,
+            bidirectional=bidirectional,
+        )
+
+    async def get_location_connection(self, connection_id: int) -> Optional[Dict[str, Any]]:
+        """Get a location connection by ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
             cursor = await db.execute("""
-                INSERT INTO location_connections 
-                (from_location_id, to_location_id, direction, travel_time, requirements, hidden)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (from_location_id, to_location_id, direction, travel_time, requirements, int(hidden)))
+                SELECT lc.*, fl.name AS from_location_name, tl.name AS to_location_name
+                FROM location_connections lc
+                JOIN locations fl ON fl.id = lc.from_location_id
+                JOIN locations tl ON tl.id = lc.to_location_id
+                WHERE lc.id = ?
+            """, (connection_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def list_location_connections(self, location_id: int = None, session_id: int = None) -> List[Dict[str, Any]]:
+        """List canonical location connection records."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            query = """
+                SELECT lc.*, fl.name AS from_location_name, tl.name AS to_location_name
+                FROM location_connections lc
+                JOIN locations fl ON fl.id = lc.from_location_id
+                JOIN locations tl ON tl.id = lc.to_location_id
+            """
+            conditions = []
+            params: List[Any] = []
+
+            if location_id is not None:
+                conditions.append("(lc.from_location_id = ? OR lc.to_location_id = ?)")
+                params.extend([location_id, location_id])
+            if session_id is not None:
+                conditions.append("(fl.session_id = ? OR tl.session_id = ?)")
+                params.extend([session_id, session_id])
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY lc.id ASC"
+
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_location_connection(self, connection_id: int, **kwargs) -> bool:
+        """Update a canonical location connection record."""
+        if not kwargs:
+            return False
+
+        existing = await self.get_location_connection(connection_id)
+        if not existing:
+            return False
+
+        merged = {
+            'from_location_id': kwargs.get('from_location_id', existing['from_location_id']),
+            'to_location_id': kwargs.get('to_location_id', existing['to_location_id']),
+            'direction': kwargs.get('direction', existing['direction']),
+            'travel_time': kwargs.get('travel_time', existing['travel_time']),
+            'requirements': kwargs.get('requirements', existing['requirements']),
+            'hidden': kwargs.get('hidden', existing['hidden']),
+            'bidirectional': kwargs.get('bidirectional', existing['bidirectional']),
+        }
+
+        from_location = await self.get_location(merged['from_location_id'])
+        to_location = await self.get_location(merged['to_location_id'])
+        if not from_location or not to_location:
+            raise ValueError("Location not found")
+        if merged['from_location_id'] == merged['to_location_id']:
+            raise ValueError("Cannot connect a location to itself")
+        if from_location.get('session_id') != to_location.get('session_id'):
+            raise ValueError("Locations must belong to the same session")
+        if from_location.get('guild_id') != to_location.get('guild_id'):
+            raise ValueError("Locations must belong to the same guild")
+
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = [int(value) if key in {'hidden', 'bidirectional'} else value for key, value in kwargs.items()] + [connection_id]
+
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute(f"UPDATE location_connections SET {fields} WHERE id = ?", values)
+                await db.commit()
+                return True
+            except aiosqlite.IntegrityError as exc:
+                raise ValueError("Location connection already exists") from exc
+
+    async def delete_location_connection(self, connection_id: int) -> bool:
+        """Delete a location connection record."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM location_connections WHERE id = ?", (connection_id,))
             await db.commit()
-            return cursor.lastrowid
+            return cursor.rowcount > 0
     
     async def get_location_connections(self, location_id: int) -> List[Dict]:
         """Get all connections from a location"""
@@ -4021,6 +4182,8 @@ class Database:
             kwargs['is_discovered'] = int(kwargs.pop('is_discovered'))
         elif 'discovered' in kwargs:
             kwargs['is_discovered'] = int(kwargs.pop('discovered'))
+        if 'location' in kwargs and 'location_id' not in kwargs:
+            kwargs.pop('location')
         kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
@@ -4130,6 +4293,12 @@ class Database:
             return False
         
         # Map API field names to DB column names
+        if kwargs.get('status') == 'active':
+            kwargs['status'] = 'triggered'
+        elif kwargs.get('status') == 'completed':
+            kwargs['status'] = 'resolved'
+        if 'location' in kwargs and 'location_id' not in kwargs:
+            kwargs.pop('location')
         kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
@@ -4887,7 +5056,7 @@ class Database:
             try:
                 cursor = await db.execute("""
                     SELECT * FROM story_events 
-                    WHERE session_id = ? AND status = 'active'
+                    WHERE session_id = ? AND status IN ('triggered', 'active')
                     ORDER BY COALESCE(priority, 0) DESC, COALESCE(triggered_at, created_at) DESC
                 """, (session_id,))
                 rows = await cursor.fetchall()
@@ -4897,7 +5066,7 @@ class Database:
                 try:
                     cursor = await db.execute("""
                         SELECT * FROM story_events 
-                        WHERE session_id = ? AND status = 'active'
+                        WHERE session_id = ? AND status IN ('triggered', 'active')
                         ORDER BY created_at DESC
                     """, (session_id,))
                     rows = await cursor.fetchall()

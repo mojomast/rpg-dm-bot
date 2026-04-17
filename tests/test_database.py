@@ -668,6 +668,59 @@ class TestNPCs:
         merchants = await db.get_npcs_by_location(67890, "Market Square")
         assert len(merchants) == 1
 
+    async def test_create_npc_with_location_id_syncs_location_text(self, db_with_session):
+        db, session_id = db_with_session
+        location_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="East Gate",
+        )
+
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            session_id=session_id,
+            name="Gate Warden",
+            description="Keeps watch.",
+            personality="Suspicious",
+            created_by=12345,
+            location_id=location_id,
+        )
+
+        npc = await db.get_npc(npc_id)
+        assert npc['location_id'] == location_id
+        assert npc['location'] == 'East Gate'
+
+    async def test_update_npc_location_id_syncs_location_text(self, db_with_session):
+        db, session_id = db_with_session
+        old_location_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Docks",
+        )
+        new_location_id = await db.create_location(
+            guild_id=67890,
+            session_id=session_id,
+            created_by=12345,
+            name="Watchtower",
+        )
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            session_id=session_id,
+            name="Harbor Scout",
+            description="Reports ship traffic.",
+            personality="Alert",
+            created_by=12345,
+            location_id=old_location_id,
+        )
+
+        await db.update_npc(npc_id, location_id=new_location_id)
+
+        npc = await db.get_npc(npc_id)
+        assert npc['location_id'] == new_location_id
+        assert npc['location'] == 'Watchtower'
+
     async def test_update_npc_relationship(self, db_with_full_setup):
         """Test updating NPC-character relationship"""
         data = db_with_full_setup
@@ -1059,6 +1112,98 @@ class TestLocations:
         assert nearby[0]['id'] == forest_id
         assert nearby[0]['name'] == "Forest"
         assert nearby[0]['location_type'] == "wilderness"
+
+    async def test_location_connection_crud_round_trip(self, db_with_session):
+        db, session_id = db_with_session
+
+        town_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Town")
+        cave_id = await db.create_location(guild_id=67890, session_id=session_id, created_by=12345, name="Cave")
+
+        connection_id = await db.create_location_connection(
+            from_location_id=town_id,
+            to_location_id=cave_id,
+            direction='north',
+            travel_time=2,
+            hidden=False,
+            bidirectional=True,
+        )
+
+        connection = await db.get_location_connection(connection_id)
+        assert connection['from_location_name'] == 'Town'
+        assert connection['to_location_name'] == 'Cave'
+        assert connection['direction'] == 'north'
+
+        all_connections = await db.list_location_connections(location_id=town_id)
+        assert len(all_connections) == 1
+        assert all_connections[0]['id'] == connection_id
+
+        await db.update_location_connection(connection_id, direction='east', hidden=True)
+        updated = await db.get_location_connection(connection_id)
+        assert updated['direction'] == 'east'
+        assert updated['hidden'] == 1
+
+        deleted = await db.delete_location_connection(connection_id)
+        assert deleted is True
+        assert await db.get_location_connection(connection_id) is None
+
+
+class TestStoryContent:
+    async def test_update_story_item_normalizes_discovered_alias(self, db_with_session):
+        db, session_id = db_with_session
+
+        item_id = await db.create_story_item(
+            guild_id=67890,
+            session_id=session_id,
+            name="Ancient Seal",
+            created_by=12345,
+        )
+
+        await db.update_story_item(item_id, discovered=True, location="Legacy Name")
+
+        item = await db.get_story_item(item_id)
+        assert item['is_discovered'] == 1
+        assert item['location_id'] is None
+
+    async def test_update_story_event_normalizes_legacy_statuses(self, db_with_session):
+        db, session_id = db_with_session
+
+        event_id = await db.create_story_event(
+            guild_id=67890,
+            session_id=session_id,
+            name="Bridge Ambush",
+            created_by=12345,
+        )
+
+        await db.update_story_event(event_id, status='active')
+        event = await db.get_story_event(event_id)
+        assert event['status'] == 'triggered'
+
+        await db.update_story_event(event_id, status='completed')
+        event = await db.get_story_event(event_id)
+        assert event['status'] == 'resolved'
+
+    async def test_get_active_events_returns_triggered_events(self, db_with_session):
+        db, session_id = db_with_session
+
+        triggered_id = await db.create_story_event(
+            guild_id=67890,
+            session_id=session_id,
+            name="Rising Tension",
+            created_by=12345,
+        )
+        resolved_id = await db.create_story_event(
+            guild_id=67890,
+            session_id=session_id,
+            name="Spent Lead",
+            created_by=12345,
+        )
+
+        await db.trigger_event(triggered_id)
+        await db.resolve_event(resolved_id, outcome='success')
+
+        active_events = await db.get_active_events(session_id)
+
+        assert [event['id'] for event in active_events] == [triggered_id]
 
 
 # =============================================================================

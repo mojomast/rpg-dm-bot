@@ -154,6 +154,46 @@ class NPCUpdate(BaseModel):
     is_merchant: Optional[bool] = None
 
 
+class FactionCreate(BaseModel):
+    guild_id: int
+    name: str
+    created_by: int
+    session_id: Optional[int] = None
+    description: Optional[str] = None
+    faction_type: str = "neutral"
+    alignment: Optional[str] = None
+    influence: int = 0
+    goals: List[Dict[str, Any]] = []
+    resources: List[Dict[str, Any]] = []
+    allies: List[Any] = []
+    enemies: List[Any] = []
+
+
+class FactionUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    faction_type: Optional[str] = None
+    alignment: Optional[str] = None
+    influence: Optional[int] = None
+    goals: Optional[List[Dict[str, Any]]] = None
+    resources: Optional[List[Dict[str, Any]]] = None
+    allies: Optional[List[Any]] = None
+    enemies: Optional[List[Any]] = None
+
+
+class FactionMemberCreate(BaseModel):
+    actor_id: int
+    actor_type: str = "npc"
+    role: Optional[str] = None
+    rank: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CharacterFactionReputationUpdate(BaseModel):
+    reputation_change: int = 0
+    notes: Optional[str] = None
+
+
 class LocationConnectionCreate(BaseModel):
     from_location_id: int
     to_location_id: int
@@ -702,6 +742,73 @@ async def delete_npc(npc_id: int):
     await db.delete_npc(npc_id)
     return {"message": "NPC deleted"}
 
+
+# ============================================================================
+# FACTION ENDPOINTS
+# ============================================================================
+
+@app.get("/api/factions")
+async def list_factions(session_id: Optional[int] = None, guild_id: Optional[int] = None):
+    """List factions."""
+    factions = await db.get_factions(session_id=session_id, guild_id=guild_id)
+    return {"factions": factions}
+
+
+@app.post("/api/factions")
+async def create_faction(faction: FactionCreate):
+    """Create a faction."""
+    faction_id = await db.create_faction(**faction.dict())
+    return {"id": faction_id, "message": "Faction created"}
+
+
+@app.patch("/api/factions/{faction_id}")
+async def update_faction(faction_id: int, faction: FactionUpdate):
+    """Update a faction."""
+    updates = {k: v for k, v in faction.dict().items() if v is not None}
+    if updates:
+        await db.update_faction(faction_id, **updates)
+    return {"message": "Faction updated"}
+
+
+@app.delete("/api/factions/{faction_id}")
+async def delete_faction(faction_id: int):
+    """Delete a faction."""
+    await db.delete_faction(faction_id)
+    return {"message": "Faction deleted"}
+
+
+@app.get("/api/factions/{faction_id}/members")
+async def get_faction_members(faction_id: int):
+    """List faction members."""
+    members = await db.get_faction_members(faction_id)
+    return {"members": members}
+
+
+@app.post("/api/factions/{faction_id}/members")
+async def add_faction_member(faction_id: int, member: FactionMemberCreate):
+    """Add a faction member."""
+    membership_id = await db.add_faction_member(faction_id=faction_id, **member.dict())
+    return {"id": membership_id, "message": "Faction member added"}
+
+
+@app.get("/api/characters/{char_id}/factions")
+async def get_character_factions(char_id: int):
+    """Get character faction reputation entries."""
+    factions = await db.get_character_faction_reputation(char_id)
+    return {"factions": factions}
+
+
+@app.patch("/api/characters/{char_id}/factions/{faction_id}")
+async def update_character_faction_reputation(char_id: int, faction_id: int, payload: CharacterFactionReputationUpdate):
+    """Update character faction reputation."""
+    reputation = await db.update_character_faction_reputation(
+        character_id=char_id,
+        faction_id=faction_id,
+        reputation_change=payload.reputation_change,
+        notes=payload.notes,
+    )
+    return {"reputation": reputation, "message": "Faction reputation updated"}
+
 # ============================================================================
 # STORY ITEM ENDPOINTS
 # ============================================================================
@@ -1172,7 +1279,7 @@ async def delete_story_event(event_id: int):
 async def get_npc_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get NPC generation templates"""
     try:
-        return load_content_file("npc_templates.json", content_pack_id)
+        return get_pack_data(content_pack_id, "npc_templates.json")
     except Exception:
         return {"templates": {}}
 
@@ -1181,6 +1288,19 @@ async def get_npc_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
 async def get_enemy_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get monster templates for combat spawning."""
     try:
+        templates = []
+        try:
+            templates = await db.get_monster_templates(content_pack_id=content_pack_id)
+        except Exception:
+            templates = []
+        if templates:
+            normalized = []
+            for template in templates:
+                row = dict(template)
+                row.setdefault('ac', row.get('armor_class'))
+                row.setdefault('hp', row.get('max_hp'))
+                normalized.append(row)
+            return {"templates": normalized}
         data = get_pack_data(content_pack_id, "enemies.json")
         templates = []
         for template_id, template in data.get('enemies', {}).items():
@@ -1190,6 +1310,22 @@ async def get_enemy_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
         return {"templates": sorted(templates, key=lambda item: item.get('name') or item.get('id') or '')}
     except Exception:
         return {"templates": []}
+
+
+@app.get("/api/monsters")
+async def list_monsters(content_pack_id: str = DEFAULT_CONTENT_PACK_ID, session_id: Optional[int] = None):
+    """List relational monster templates."""
+    monsters = await db.get_monster_templates(content_pack_id=content_pack_id, session_id=session_id)
+    return {"monsters": monsters}
+
+
+@app.get("/api/monsters/{template_id}")
+async def get_monster(template_id: str, content_pack_id: str = DEFAULT_CONTENT_PACK_ID, session_id: Optional[int] = None):
+    """Get one monster template."""
+    monster = await db.get_monster_template(template_id=template_id, content_pack_id=content_pack_id, session_id=session_id)
+    if not monster:
+        raise HTTPException(status_code=404, detail="Monster template not found")
+    return monster
 
 # ============================================================================
 # GAME DATA ENDPOINTS - Classes, Races, Skills, Items, Spells

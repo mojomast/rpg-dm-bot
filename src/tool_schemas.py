@@ -309,9 +309,116 @@ ADD_ENEMY_SCHEMA = {
                 "stats": {
                     "type": "object",
                     "description": "Enemy stats (e.g., {'ac': 15, 'attack_bonus': 5, 'damage': '1d8+3'})"
+                },
+                "armor_class": {
+                    "type": "integer",
+                    "description": "Optional explicit AC override"
+                },
+                "template_id": {
+                    "type": "string",
+                    "description": "Optional monster template ID to load from the database/content pack"
+                },
+                "template_name": {
+                    "type": "string",
+                    "description": "Optional monster template name to resolve if the ID is unknown"
                 }
             },
-            "required": ["name", "hp"]
+            "required": []
+        }
+    }
+}
+
+GET_FACTIONS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_factions",
+        "description": "List factions in the current campaign session.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }
+}
+
+CREATE_FACTION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "create_faction",
+        "description": "Create a faction in the current campaign session.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Faction name"},
+                "description": {"type": "string", "description": "Faction description"},
+                "faction_type": {"type": "string", "description": "Faction category or alignment role"},
+                "alignment": {"type": "string", "description": "Optional moral or political alignment"},
+                "influence": {"type": "integer", "description": "Relative influence level"},
+                "goals": {"type": "array", "items": {"type": "object"}, "description": "Faction goals"}
+            },
+            "required": ["name"]
+        }
+    }
+}
+
+UPDATE_FACTION_REPUTATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "update_faction_reputation",
+        "description": "Change a character's reputation with a faction.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {"type": "integer", "description": "Character ID"},
+                "faction_id": {"type": "integer", "description": "Faction ID"},
+                "reputation_change": {"type": "integer", "description": "Signed reputation delta"},
+                "notes": {"type": "string", "description": "Optional update notes"}
+            },
+            "required": ["character_id", "faction_id", "reputation_change"]
+        }
+    }
+}
+
+GET_CHARACTER_FACTION_REPUTATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_character_faction_reputation",
+        "description": "Get a character's faction reputation entries.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character_id": {"type": "integer", "description": "Character ID"},
+                "faction_id": {"type": "integer", "description": "Optional single faction ID"}
+            },
+            "required": ["character_id"]
+        }
+    }
+}
+
+SPAWN_MONSTER_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "spawn_monster",
+        "description": "Spawn one or more monsters from a template into the active combat.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string", "description": "Monster template ID"},
+                "count": {"type": "integer", "description": "How many copies to spawn"}
+            },
+            "required": ["template_id"]
+        }
+    }
+}
+
+GET_STAT_BLOCK_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_stat_block",
+        "description": "Get the full stat block for a monster template.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string", "description": "Monster template ID"},
+                "template_name": {"type": "string", "description": "Monster template name"}
+            },
+            "required": []
         }
     }
 }
@@ -2235,6 +2342,8 @@ TOOLS_SCHEMA = [
     # Combat
     START_COMBAT_SCHEMA,
     ADD_ENEMY_SCHEMA,
+    SPAWN_MONSTER_SCHEMA,
+    GET_STAT_BLOCK_SCHEMA,
     ROLL_INITIATIVE_SCHEMA,
     DEAL_DAMAGE_SCHEMA,
     HEAL_COMBATANT_SCHEMA,
@@ -2260,6 +2369,10 @@ TOOLS_SCHEMA = [
     CREATE_NPC_SCHEMA,
     UPDATE_NPC_RELATIONSHIP_SCHEMA,
     GET_NPCS_SCHEMA,
+    GET_FACTIONS_SCHEMA,
+    CREATE_FACTION_SCHEMA,
+    UPDATE_FACTION_REPUTATION_SCHEMA,
+    GET_CHARACTER_FACTION_REPUTATION_SCHEMA,
     GENERATE_NPC_SCHEMA,
     SET_NPC_SECRET_SCHEMA,
     # NPC Party Members
@@ -2352,19 +2465,21 @@ class ToolSchemas:
                          ADD_EXPERIENCE_SCHEMA, UPDATE_CHARACTER_STATS_SCHEMA],
             "inventory": [GIVE_ITEM_SCHEMA, REMOVE_ITEM_SCHEMA, GET_INVENTORY_SCHEMA,
                          GIVE_GOLD_SCHEMA, TAKE_GOLD_SCHEMA],
-            "combat": [START_COMBAT_SCHEMA, ADD_ENEMY_SCHEMA, ROLL_INITIATIVE_SCHEMA,
-                      DEAL_DAMAGE_SCHEMA, HEAL_COMBATANT_SCHEMA, APPLY_STATUS_SCHEMA,
-                      NEXT_TURN_SCHEMA, GET_COMBAT_STATUS_SCHEMA, END_COMBAT_SCHEMA,
-                      END_COMBAT_WITH_REWARDS_SCHEMA],
+            "combat": [START_COMBAT_SCHEMA, ADD_ENEMY_SCHEMA, SPAWN_MONSTER_SCHEMA, GET_STAT_BLOCK_SCHEMA, ROLL_INITIATIVE_SCHEMA,
+                       DEAL_DAMAGE_SCHEMA, HEAL_COMBATANT_SCHEMA, APPLY_STATUS_SCHEMA,
+                       NEXT_TURN_SCHEMA, GET_COMBAT_STATUS_SCHEMA, END_COMBAT_SCHEMA,
+                       END_COMBAT_WITH_REWARDS_SCHEMA],
             "dice": [ROLL_DICE_SCHEMA, ROLL_ATTACK_SCHEMA, ROLL_SAVE_SCHEMA, 
                     ROLL_SKILL_CHECK_SCHEMA],
             "quest": [CREATE_QUEST_SCHEMA, UPDATE_QUEST_SCHEMA, COMPLETE_OBJECTIVE_SCHEMA,
                      GIVE_QUEST_REWARDS_SCHEMA, COMPLETE_QUEST_WITH_REWARDS_SCHEMA, 
                      GET_QUESTS_SCHEMA],
             "npc": [GET_NPC_INFO_SCHEMA, CREATE_NPC_SCHEMA, UPDATE_NPC_RELATIONSHIP_SCHEMA,
-                   GET_NPCS_SCHEMA, GENERATE_NPC_SCHEMA, SET_NPC_SECRET_SCHEMA,
-                   ADD_NPC_TO_PARTY_SCHEMA, REMOVE_NPC_FROM_PARTY_SCHEMA,
-                   GET_PARTY_NPCS_SCHEMA, UPDATE_NPC_LOYALTY_SCHEMA, NPC_PARTY_ACTION_SCHEMA],
+                    GET_NPCS_SCHEMA, GET_FACTIONS_SCHEMA, CREATE_FACTION_SCHEMA,
+                    UPDATE_FACTION_REPUTATION_SCHEMA, GET_CHARACTER_FACTION_REPUTATION_SCHEMA,
+                    GENERATE_NPC_SCHEMA, SET_NPC_SECRET_SCHEMA,
+                    ADD_NPC_TO_PARTY_SCHEMA, REMOVE_NPC_FROM_PARTY_SCHEMA,
+                    GET_PARTY_NPCS_SCHEMA, UPDATE_NPC_LOYALTY_SCHEMA, NPC_PARTY_ACTION_SCHEMA],
             "session": [GET_PARTY_INFO_SCHEMA, ADD_STORY_ENTRY_SCHEMA, GET_STORY_LOG_SCHEMA,
                        GET_COMPREHENSIVE_SESSION_STATE_SCHEMA],
             "memory": [SAVE_MEMORY_SCHEMA, GET_PLAYER_MEMORIES_SCHEMA],
@@ -2380,7 +2495,7 @@ class ToolSchemas:
                           TRANSFER_STORY_ITEM_SCHEMA, GET_STORY_ITEMS_SCHEMA,
                           PICKUP_STORY_ITEM_SCHEMA, DROP_STORY_ITEM_SCHEMA],
             "story_event": [CREATE_STORY_EVENT_SCHEMA, TRIGGER_EVENT_SCHEMA,
-                           RESOLVE_EVENT_SCHEMA, GET_ACTIVE_EVENTS_SCHEMA],
+                            RESOLVE_EVENT_SCHEMA, GET_ACTIVE_EVENTS_SCHEMA],
             "worldbuilding": [GENERATE_WORLD_SCHEMA, GENERATE_KEY_NPCS_SCHEMA,
                              GENERATE_LOCATION_SCHEMA, GENERATE_QUEST_SCHEMA,
                              GENERATE_ENCOUNTER_SCHEMA, GENERATE_BACKSTORY_SCHEMA,

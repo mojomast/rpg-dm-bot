@@ -11,9 +11,44 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from src.content_loader import DEFAULT_CONTENT_PACK_ID, get_pack_data
+
 
 JSON_SESSION_FIELDS = {'world_state', 'theme_config'}
 JSON_GAME_STATE_FIELDS = {'game_data', 'theme_state', 'allowed_content_packs'}
+JSON_NPC_FIELDS = {
+    'merchant_inventory': [],
+    'stats': {},
+    'combat_stats': {},
+    'goals': [],
+    'secrets': [],
+    'tags': [],
+    'actions': [],
+    'traits': [],
+}
+JSON_QUEST_FIELDS = {
+    'objectives': [],
+    'rewards': {},
+}
+JSON_QUEST_PROGRESS_FIELDS = {
+    'objectives_completed': [],
+}
+JSON_FACTION_FIELDS = {
+    'goals': [],
+    'resources': [],
+    'allies': [],
+    'enemies': [],
+}
+JSON_MONSTER_TEMPLATE_FIELDS = {
+    'stats': {},
+    'actions': [],
+    'traits': [],
+    'loot_table': [],
+}
+JSON_BOSS_PHASE_FIELDS = {
+    'actions': [],
+    'traits': [],
+}
 
 
 def _loads_json_value(value: Any, default: Any):
@@ -50,6 +85,28 @@ def _normalize_game_state_record(state: Optional[Dict[str, Any]]) -> Optional[Di
     normalized['theme_state'] = _loads_json_value(normalized.get('theme_state'), {})
     normalized['allowed_content_packs'] = _loads_json_value(normalized.get('allowed_content_packs'), [])
     return normalized
+
+
+def _normalize_json_fields(record: Optional[Dict[str, Any]], field_defaults: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if record is None:
+        return None
+    normalized = dict(record)
+    for field, default in field_defaults.items():
+        normalized[field] = _loads_json_value(normalized.get(field), default)
+    return normalized
+
+
+def _clamp(value: Any, minimum: int, maximum: int, default: int = 0) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _slugify(value: str) -> str:
+    value = re.sub(r'[^a-z0-9]+', '_', (value or '').strip().lower())
+    return value.strip('_') or 'template'
 
 
 class Database:
@@ -197,6 +254,102 @@ class Database:
                     FOREIGN KEY (npc_id) REFERENCES npcs(id),
                     FOREIGN KEY (character_id) REFERENCES characters(id),
                     UNIQUE(npc_id, character_id)
+                )
+            """)
+
+            # ================================================================
+            # FACTIONS TABLES
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS factions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    session_id INTEGER,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    faction_type TEXT DEFAULT 'neutral',
+                    alignment TEXT,
+                    influence INTEGER DEFAULT 0,
+                    goals TEXT DEFAULT '[]',
+                    resources TEXT DEFAULT '[]',
+                    allies TEXT DEFAULT '[]',
+                    enemies TEXT DEFAULT '[]',
+                    created_by INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS faction_memberships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    faction_id INTEGER NOT NULL,
+                    actor_type TEXT NOT NULL DEFAULT 'npc',
+                    actor_id INTEGER NOT NULL,
+                    role TEXT,
+                    rank TEXT,
+                    joined_at TEXT NOT NULL,
+                    notes TEXT,
+                    FOREIGN KEY (faction_id) REFERENCES factions(id),
+                    UNIQUE(faction_id, actor_type, actor_id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS character_faction_reputation (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    character_id INTEGER NOT NULL,
+                    faction_id INTEGER NOT NULL,
+                    reputation INTEGER DEFAULT 0,
+                    notes TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (character_id) REFERENCES characters(id),
+                    FOREIGN KEY (faction_id) REFERENCES factions(id),
+                    UNIQUE(character_id, faction_id)
+                )
+            """)
+
+            # ================================================================
+            # MONSTER TEMPLATES TABLES
+            # ================================================================
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS monster_templates (
+                    id TEXT PRIMARY KEY,
+                    session_id INTEGER,
+                    content_pack_id TEXT NOT NULL DEFAULT 'fantasy_core',
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    creature_family TEXT,
+                    encounter_tier TEXT DEFAULT 'standard',
+                    challenge_rating REAL DEFAULT 0,
+                    max_hp INTEGER DEFAULT 1,
+                    armor_class INTEGER DEFAULT 10,
+                    speed INTEGER DEFAULT 30,
+                    is_boss INTEGER DEFAULT 0,
+                    stats TEXT DEFAULT '{}',
+                    actions TEXT DEFAULT '[]',
+                    traits TEXT DEFAULT '[]',
+                    loot_table TEXT DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS boss_phases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    template_id TEXT NOT NULL,
+                    phase_number INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    hp_threshold INTEGER,
+                    description TEXT,
+                    actions TEXT DEFAULT '[]',
+                    traits TEXT DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (template_id) REFERENCES monster_templates(id),
+                    UNIQUE(template_id, phase_number)
                 )
             """)
             
@@ -619,7 +772,7 @@ class Database:
                     FOREIGN KEY (location_id) REFERENCES locations(id)
                 )
             """)
-            
+
             # ================================================================
             # SESSION SNAPSHOTS TABLE (save/load game state)
             # ================================================================
@@ -900,6 +1053,83 @@ class Database:
             await db.execute("UPDATE combat_participants SET armor_class = COALESCE(armor_class, 10)")
             await db.execute("UPDATE combat_participants SET combat_stats = COALESCE(combat_stats, '{}')")
             await db.commit()
+        except Exception:
+            pass
+
+        # Migration 7: Phase 5 NPC foundation columns
+        try:
+            cursor = await db.execute("PRAGMA table_info(npcs)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'actor_kind' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN actor_kind TEXT DEFAULT 'npc'")
+                await db.commit()
+            if 'faction_id' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN faction_id INTEGER")
+                await db.commit()
+            if 'faction_role' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN faction_role TEXT")
+                await db.commit()
+            if 'goals' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN goals TEXT DEFAULT '[]'")
+                await db.commit()
+            if 'secrets' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN secrets TEXT DEFAULT '[]'")
+                await db.commit()
+            if 'tags' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN tags TEXT DEFAULT '[]'")
+                await db.commit()
+            if 'challenge_rating' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN challenge_rating REAL DEFAULT 0")
+                await db.commit()
+            if 'actions' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN actions TEXT DEFAULT '[]'")
+                await db.commit()
+            if 'traits' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN traits TEXT DEFAULT '[]'")
+                await db.commit()
+
+            await db.execute("UPDATE npcs SET actor_kind = COALESCE(NULLIF(actor_kind, ''), 'npc')")
+            await db.execute("UPDATE npcs SET goals = COALESCE(NULLIF(goals, ''), '[]')")
+            await db.execute("UPDATE npcs SET secrets = COALESCE(NULLIF(secrets, ''), '[]')")
+            await db.execute("UPDATE npcs SET tags = COALESCE(NULLIF(tags, ''), '[]')")
+            await db.execute("UPDATE npcs SET actions = COALESCE(NULLIF(actions, ''), '[]')")
+            await db.execute("UPDATE npcs SET traits = COALESCE(NULLIF(traits, ''), '[]')")
+            await db.commit()
+        except Exception:
+            pass
+
+        # Migration 8: Phase 5 combat participant template/runtime columns
+        try:
+            cursor = await db.execute("PRAGMA table_info(combat_participants)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'template_id' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN template_id TEXT")
+                await db.commit()
+            if 'resource_state' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN resource_state TEXT DEFAULT '{}' ")
+                await db.commit()
+            if 'phase_state' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN phase_state TEXT DEFAULT '{}' ")
+                await db.commit()
+            if 'is_boss' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN is_boss INTEGER DEFAULT 0")
+                await db.commit()
+            if 'encounter_tier' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN encounter_tier TEXT DEFAULT 'standard'")
+                await db.commit()
+
+            await db.execute("UPDATE combat_participants SET resource_state = COALESCE(NULLIF(resource_state, ''), '{}')")
+            await db.execute("UPDATE combat_participants SET phase_state = COALESCE(NULLIF(phase_state, ''), '{}')")
+            await db.execute("UPDATE combat_participants SET encounter_tier = COALESCE(NULLIF(encounter_tier, ''), 'standard')")
+            await db.commit()
+        except Exception:
+            pass
+
+        # Migration 10: Seed content-pack monster templates into relational table
+        try:
+            await self._seed_default_monster_templates(db)
         except Exception:
             pass
     
@@ -1764,10 +1994,10 @@ class Database:
     # ========================================================================
     
     async def create_quest(self, guild_id: int, title: str, description: str,
-                          objectives: List[Dict], rewards: Dict, created_by: int,
-                          session_id: int = None, difficulty: str = "medium",
-                          quest_giver_npc_id: int = None, dm_notes: str = None,
-                          dm_plan: str = None) -> int:
+                           objectives: List[Dict], rewards: Dict, created_by: int,
+                           session_id: int = None, difficulty: str = "medium",
+                           quest_giver_npc_id: int = None, dm_notes: str = None,
+                           dm_plan: str = None) -> int:
         """Create a new quest"""
         now = datetime.utcnow().isoformat()
         
@@ -1789,10 +2019,7 @@ class Database:
             cursor = await db.execute("SELECT * FROM quests WHERE id = ?", (quest_id,))
             row = await cursor.fetchone()
             if row:
-                quest = dict(row)
-                quest['objectives'] = json.loads(quest['objectives'])
-                quest['rewards'] = json.loads(quest['rewards'])
-                return quest
+                return self._normalize_quest_record(dict(row))
             return None
     
     async def get_available_quests(self, guild_id: int, session_id: int = None) -> List[Dict[str, Any]]:
@@ -1812,10 +2039,7 @@ class Database:
             rows = await cursor.fetchall()
             quests = []
             for row in rows:
-                quest = dict(row)
-                quest['objectives'] = json.loads(quest['objectives'])
-                quest['rewards'] = json.loads(quest['rewards'])
-                quests.append(quest)
+                quests.append(self._normalize_quest_record(dict(row)))
             return quests
     
     async def accept_quest(self, quest_id: int, character_id: int) -> Dict[str, Any]:
@@ -1861,10 +2085,8 @@ class Database:
             rows = await cursor.fetchall()
             quests = []
             for row in rows:
-                quest = dict(row)
-                quest['objectives'] = json.loads(quest['objectives'])
-                quest['rewards'] = json.loads(quest['rewards'])
-                quest['objectives_completed'] = json.loads(quest['objectives_completed'])
+                quest = self._normalize_quest_record(dict(row))
+                quest = self._normalize_quest_progress_record(quest)
                 quests.append(quest)
             return quests
     
@@ -1951,10 +2173,9 @@ class Database:
             return False
         
         # Handle JSON fields
-        if 'objectives' in kwargs:
-            kwargs['objectives'] = json.dumps(kwargs['objectives'])
-        if 'rewards' in kwargs:
-            kwargs['rewards'] = json.dumps(kwargs['rewards'])
+        for field, default in JSON_QUEST_FIELDS.items():
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], default)
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [quest_id]
@@ -1972,7 +2193,11 @@ class Database:
                         personality: str, created_by: int, npc_type: str = "neutral",
                         location: str = None, location_id: int = None, is_merchant: bool = False,
                         merchant_inventory: List[Dict] = None, stats: Dict = None,
-                        session_id: int = None) -> int:
+                        session_id: int = None, actor_kind: str = 'npc', faction_id: int = None,
+                        faction_role: str = None, goals: List[Dict[str, Any]] = None,
+                        secrets: List[Dict[str, Any]] = None, tags: List[str] = None,
+                        challenge_rating: float = 0, actions: List[Dict[str, Any]] = None,
+                        traits: List[Dict[str, Any]] = None) -> int:
         """Create a new NPC"""
         now = datetime.utcnow().isoformat()
 
@@ -1985,11 +2210,14 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO npcs (guild_id, session_id, name, description, personality,
-                    location, location_id, npc_type, is_merchant, merchant_inventory, stats, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    location, location_id, npc_type, is_merchant, merchant_inventory, stats, created_by, created_at,
+                    actor_kind, faction_id, faction_role, goals, secrets, tags, challenge_rating, actions, traits)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (guild_id, session_id, name, description, personality, location, location_id, npc_type,
                   1 if is_merchant else 0, json.dumps(merchant_inventory or []),
-                  json.dumps(stats or {}), created_by, now))
+                  json.dumps(stats or {}), created_by, now, actor_kind, faction_id, faction_role,
+                  json.dumps(goals or []), json.dumps(secrets or []), json.dumps(tags or []),
+                  challenge_rating, json.dumps(actions or []), json.dumps(traits or [])))
             await db.commit()
             return cursor.lastrowid
     
@@ -2000,10 +2228,7 @@ class Database:
             cursor = await db.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,))
             row = await cursor.fetchone()
             if row:
-                npc = dict(row)
-                npc['merchant_inventory'] = json.loads(npc['merchant_inventory'])
-                npc['stats'] = json.loads(npc['stats'])
-                return npc
+                return self._normalize_npc_record(dict(row))
             return None
     
     async def get_npcs_by_location(self, guild_id: int, location: str) -> List[Dict[str, Any]]:
@@ -2016,10 +2241,7 @@ class Database:
             rows = await cursor.fetchall()
             npcs = []
             for row in rows:
-                npc = dict(row)
-                npc['merchant_inventory'] = json.loads(npc['merchant_inventory'])
-                npc['stats'] = json.loads(npc['stats'])
-                npcs.append(npc)
+                npcs.append(self._normalize_npc_record(dict(row)))
             return npcs
     
     async def get_guild_npcs(self, guild_id: int, session_id: int = None) -> List[Dict[str, Any]]:
@@ -2038,10 +2260,7 @@ class Database:
             rows = await cursor.fetchall()
             npcs = []
             for row in rows:
-                npc = dict(row)
-                npc['merchant_inventory'] = json.loads(npc['merchant_inventory'])
-                npc['stats'] = json.loads(npc['stats'])
-                npcs.append(npc)
+                npcs.append(self._normalize_npc_record(dict(row)))
             return npcs
 
     async def get_npcs_by_session(self, session_id: int) -> List[Dict[str, Any]]:
@@ -2055,10 +2274,7 @@ class Database:
             rows = await cursor.fetchall()
             npcs = []
             for row in rows:
-                npc = dict(row)
-                npc['merchant_inventory'] = json.loads(npc['merchant_inventory']) if npc.get('merchant_inventory') else []
-                npc['stats'] = json.loads(npc['stats']) if npc.get('stats') else {}
-                npcs.append(npc)
+                npcs.append(self._normalize_npc_record(dict(row)))
             return npcs
 
     async def get_npcs_by_guild(self, guild_id: int) -> List[Dict[str, Any]]:
@@ -2283,6 +2499,24 @@ class Database:
             except Exception:
                 combat_stats = {}
         return dict(combat_stats or {})
+
+    def _normalize_npc_record(self, npc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(npc, JSON_NPC_FIELDS)
+
+    def _normalize_quest_record(self, quest: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(quest, JSON_QUEST_FIELDS)
+
+    def _normalize_quest_progress_record(self, progress: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(progress, JSON_QUEST_PROGRESS_FIELDS)
+
+    def _normalize_faction_record(self, faction: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(faction, JSON_FACTION_FIELDS)
+
+    def _normalize_monster_template_record(self, template: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(template, JSON_MONSTER_TEMPLATE_FIELDS)
+
+    def _normalize_boss_phase_record(self, phase: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(phase, JSON_BOSS_PHASE_FIELDS)
     
     async def get_active_combat(self, guild_id: int = None, channel_id: int = None) -> Optional[Dict[str, Any]]:
         """Get active combat in a channel or guild"""
@@ -2332,7 +2566,10 @@ class Database:
     async def add_combatant(self, encounter_id: int, participant_type: str,
                             participant_id: int, name: str, hp: int, max_hp: int,
                             initiative: int, is_player: bool = True,
-                            armor_class: int = None, combat_stats: Dict[str, Any] = None) -> int:
+                            armor_class: int = None, combat_stats: Dict[str, Any] = None,
+                            template_id: str = None, resource_state: Dict[str, Any] = None,
+                            phase_state: Dict[str, Any] = None, is_boss: bool = False,
+                            encounter_tier: str = 'standard') -> int:
         """Add a combatant to an encounter"""
         normalized_stats = self._normalize_combat_stats(combat_stats)
         if armor_class is None:
@@ -2349,10 +2586,13 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO combat_participants (encounter_id, participant_type, participant_id,
-                    name, current_hp, max_hp, initiative, is_player, armor_class, combat_stats)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    name, current_hp, max_hp, initiative, is_player, armor_class, combat_stats,
+                    template_id, resource_state, phase_state, is_boss, encounter_tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (encounter_id, participant_type, participant_id, name, hp, max_hp,
-                  initiative, 1 if is_player else 0, armor_class, json.dumps(normalized_stats)))
+                  initiative, 1 if is_player else 0, armor_class, json.dumps(normalized_stats),
+                  template_id, json.dumps(resource_state or {}), json.dumps(phase_state or {}),
+                  1 if is_boss else 0, encounter_tier or 'standard'))
             await db.commit()
             return cursor.lastrowid
     
@@ -2370,6 +2610,8 @@ class Database:
                 c = dict(row)
                 c['status_effects'] = json.loads(c['status_effects'])
                 c['combat_stats'] = self._normalize_combat_stats(c.get('combat_stats'))
+                c['resource_state'] = _loads_json_value(c.get('resource_state'), {})
+                c['phase_state'] = _loads_json_value(c.get('phase_state'), {})
                 combatants.append(c)
             return combatants
     
@@ -3109,6 +3351,10 @@ class Database:
                 if not linked_location:
                     raise ValueError("Location not found")
                 kwargs['location'] = linked_location['name']
+
+        for field, default in JSON_NPC_FIELDS.items():
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], default)
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [npc_id]
@@ -3157,11 +3403,7 @@ class Database:
             rows = await cursor.fetchall()
             quests = []
             for row in rows:
-                quest = dict(row)
-                quest['objectives'] = json.loads(quest['objectives']) if quest.get('objectives') else []
-                quest['rewards'] = json.loads(quest['rewards']) if quest.get('rewards') else {}
-                quests.append(quest)
-            return quests
+                quests.append(self._normalize_quest_record(dict(row)))
             return quests
     
     async def get_quest(self, quest_id: int) -> Optional[Dict[str, Any]]:
@@ -3171,10 +3413,7 @@ class Database:
             cursor = await db.execute("SELECT * FROM quests WHERE id = ?", (quest_id,))
             row = await cursor.fetchone()
             if row:
-                quest = dict(row)
-                quest['objectives'] = json.loads(quest['objectives']) if quest.get('objectives') else []
-                quest['rewards'] = json.loads(quest['rewards']) if quest.get('rewards') else {}
-                return quest
+                return self._normalize_quest_record(dict(row))
             return None
 
     async def get_quest_stages(self, quest_id: int) -> List[Dict[str, Any]]:
@@ -3232,6 +3471,10 @@ class Database:
         """Update quest fields"""
         if not kwargs:
             return False
+
+        for field, default in JSON_QUEST_FIELDS.items():
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], default)
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [quest_id]
@@ -3319,6 +3562,8 @@ class Database:
                 p = dict(row)
                 p['status_effects'] = json.loads(p['status_effects']) if p.get('status_effects') else []
                 p['combat_stats'] = self._normalize_combat_stats(p.get('combat_stats'))
+                p['resource_state'] = _loads_json_value(p.get('resource_state'), {})
+                p['phase_state'] = _loads_json_value(p.get('phase_state'), {})
                 p['character_id'] = p['participant_id'] if p.get('participant_type') == 'character' else None
                 participants.append(p)
             return participants
@@ -4369,6 +4614,441 @@ class Database:
             """, (location_id,))
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # ==================== PHASE 5: FACTIONS & MONSTERS ====================
+
+    def _enemy_template_to_monster_template(
+        self,
+        template_id: str,
+        payload: Dict[str, Any],
+        content_pack_id: str,
+        session_id: int = None,
+    ) -> Dict[str, Any]:
+        payload = dict(payload or {})
+        stats = dict(payload.get('stats') or {})
+        description = payload.get('description')
+        attacks = payload.get('attacks') or []
+
+        traits = []
+        if description:
+            traits.append({'name': 'Description', 'text': description})
+        for field in ('special_abilities', 'immunities', 'vulnerabilities', 'xp_reward', 'gold_reward'):
+            if payload.get(field) not in (None, '', [], {}):
+                traits.append({'name': field, 'value': payload.get(field)})
+
+        return {
+            'id': payload.get('id') or template_id,
+            'session_id': session_id,
+            'content_pack_id': content_pack_id or DEFAULT_CONTENT_PACK_ID,
+            'name': payload.get('name') or template_id.replace('_', ' ').title(),
+            'description': description,
+            'creature_family': payload.get('creature_family') or template_id.split('_', 1)[0],
+            'encounter_tier': 'boss' if payload.get('is_boss') else 'standard',
+            'challenge_rating': payload.get('challenge_rating') or 0,
+            'max_hp': payload.get('hp') or payload.get('max_hp') or 1,
+            'armor_class': payload.get('ac') or payload.get('armor_class') or 10,
+            'speed': payload.get('speed') or 30,
+            'is_boss': 1 if payload.get('is_boss') else 0,
+            'stats': stats,
+            'actions': attacks,
+            'traits': traits,
+            'loot_table': payload.get('loot_table') or [],
+        }
+
+    async def _seed_default_monster_templates(self, db_conn=None, content_pack_id: str = DEFAULT_CONTENT_PACK_ID) -> int:
+        now = datetime.utcnow().isoformat()
+        payload = get_pack_data(content_pack_id, 'enemies.json')
+        enemies = payload.get('enemies', {}) if isinstance(payload, dict) else {}
+        if not enemies:
+            return 0
+
+        should_close = db_conn is None
+        db = db_conn or await aiosqlite.connect(self.db_path)
+        seeded = 0
+        try:
+            for raw_template_id, template in enemies.items():
+                record = self._enemy_template_to_monster_template(raw_template_id, template, content_pack_id)
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO monster_templates (
+                        id, session_id, content_pack_id, name, description, creature_family,
+                        encounter_tier, challenge_rating, max_hp, armor_class, speed, is_boss,
+                        stats, actions, traits, loot_table, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record['id'],
+                        record['session_id'],
+                        record['content_pack_id'],
+                        record['name'],
+                        record['description'],
+                        record['creature_family'],
+                        record['encounter_tier'],
+                        record['challenge_rating'],
+                        record['max_hp'],
+                        record['armor_class'],
+                        record['speed'],
+                        record['is_boss'],
+                        json.dumps(record['stats']),
+                        json.dumps(record['actions']),
+                        json.dumps(record['traits']),
+                        json.dumps(record['loot_table']),
+                        now,
+                        now,
+                    ),
+                )
+                seeded += 1
+            await db.commit()
+            return seeded
+        finally:
+            if should_close:
+                await db.close()
+
+    async def seed_monster_templates_from_content_pack(self, content_pack_id: str = DEFAULT_CONTENT_PACK_ID) -> int:
+        """Seed relational monster templates from a content pack's enemies.json file."""
+        return await self._seed_default_monster_templates(content_pack_id=content_pack_id)
+
+    async def create_faction(
+        self,
+        guild_id: int,
+        name: str,
+        created_by: int,
+        session_id: int = None,
+        description: str = None,
+        faction_type: str = 'neutral',
+        alignment: str = None,
+        influence: int = 0,
+        goals: List[Dict[str, Any]] = None,
+        resources: List[Dict[str, Any]] = None,
+        allies: List[Any] = None,
+        enemies: List[Any] = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO factions (
+                    guild_id, session_id, name, description, faction_type, alignment, influence,
+                    goals, resources, allies, enemies, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    guild_id,
+                    session_id,
+                    name,
+                    description,
+                    faction_type,
+                    alignment,
+                    influence,
+                    json.dumps(goals or []),
+                    json.dumps(resources or []),
+                    json.dumps(allies or []),
+                    json.dumps(enemies or []),
+                    created_by,
+                    now,
+                    now,
+                ),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_faction(self, faction_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM factions WHERE id = ?", (faction_id,))
+            row = await cursor.fetchone()
+            return self._normalize_faction_record(dict(row)) if row else None
+
+    async def get_factions(self, session_id: int = None, guild_id: int = None) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions = []
+            params = []
+            if session_id is not None:
+                conditions.append('session_id = ?')
+                params.append(session_id)
+            if guild_id is not None:
+                conditions.append('guild_id = ?')
+                params.append(guild_id)
+            where_clause = ' AND '.join(conditions) if conditions else '1=1'
+            cursor = await db.execute(
+                f"SELECT * FROM factions WHERE {where_clause} ORDER BY updated_at DESC, id DESC",
+                params,
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_faction_record(dict(row)) for row in rows]
+
+    async def update_faction(self, faction_id: int, **kwargs) -> bool:
+        if not kwargs:
+            return False
+        for field in JSON_FACTION_FIELDS:
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], JSON_FACTION_FIELDS[field])
+        kwargs['updated_at'] = datetime.utcnow().isoformat()
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [faction_id]
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(f"UPDATE factions SET {fields} WHERE id = ?", values)
+            await db.commit()
+            return True
+
+    async def delete_faction(self, faction_id: int) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM faction_memberships WHERE faction_id = ?", (faction_id,))
+            await db.execute("DELETE FROM character_faction_reputation WHERE faction_id = ?", (faction_id,))
+            await db.execute("UPDATE npcs SET faction_id = NULL, faction_role = NULL WHERE faction_id = ?", (faction_id,))
+            await db.execute("DELETE FROM factions WHERE id = ?", (faction_id,))
+            await db.commit()
+            return True
+
+    async def add_faction_member(
+        self,
+        faction_id: int,
+        actor_id: int,
+        actor_type: str = 'npc',
+        role: str = None,
+        rank: str = None,
+        notes: str = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO faction_memberships (faction_id, actor_type, actor_id, role, rank, joined_at, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(faction_id, actor_type, actor_id)
+                DO UPDATE SET role = excluded.role, rank = excluded.rank, notes = excluded.notes
+                """,
+                (faction_id, actor_type, actor_id, role, rank, now, notes),
+            )
+            if actor_type == 'npc':
+                await db.execute(
+                    "UPDATE npcs SET faction_id = ?, faction_role = ? WHERE id = ?",
+                    (faction_id, role, actor_id),
+                )
+            await db.commit()
+            cursor = await db.execute(
+                "SELECT id FROM faction_memberships WHERE faction_id = ? AND actor_type = ? AND actor_id = ?",
+                (faction_id, actor_type, actor_id),
+            )
+            row = await cursor.fetchone()
+            return row[0]
+
+    async def get_faction_members(self, faction_id: int, actor_type: str = None) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            params: List[Any] = [faction_id]
+            where = ['fm.faction_id = ?']
+            if actor_type:
+                where.append('fm.actor_type = ?')
+                params.append(actor_type)
+            cursor = await db.execute(
+                f"""
+                SELECT fm.*, n.name AS actor_name
+                FROM faction_memberships fm
+                LEFT JOIN npcs n ON fm.actor_type = 'npc' AND fm.actor_id = n.id
+                WHERE {' AND '.join(where)}
+                ORDER BY fm.joined_at ASC, fm.id ASC
+                """,
+                params,
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_character_faction_reputation(
+        self,
+        character_id: int,
+        faction_id: int,
+        reputation_change: int = 0,
+        notes: str = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT reputation FROM character_faction_reputation WHERE character_id = ? AND faction_id = ?",
+                (character_id, faction_id),
+            )
+            row = await cursor.fetchone()
+            current = row[0] if row else 0
+            new_reputation = _clamp(current + int(reputation_change or 0), -100, 100)
+            await db.execute(
+                """
+                INSERT INTO character_faction_reputation (character_id, faction_id, reputation, notes, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(character_id, faction_id)
+                DO UPDATE SET reputation = excluded.reputation, notes = excluded.notes, updated_at = excluded.updated_at
+                """,
+                (character_id, faction_id, new_reputation, notes, now),
+            )
+            await db.commit()
+            return new_reputation
+
+    async def get_character_faction_reputation(self, character_id: int, faction_id: int = None) -> List[Dict[str, Any]] | Dict[str, Any]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if faction_id is not None:
+                cursor = await db.execute(
+                    """
+                    SELECT cfr.*, f.name AS faction_name
+                    FROM character_faction_reputation cfr
+                    JOIN factions f ON cfr.faction_id = f.id
+                    WHERE cfr.character_id = ? AND cfr.faction_id = ?
+                    """,
+                    (character_id, faction_id),
+                )
+                row = await cursor.fetchone()
+                return dict(row) if row else {'character_id': character_id, 'faction_id': faction_id, 'reputation': 0}
+            cursor = await db.execute(
+                """
+                SELECT cfr.*, f.name AS faction_name
+                FROM character_faction_reputation cfr
+                JOIN factions f ON cfr.faction_id = f.id
+                WHERE cfr.character_id = ?
+                ORDER BY f.name
+                """,
+                (character_id,),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def create_monster_template(
+        self,
+        template_id: str,
+        name: str,
+        content_pack_id: str = DEFAULT_CONTENT_PACK_ID,
+        session_id: int = None,
+        description: str = None,
+        creature_family: str = None,
+        encounter_tier: str = 'standard',
+        challenge_rating: float = 0,
+        max_hp: int = 1,
+        armor_class: int = 10,
+        speed: int = 30,
+        is_boss: bool = False,
+        stats: Dict[str, Any] = None,
+        actions: List[Dict[str, Any]] = None,
+        traits: List[Dict[str, Any]] = None,
+        loot_table: List[Dict[str, Any]] = None,
+    ) -> str:
+        now = datetime.utcnow().isoformat()
+        normalized_id = template_id or _slugify(name)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO monster_templates (
+                    id, session_id, content_pack_id, name, description, creature_family,
+                    encounter_tier, challenge_rating, max_hp, armor_class, speed, is_boss,
+                    stats, actions, traits, loot_table, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          COALESCE((SELECT created_at FROM monster_templates WHERE id = ?), ?), ?)
+                """,
+                (
+                    normalized_id,
+                    session_id,
+                    content_pack_id,
+                    name,
+                    description,
+                    creature_family,
+                    encounter_tier,
+                    challenge_rating,
+                    max_hp,
+                    armor_class,
+                    speed,
+                    1 if is_boss else 0,
+                    json.dumps(stats or {}),
+                    json.dumps(actions or []),
+                    json.dumps(traits or []),
+                    json.dumps(loot_table or []),
+                    normalized_id,
+                    now,
+                    now,
+                ),
+            )
+            await db.commit()
+            return normalized_id
+
+    async def get_monster_template(
+        self,
+        template_id: str = None,
+        template_name: str = None,
+        content_pack_id: str = None,
+        session_id: int = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not template_id and not template_name:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions = []
+            params: List[Any] = []
+            if template_id:
+                conditions.append('id = ?')
+                params.append(template_id)
+            if template_name:
+                conditions.append('lower(name) = lower(?)')
+                params.append(template_name)
+            query = f"SELECT * FROM monster_templates WHERE ({' OR '.join(conditions)})"
+            if session_id is not None:
+                query += " AND (session_id = ? OR session_id IS NULL)"
+                params.append(session_id)
+            if content_pack_id:
+                query += " AND content_pack_id = ?"
+                params.append(content_pack_id)
+            query += " ORDER BY CASE WHEN session_id IS NULL THEN 1 ELSE 0 END, updated_at DESC LIMIT 1"
+            cursor = await db.execute(query, params)
+            row = await cursor.fetchone()
+            return self._normalize_monster_template_record(dict(row)) if row else None
+
+    async def get_monster_templates(self, content_pack_id: str = None, session_id: int = None) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            conditions = []
+            params = []
+            if content_pack_id:
+                conditions.append('content_pack_id = ?')
+                params.append(content_pack_id)
+            if session_id is not None:
+                conditions.append('(session_id = ? OR session_id IS NULL)')
+                params.append(session_id)
+            where_clause = ' AND '.join(conditions) if conditions else '1=1'
+            cursor = await db.execute(
+                f"SELECT * FROM monster_templates WHERE {where_clause} ORDER BY name",
+                params,
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_monster_template_record(dict(row)) for row in rows]
+
+    async def create_boss_phase(
+        self,
+        template_id: str,
+        phase_number: int,
+        name: str,
+        hp_threshold: int = None,
+        description: str = None,
+        actions: List[Dict[str, Any]] = None,
+        traits: List[Dict[str, Any]] = None,
+    ) -> int:
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                INSERT OR REPLACE INTO boss_phases (
+                    template_id, phase_number, name, hp_threshold, description, actions, traits, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (template_id, phase_number, name, hp_threshold, description, json.dumps(actions or []), json.dumps(traits or []), now),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_boss_phases(self, template_id: str) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM boss_phases WHERE template_id = ? ORDER BY phase_number ASC",
+                (template_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_boss_phase_record(dict(row)) for row in rows]
 
     # ==================== STORY EVENTS METHODS ====================
     

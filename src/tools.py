@@ -234,6 +234,18 @@ class ToolExecutor:
                 return await self._update_npc_relationship(tool_args)
             elif tool_name == "get_npcs":
                 return await self._get_npcs(context, tool_args)
+            elif tool_name == "get_factions":
+                return await self._get_factions(context, tool_args)
+            elif tool_name == "create_faction":
+                return await self._create_faction(context, tool_args)
+            elif tool_name == "update_faction_reputation":
+                return await self._update_faction_reputation(tool_args)
+            elif tool_name == "get_character_faction_reputation":
+                return await self._get_character_faction_reputation(tool_args)
+            elif tool_name == "spawn_monster":
+                return await self._spawn_monster(context, tool_args)
+            elif tool_name == "get_stat_block":
+                return await self._get_stat_block(context, tool_args)
             
             # NPC Party Member tools
             elif tool_name == "add_npc_to_party":
@@ -306,7 +318,6 @@ class ToolExecutor:
                 return await self._resolve_event(tool_args)
             elif tool_name == "get_active_events":
                 return await self._get_active_events(context)
-            
             # Enhanced NPC tools  
             elif tool_name == "generate_npc":
                 return await self._generate_npc(context, tool_args)
@@ -542,6 +553,9 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         initiative_bonus: int = 0,
         stats: Optional[Dict[str, Any]] = None,
         armor_class: Optional[int] = None,
+        template_id: Optional[str] = None,
+        encounter_tier: str = 'standard',
+        is_boss: bool = False,
     ) -> int:
         """Insert an enemy into combat using canonical stat normalization."""
         stats = dict(stats or {})
@@ -565,27 +579,74 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             is_player=False,
             armor_class=armor_class,
             combat_stats=stats,
+            template_id=template_id,
+            encounter_tier=encounter_tier,
+            is_boss=is_boss,
         )
 
     async def load_enemy_template(self, template_id: str, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """Load a monster template from the active content pack."""
-        enemies_payload = await self._load_theme_content(context or {}, 'enemies.json')
+        """Load a monster template, preferring relational storage and falling back to pack JSON."""
+        context = context or {}
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or context.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        session_id = (session or {}).get('id') or context.get('session_id')
+
+        template = await self.db.get_monster_template(
+            template_id=template_id,
+            content_pack_id=content_pack_id,
+            session_id=session_id,
+        )
+        if template:
+            return template
+
+        enemies_payload = await self._load_theme_content(context, 'enemies.json')
         enemies = enemies_payload.get('enemies', {}) if isinstance(enemies_payload, dict) else {}
-        template = enemies.get(template_id)
-        if not template:
+        raw_template = enemies.get(template_id)
+        if not raw_template:
             return None
-        return dict(template)
+        return self.db._enemy_template_to_monster_template(template_id, raw_template, content_pack_id, session_id=session_id)
+
+    async def get_stat_block(
+        self,
+        template_id: str = None,
+        template_name: str = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve a monster stat block by ID or name."""
+        context = context or {}
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or context.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        session_id = (session or {}).get('id') or context.get('session_id')
+
+        template = await self.db.get_monster_template(
+            template_id=template_id,
+            template_name=template_name,
+            content_pack_id=content_pack_id,
+            session_id=session_id,
+        )
+        if template:
+            return template
+        if template_id:
+            return await self.load_enemy_template(template_id, context)
+        return None
 
     async def list_enemy_templates(self, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """List available monster templates from the active content pack."""
-        enemies_payload = await self._load_theme_content(context or {}, 'enemies.json')
+        """List available monster templates from relational storage, with pack fallback."""
+        context = context or {}
+        session = await self._get_session_for_context(context)
+        content_pack_id = (session or {}).get('content_pack_id') or context.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        session_id = (session or {}).get('id') or context.get('session_id')
+
+        templates = await self.db.get_monster_templates(content_pack_id=content_pack_id, session_id=session_id)
+        if templates:
+            return templates
+
+        enemies_payload = await self._load_theme_content(context, 'enemies.json')
         enemies = enemies_payload.get('enemies', {}) if isinstance(enemies_payload, dict) else {}
-        templates = []
+        fallback = []
         for template_id, template in enemies.items():
-            row = dict(template)
-            row.setdefault('id', template_id)
-            templates.append(row)
-        return sorted(templates, key=lambda item: item.get('name') or item.get('id') or '')
+            fallback.append(self.db._enemy_template_to_monster_template(template_id, template, content_pack_id, session_id=session_id))
+        return sorted(fallback, key=lambda item: item.get('name') or item.get('id') or '')
 
     async def spawn_enemy_template_combatants(
         self,
@@ -600,15 +661,17 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             raise ValueError('Enemy template not found')
 
         count = max(1, int(count or 1))
-        hp = int(template.get('hp') or 1)
-        armor_class = int(template.get('ac') or template.get('armor_class') or 10)
+        hp = int(template.get('max_hp') or template.get('hp') or 1)
+        armor_class = int(template.get('armor_class') or template.get('ac') or 10)
         stats = dict(template.get('stats') or {})
         stats.setdefault('template_id', template.get('id') or template_id)
         stats.setdefault('description', template.get('description'))
-        stats.setdefault('attacks', template.get('attacks', []))
+        stats.setdefault('actions', template.get('actions', template.get('attacks', [])))
         stats.setdefault('challenge_rating', template.get('challenge_rating'))
-        stats.setdefault('xp_reward', template.get('xp_reward'))
         stats.setdefault('loot_table', template.get('loot_table', []))
+        stats.setdefault('traits', template.get('traits', []))
+        stats.setdefault('encounter_tier', template.get('encounter_tier', 'standard'))
+        stats.setdefault('is_boss', bool(template.get('is_boss')))
 
         created_ids = []
         base_name = template.get('name') or template_id.replace('_', ' ').title()
@@ -621,6 +684,9 @@ Backstory: {char['backstory'] or 'Unknown'}"""
                 initiative_bonus=0,
                 stats=stats,
                 armor_class=armor_class,
+                template_id=template.get('id') or template_id,
+                encounter_tier=template.get('encounter_tier', 'standard'),
+                is_boss=bool(template.get('is_boss')),
             )
             created_ids.append(combatant_id)
 
@@ -660,10 +726,33 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         init_bonus = args.get('initiative_bonus', 0)
         stats = dict(args.get('stats') or {})
         armor_class = args.get('armor_class')
+        template_id = args.get('template_id')
+        template_name = args.get('template_name')
         
         combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat. Start combat first."
+
+        template = None
+        if template_id or template_name:
+            template = await self.get_stat_block(template_id=template_id, template_name=template_name, context=context)
+            if template:
+                template_id = template.get('id')
+                name = name or template.get('name')
+                hp = hp if hp is not None else template.get('max_hp') or 1
+                armor_class = armor_class if armor_class is not None else template.get('armor_class') or 10
+                merged_stats = dict(template.get('stats') or {})
+                merged_stats.setdefault('actions', template.get('actions', []))
+                merged_stats.setdefault('traits', template.get('traits', []))
+                merged_stats.setdefault('challenge_rating', template.get('challenge_rating'))
+                merged_stats.setdefault('loot_table', template.get('loot_table', []))
+                merged_stats.update(stats)
+                stats = merged_stats
+            else:
+                logger.warning("Monster template not found for add_enemy", extra={"template_id": template_id, "template_name": template_name})
+
+        if not name or hp is None:
+            return "Error: name and hp are required unless a known template is provided."
         
         combatant_id = await self.add_enemy_combatant(
             combat['id'],
@@ -672,6 +761,9 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             initiative_bonus=init_bonus,
             stats=stats,
             armor_class=armor_class,
+            template_id=template_id,
+            encounter_tier=(template or {}).get('encounter_tier', stats.get('encounter_tier', 'standard')),
+            is_boss=bool((template or {}).get('is_boss', stats.get('is_boss', False))),
         )
 
         normalized_ac = armor_class or stats.get('ac') or stats.get('armor_class') or 10
@@ -1176,6 +1268,82 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             lines.append(f"[{npc['id']}] {merchant}**{npc['name']}** ({npc['npc_type']}) - {npc['location'] or 'Unknown location'}")
         
         return "\n".join(lines)
+
+    async def _get_factions(self, context: Dict, args: Dict) -> str:
+        """Get factions for the current session/guild."""
+        session = await self._get_session_for_context(context)
+        factions = await self.db.get_factions(
+            session_id=(session or {}).get('id'),
+            guild_id=context.get('guild_id'),
+        )
+        if not factions:
+            return "No factions found."
+        return "\n".join(["**Factions:**"] + [f"[{f['id']}] **{f['name']}** ({f.get('faction_type') or 'neutral'})" for f in factions])
+
+    async def _create_faction(self, context: Dict, args: Dict) -> str:
+        """Create a faction in the current session."""
+        session = await self._get_session_for_context(context)
+        faction_id = await self.db.create_faction(
+            guild_id=context.get('guild_id'),
+            session_id=(session or {}).get('id'),
+            name=args.get('name'),
+            description=args.get('description'),
+            faction_type=args.get('faction_type', 'neutral'),
+            alignment=args.get('alignment'),
+            influence=args.get('influence', 0),
+            goals=args.get('goals'),
+            resources=args.get('resources'),
+            allies=args.get('allies'),
+            enemies=args.get('enemies'),
+            created_by=context.get('user_id'),
+        )
+        return f"Created faction **{args.get('name')}** (ID: {faction_id})"
+
+    async def _update_faction_reputation(self, args: Dict) -> str:
+        """Update character faction reputation."""
+        reputation = await self.db.update_character_faction_reputation(
+            character_id=args.get('character_id'),
+            faction_id=args.get('faction_id'),
+            reputation_change=args.get('reputation_change', 0),
+            notes=args.get('notes'),
+        )
+        return f"Faction reputation updated to {reputation}."
+
+    async def _get_character_faction_reputation(self, args: Dict) -> str:
+        """Get character faction reputation."""
+        records = await self.db.get_character_faction_reputation(
+            character_id=args.get('character_id'),
+            faction_id=args.get('faction_id'),
+        )
+        if isinstance(records, dict):
+            return f"Faction reputation: {records.get('reputation', 0)}"
+        if not records:
+            return "No faction reputation found."
+        return "\n".join(["**Faction Reputation:**"] + [f"- {row['faction_name']}: {row['reputation']}" for row in records])
+
+    async def _spawn_monster(self, context: Dict, args: Dict) -> str:
+        """Spawn one or more template-backed monsters into the active combat."""
+        combat = await self.db.get_active_combat(channel_id=context.get('channel_id'))
+        if not combat:
+            return "Error: No active combat."
+        template_id = args.get('template_id')
+        count = int(args.get('count') or 1)
+        try:
+            created_ids = await self.spawn_enemy_template_combatants(combat['id'], template_id, count=count, context=context)
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return f"Spawned {len(created_ids)} monster(s) from template {template_id}: {', '.join(str(item) for item in created_ids)}"
+
+    async def _get_stat_block(self, context: Dict, args: Dict) -> str:
+        """Get a JSON stat block for a monster template."""
+        template = await self.get_stat_block(
+            template_id=args.get('template_id'),
+            template_name=args.get('template_name'),
+            context=context,
+        )
+        if not template:
+            return "Error: Monster template not found"
+        return json.dumps(template, indent=2, sort_keys=True)
     
     # =========================================================================
     # SESSION/STORY TOOL IMPLEMENTATIONS
@@ -1237,7 +1405,7 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             lines.append(f"{type_emoji} {preview}")
         
         return "\n".join(lines)
-    
+
     # =========================================================================
     # MEMORY TOOL IMPLEMENTATIONS
     # =========================================================================

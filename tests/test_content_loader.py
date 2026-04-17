@@ -1,19 +1,30 @@
-import pytest
+"""Regression tests for content-pack loading and fallback behavior."""
 
-from src.content_loader import DEFAULT_CONTENT_PACK_ID, clear_content_cache, get_pack_data
+from src import content_loader
 
 
-def test_get_pack_data_returns_default_pack_content():
-    clear_content_cache()
+def test_get_pack_data_reads_active_pack_resource():
+    content_loader.clear_content_cache()
 
-    data = get_pack_data(DEFAULT_CONTENT_PACK_ID, "classes.json")
+    data = content_loader.get_pack_data("fantasy_core", "classes.json")
 
     assert "classes" in data
     assert "warrior" in data["classes"]
 
 
-def test_get_pack_data_raises_for_missing_resource():
-    clear_content_cache()
+def test_get_pack_data_falls_back_to_legacy_flat_file():
+    content_loader.clear_content_cache()
 
-    with pytest.raises(FileNotFoundError):
-        get_pack_data(DEFAULT_CONTENT_PACK_ID, "does_not_exist.json")
+    data = content_loader.get_pack_data("fantasy_core", "starter_kits.json")
+
+    assert isinstance(data, dict)
+    assert data
+
+
+def test_get_session_pack_data_defaults_to_default_pack():
+    content_loader.clear_content_cache()
+
+    data = content_loader.get_session_pack_data({}, "races.json")
+
+    assert "races" in data
+    assert "human" in data["races"]

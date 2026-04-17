@@ -83,6 +83,52 @@ async def test_finalize_campaign_persists_playable_session_state(db):
 
 
 @pytest.mark.asyncio
+async def test_finalize_campaign_preserves_explicit_content_pack_and_missing_first_location_id(db):
+    api_module.db = db
+
+    payload = api_module.CampaignFinalize(
+        guild_id=67890,
+        dm_user_id=12345,
+        name="Pack Aware Campaign",
+        description="Should keep explicit pack and starting location.",
+        content_pack_id="fantasy_core",
+        world_setting={"theme": "fantasy", "name": "Pack Realm", "content_pack_id": "fantasy_core"},
+        locations=[
+            {
+                "name": "Nameless Start",
+                "type": "town",
+                "description": "The generated first location omitted an id.",
+                "danger_level": 1,
+                "connections": [{"target_id": "loc_second", "direction": "road", "travel_time": 1}],
+            },
+            {
+                "id": "loc_second",
+                "name": "Second Stop",
+                "type": "village",
+                "description": "The next stop down the road.",
+                "danger_level": 1,
+                "connections": [],
+            },
+        ],
+        npcs=[],
+        factions=[],
+        quest_hooks=[],
+        starting_scenario="The road begins here.",
+        generation_settings={"world_theme": "fantasy", "content_pack_id": "fantasy_core"},
+    )
+
+    result = await api_module.finalize_campaign(payload)
+
+    session = await db.get_session(result["session_id"])
+    game_state = await db.get_game_state(result["session_id"])
+    starting_location = await db.get_location(game_state["current_location_id"])
+
+    assert session["content_pack_id"] == "fantasy_core"
+    assert game_state["active_content_pack_id"] == "fantasy_core"
+    assert starting_location["name"] == "Nameless Start"
+
+
+@pytest.mark.asyncio
 async def test_finalize_campaign_persists_user_edited_preview_content(db):
     api_module.db = db
 
@@ -500,8 +546,11 @@ async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
         game_data={"active_content_pack_id": "fantasy_core"},
     )
 
+    identity = "11111111-1111-4111-8111-111111111111"
+    web_user_id = web_user_id_from_uuid(identity)
+
     char_id = await db.create_character(
-        user_id=12345,
+        user_id=web_user_id,
         guild_id=67890,
         name="Aria",
         race="human",
@@ -516,7 +565,7 @@ async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
         },
         session_id=session_id,
     )
-    await db.join_session(session_id, user_id=12345, character_id=char_id)
+    await db.join_session(session_id, user_id=web_user_id, character_id=char_id)
 
     other_char_id = await db.create_character(
         user_id=54321,
@@ -532,11 +581,11 @@ async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
             "wisdom": 12,
             "charisma": 10,
         },
+        session_id=session_id,
     )
+    await db.join_session(session_id, user_id=54321, character_id=other_char_id)
 
-    identity = "11111111-1111-4111-8111-111111111111"
     await db.create_web_identity(identity, "hashed-ip")
-    web_user_id = web_user_id_from_uuid(identity)
     synthetic_channel_id = web_user_id_from_uuid(f"web-session:{session_id}:user:{identity}")
     await db.save_message(web_user_id, 67890, synthetic_channel_id, "assistant", "Welcome back.", session_id=session_id)
 
@@ -547,10 +596,13 @@ async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
     assert bootstrap.game_state["current_location_id"] == location_id
     assert bootstrap.location["name"] == "Rivergate"
     assert bootstrap.recent_messages[-1]["content"] == "Welcome back."
+    assert bootstrap.session["world_theme"] == "fantasy"
+    assert bootstrap.game_state["active_content_pack_id"] == "fantasy_core"
+    assert len(bootstrap.available_characters) == 1
 
     with pytest.raises(api_module.HTTPException) as invalid_bootstrap:
         await api_module.get_chat_bootstrap(session_id=session_id, character_id=other_char_id, x_web_identity=identity)
-    assert invalid_bootstrap.value.status_code == 400
+    assert invalid_bootstrap.value.status_code == 403
 
     request = api_module.ChatRequest(session_id=session_id, character_id=char_id, message="hello")
     response = await api_module.chat_with_dm.__wrapped__(
@@ -567,7 +619,63 @@ async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
             request=api_module.ChatRequest(session_id=session_id, character_id=other_char_id, message="hello"),
             x_web_identity=identity,
         )
-    assert invalid_chat.value.status_code == 400
+    assert invalid_chat.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_browser_chat_rejects_missing_character_invalid_session_and_inactive_session(db):
+    api_module.db = db
+    api_module.chat_handler = SimpleNamespace(
+        process_single_message=AsyncMock(),
+        extract_response_options=lambda _response: [],
+    )
+
+    active_session_id = await db.create_session(guild_id=67890, name="Active Browser Session", dm_user_id=12345)
+    paused_session_id = await db.create_session(guild_id=67890, name="Paused Browser Session", dm_user_id=12345)
+    await db.update_session(active_session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+    await db.update_session(paused_session_id, status="paused", world_theme="fantasy", content_pack_id="fantasy_core")
+
+    identity = "11111111-3333-4333-8333-333333333333"
+    await db.create_web_identity(identity, "hashed-ip")
+
+    with pytest.raises(api_module.HTTPException) as missing_character:
+        await api_module.chat_with_dm.__wrapped__(
+            http_request=SimpleNamespace(headers={}),
+            request=api_module.ChatRequest(session_id=active_session_id, message="hello"),
+            x_web_identity=identity,
+        )
+    assert missing_character.value.status_code == 400
+    assert missing_character.value.detail == "character_id is required"
+
+    with pytest.raises(api_module.HTTPException) as invalid_session:
+        await api_module.get_chat_bootstrap(session_id=999999, x_web_identity=identity)
+    assert invalid_session.value.status_code == 400
+
+    with pytest.raises(api_module.HTTPException) as inactive_session:
+        await api_module.get_chat_bootstrap(session_id=paused_session_id, x_web_identity=identity)
+    assert inactive_session.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_browser_chat_rejects_missing_session_id(db):
+    api_module.db = db
+
+    identity = "11111111-4444-4444-8444-444444444444"
+    await db.create_web_identity(identity, "hashed-ip")
+
+    with pytest.raises(api_module.HTTPException) as bootstrap_error:
+        await api_module.get_chat_bootstrap(session_id=None, x_web_identity=identity)
+    assert bootstrap_error.value.status_code == 400
+    assert bootstrap_error.value.detail == "session_id is required"
+
+    with pytest.raises(api_module.HTTPException) as chat_error:
+        await api_module.chat_with_dm.__wrapped__(
+            http_request=SimpleNamespace(headers={}),
+            request=api_module.ChatRequest(session_id=None, character_id=1, message="hello"),
+            x_web_identity=identity,
+        )
+    assert chat_error.value.status_code == 400
+    assert chat_error.value.detail == "session_id is required"
 
 
 @pytest.mark.asyncio
@@ -599,6 +707,7 @@ async def test_create_browser_character_attaches_to_session(db):
 
     assert response["character"]["name"] == "Mira"
     assert response["character"]["session_id"] == session_id
+    assert response["character"]["current_location_id"] is None
 
     participants = await db.get_session_participants(session_id)
     assert len(participants) == 1
@@ -616,6 +725,77 @@ async def test_create_browser_character_attaches_to_session(db):
             x_web_identity=identity,
         )
     assert duplicate.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_browser_character_inherits_session_current_location(db):
+    api_module.db = db
+
+    session_id = await db.create_session(guild_id=67890, name="Located Browser Session", dm_user_id=12345)
+    await db.update_session(session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+    location_id = await db.create_location(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Bridgewatch",
+        description="A bridge settlement.",
+    )
+    await db.save_game_state(
+        session_id,
+        current_scene="At the bridge.",
+        current_location="Bridgewatch",
+        current_location_id=location_id,
+        game_data={"active_content_pack_id": "fantasy_core"},
+    )
+
+    identity = "22222222-3333-4333-8333-333333333333"
+    await db.create_web_identity(identity, "hashed-ip")
+
+    response = await api_module.create_browser_character(
+        character=api_module.BrowserCharacterCreate(
+            session_id=session_id,
+            name="Kest",
+            race="human",
+            char_class="warrior",
+            backstory="A road warden.",
+        ),
+        x_web_identity=identity,
+    )
+
+    assert response["character"]["current_location_id"] == location_id
+
+
+@pytest.mark.asyncio
+async def test_bulk_game_data_update_routes_exist_and_persist(monkeypatch):
+    items_saved = {}
+    spells_saved = {}
+
+    def fake_load_game_data(filename, content_pack_id=api_module.DEFAULT_CONTENT_PACK_ID, use_content_pack=True):
+        if filename == "items.json":
+            return {"item_categories": ["weapons"], "weapons": [{"id": "sword", "name": "Sword", "type": "weapon"}]}
+        if filename == "spells.json":
+            return {"class_spell_lists": {"mage": ["spark"]}, "spells": {"spark": {"name": "Spark", "level": 0}}}
+        return {}
+
+    def fake_save_game_data(filename, data):
+        if filename == "items.json":
+            items_saved.update(data)
+        elif filename == "spells.json":
+            spells_saved.update(data)
+        return True
+
+    monkeypatch.setattr(api_module, "load_game_data", fake_load_game_data)
+    monkeypatch.setattr(api_module, "save_game_data", fake_save_game_data)
+
+    item_result = await api_module.update_all_items({"items": {"weapons": [{"id": "axe", "name": "Axe", "type": "weapon"}]}})
+    spell_result = await api_module.update_all_spells({"spells": {"flare": {"name": "Flare", "level": 1}}})
+
+    assert item_result["message"] == "Items updated"
+    assert spell_result["message"] == "Spells updated"
+    assert items_saved["item_categories"] == ["weapons"]
+    assert items_saved["weapons"][0]["id"] == "axe"
+    assert spells_saved["class_spell_lists"] == {"mage": ["spark"]}
+    assert spells_saved["spells"]["flare"]["name"] == "Flare"
 
 
 @pytest.mark.asyncio

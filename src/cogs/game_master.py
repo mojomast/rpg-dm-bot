@@ -626,15 +626,28 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
     
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        
-        # Create the session
-        session_id = await self.game_master.bot.db.create_session(
-            guild_id=interaction.guild.id,
-            name=str(self.game_name),
-            description=str(self.description) if self.description.value else "A new adventure awaits!",
-            dm_user_id=interaction.user.id,
-            max_players=6
-        )
+
+        sessions_cog = self.game_master.bot.get_cog('Sessions')
+        session = None
+        if sessions_cog and hasattr(sessions_cog, 'create_session_record'):
+            session = await sessions_cog.create_session_record(
+                guild_id=interaction.guild.id,
+                name=str(self.game_name),
+                description=str(self.description) if self.description.value else None,
+                dm_user_id=interaction.user.id,
+                max_players=6,
+            )
+        else:
+            session_id = await self.game_master.bot.db.create_session(
+                guild_id=interaction.guild.id,
+                name=str(self.game_name),
+                description=str(self.description) if self.description.value else "A new adventure awaits!",
+                dm_user_id=interaction.user.id,
+                max_players=6
+            )
+            session = await self.game_master.bot.db.get_session(session_id)
+
+        session_id = session['id']
         
         # Get or create character for the game creator
         char = await self.game_master.bot.db.get_active_character(
@@ -699,7 +712,10 @@ class QuickStartModal(discord.ui.Modal, title="Start New Game"):
             
         else:
             # Has character - add to session and offer to start
-            await self.game_master.bot.db.add_session_player(session_id, char['id'])
+            if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+                await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+            else:
+                await self.game_master.bot.db.add_session_player(session_id, char['id'])
             
             embed = discord.Embed(
                 title=f"🎲 Game Created: {self.game_name}",
@@ -868,27 +884,24 @@ class SessionManageView(discord.ui.View):
     @discord.ui.button(label="🚪 Join Game", style=discord.ButtonStyle.primary, row=0)
     async def join_game(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Join this game session"""
-        char = await self.game_master.bot.db.get_active_character(
-            interaction.user.id, interaction.guild.id
-        )
-        
-        if not char:
-            await interaction.response.send_message(
-                "❌ You need a character first! Use `/character create`",
-                ephemeral=True
+        sessions_cog = self.game_master.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+            result = await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, self.session['id'])
+            if result.get('error'):
+                await interaction.response.send_message(result['error'], ephemeral=result.get('code') != 'already_joined')
+                return
+            char = result['character']
+        else:
+            char = await self.game_master.bot.db.get_active_character(
+                interaction.user.id, interaction.guild.id
             )
-            return
-        
-        # Check if already in session
-        players = await self.game_master.bot.db.get_session_players(self.session['id'])
-        if any(p.get('character_id') == char['id'] for p in players if p.get('character_id')):
-            await interaction.response.send_message(
-                f"✅ **{char['name']}** is already in this game!",
-                ephemeral=True
-            )
-            return
-        
-        await self.game_master.bot.db.add_session_player(self.session['id'], char['id'])
+            if not char:
+                await interaction.response.send_message(
+                    "❌ You need a character first! Use `/character create`",
+                    ephemeral=True
+                )
+                return
+            await self.game_master.bot.db.add_session_player(self.session['id'], char['id'])
 
         await interaction.response.send_message(
             f"✅ **{char['name']}** has joined **{self.session['name']}**! 🎉"
@@ -974,19 +987,27 @@ class GameListView(discord.ui.View):
     
     def make_join_callback(self, session_id: int, session_name: str):
         async def callback(interaction: discord.Interaction):
-            char = await self.game_master.bot.db.get_active_character(
-                interaction.user.id,
-                interaction.guild.id
-            )
-            
-            if not char:
-                await interaction.response.send_message(
-                    "❌ You need a character first! Click 'Create Character' or use `/character create`",
-                    ephemeral=True
+            sessions_cog = self.game_master.bot.get_cog('Sessions')
+            if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+                result = await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+                if result.get('error'):
+                    await interaction.response.send_message(result['error'], ephemeral=result.get('code') != 'already_joined')
+                    return
+                char = result['character']
+            else:
+                char = await self.game_master.bot.db.get_active_character(
+                    interaction.user.id,
+                    interaction.guild.id
                 )
-                return
-            
-            await self.game_master.bot.db.add_session_player(session_id, char['id'])
+                
+                if not char:
+                    await interaction.response.send_message(
+                        "❌ You need a character first! Click 'Create Character' or use `/character create`",
+                        ephemeral=True
+                    )
+                    return
+                
+                await self.game_master.bot.db.add_session_player(session_id, char['id'])
             
             await interaction.response.send_message(
                 f"✅ **{char['name']}** has joined **{session_name}**! 🎉",
@@ -1117,14 +1138,27 @@ class GameMaster(commands.Cog):
         
         await interaction.response.defer()
         
-        # Create session
-        session_id = await self.db.create_session(
-            guild_id=interaction.guild.id,
-            name=name,
-            description=description or "A new adventure awaits!",
-            dm_user_id=interaction.user.id,
-            max_players=6
-        )
+        sessions_cog = self.bot.get_cog('Sessions')
+        session = None
+        if sessions_cog and hasattr(sessions_cog, 'create_session_record'):
+            session = await sessions_cog.create_session_record(
+                guild_id=interaction.guild.id,
+                name=name,
+                description=description,
+                dm_user_id=interaction.user.id,
+                max_players=6,
+            )
+        else:
+            session_id = await self.db.create_session(
+                guild_id=interaction.guild.id,
+                name=name,
+                description=description or "A new adventure awaits!",
+                dm_user_id=interaction.user.id,
+                max_players=6
+            )
+            session = await self.db.get_session(session_id)
+
+        session_id = session['id']
         
         # Get user's character
         char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
@@ -1161,7 +1195,10 @@ class GameMaster(commands.Cog):
             await interaction.followup.send(embed=embed)
             await self.start_character_interview_for_session(interaction.user, interaction.guild, session_id=session_id)
         else:
-            await self.db.add_session_player(session_id, char['id'])
+            if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+                await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+            else:
+                await self.db.add_session_player(session_id, char['id'])
             embed = discord.Embed(
                 title=f"🎲 Game Created: {name}",
                 description=f"**{char['name']}** is ready to adventure!",
@@ -1187,40 +1224,38 @@ class GameMaster(commands.Cog):
             )
             return
         
-        session = await self._get_guild_session(interaction.guild.id, session_id)
-        
-        if not session:
-            await interaction.response.send_message("❌ Game not found!", ephemeral=True)
-            return
-        
-        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
-        
-        if not char:
-            await interaction.response.send_message(
-                "❌ You need a character first! Use `/game menu` to create one.",
-                ephemeral=True
-            )
-            return
-        
-        # Check if already in session
-        players = await self.db.get_session_players(session_id)
-        if any(p.get('character_id') == char['id'] for p in players if p.get('character_id')):
-            await interaction.response.send_message(
-                f"You're already in **{session['name']}**!",
-                ephemeral=True
-            )
-            return
-        
-        # Check capacity
-        if len(players) >= session['max_players']:
-            await interaction.response.send_message("❌ This game is full!", ephemeral=True)
-            return
-        
-        await self.db.add_session_player(session_id, char['id'])
+        sessions_cog = self.bot.get_cog('Sessions')
+        if sessions_cog and hasattr(sessions_cog, 'join_session_membership'):
+            result = await sessions_cog.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+            if result.get('error'):
+                await interaction.response.send_message(result['error'], ephemeral=result.get('code') != 'already_joined')
+                return
+            session = result['session']
+            char = result['character']
+            party_size = result['party_size']
+        else:
+            session = await self._get_guild_session(interaction.guild.id, session_id)
+            
+            if not session:
+                await interaction.response.send_message("❌ Game not found!", ephemeral=True)
+                return
+            
+            char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+            
+            if not char:
+                await interaction.response.send_message(
+                    "❌ You need a character first! Use `/game menu` to create one.",
+                    ephemeral=True
+                )
+                return
+            
+            players = await self.db.get_session_players(session_id)
+            await self.db.add_session_player(session_id, char['id'])
+            party_size = len(players) + 1
         
         await interaction.response.send_message(
             f"✅ **{char['name']}** has joined **{session['name']}**! 🎉\n"
-            f"Party size: {len(players) + 1}/{session['max_players']}"
+            f"Party size: {party_size}/{session['max_players']}"
         )
         
         # Notify the DM

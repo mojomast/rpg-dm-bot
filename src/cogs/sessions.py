@@ -166,6 +166,54 @@ class Sessions(commands.Cog):
     def db(self):
         return self.bot.db
 
+    async def create_session_record(
+        self,
+        guild_id: int,
+        name: str,
+        description: Optional[str],
+        dm_user_id: int,
+        max_players: int = 6,
+    ) -> dict:
+        """Create a session using the canonical session lifecycle surface."""
+        session_id = await self.db.create_session(
+            guild_id=guild_id,
+            name=name,
+            description=description or "A new adventure awaits!",
+            dm_user_id=dm_user_id,
+            max_players=max_players,
+        )
+        return await self.db.get_session(session_id)
+
+    async def join_session_membership(self, guild_id: int, user_id: int, session_id: int) -> dict:
+        """Join a session using canonical validation and membership rules."""
+        session = await self._get_guild_session(guild_id, session_id)
+        if not session:
+            return {"error": "❌ Session not found!", "code": "not_found"}
+
+        char = await self.db.get_active_character(user_id, guild_id)
+        if not char:
+            return {"error": "❌ You need a character! Use `/character create`", "code": "no_character", "session": session}
+
+        players = await self.db.get_session_players(session['id'])
+        if any(player.get('character_id') == char['id'] for player in players if player.get('character_id')):
+            return {
+                "error": f"✅ **{char['name']}** is already in **{session['name']}**!",
+                "code": "already_joined",
+                "session": session,
+                "character": char,
+                "party_size": len(players),
+            }
+
+        if len(players) >= session['max_players']:
+            return {"error": "❌ This session is full!", "code": "full", "session": session, "character": char}
+
+        await self.db.add_session_player(session['id'], char['id'])
+        return {
+            "session": session,
+            "character": char,
+            "party_size": len(players) + 1,
+        }
+
     async def _begin_session_lifecycle(self, interaction: discord.Interaction, session_id: int, resume: bool = False):
         """Delegate to GameMaster's canonical lifecycle helper when available."""
         game_master = self.bot.get_cog('GameMaster')
@@ -414,37 +462,17 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to join")
     async def join_session(self, interaction: discord.Interaction, session_id: int):
         """Join a session"""
-        session = await self._get_guild_session(interaction.guild.id, session_id)
-        
-        if not session:
+        result = await self.join_session_membership(interaction.guild.id, interaction.user.id, session_id)
+        if result.get('error'):
             await interaction.response.send_message(
-                "❌ Session not found!",
-                ephemeral=True
+                result['error'],
+                ephemeral=result.get('code') != 'already_joined',
             )
             return
-        
-        char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
-        
-        if not char:
-            await interaction.response.send_message(
-                "❌ You need a character! Use `/character create`",
-                ephemeral=True
-            )
-            return
-        
-        players = await self.db.get_session_players(session['id'])
-        if len(players) >= session['max_players']:
-            await interaction.response.send_message(
-                "❌ This session is full!",
-                ephemeral=True
-            )
-            return
-        
-        await self.db.add_session_player(session['id'], char['id'])
-        
-        await interaction.response.send_message(
-            f"✅ **{char['name']}** has joined **{session['name']}**!"
-        )
+
+        session = result['session']
+        char = result['character']
+        await interaction.response.send_message(f"✅ **{char['name']}** has joined **{session['name']}**!")
     
     @session_group.command(name="leave", description="Leave a game session")
     @app_commands.describe(session_id="The ID of the session to leave")

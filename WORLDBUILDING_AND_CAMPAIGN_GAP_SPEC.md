@@ -728,6 +728,9 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: Discord spell runtime reads now resolve `spells.json` through the active session content pack for cast/learn/info/quickcast flows via shared runtime content helpers in `src/cogs/spells.py` and `src/utils.py`
 - ✅ COMPLETE: Discord skills runtime reads now resolve `skills.json` through the active session content pack for tree rendering, learn/use/info flows, and autocomplete in `src/cogs/skills.py`
 - ✅ COMPLETE: Discord inventory/item runtime reads now resolve `items.json` through the active session content pack for inventory views, item details, shop flows, quick-use, and combat consumable item selection in `src/cogs/inventory.py` and `src/cogs/combat.py`
+- ✅ COMPLETE: `/character create` now delegates to the canonical session-bound GM interview flow instead of maintaining a separate hardcoded race/class/stat allocation runtime in `src/cogs/characters.py`
+- ✅ COMPLETE: slash-command combat setup, party joining, and enemy spawn now delegate through the same canonical encounter/participant creation path used by tool-driven combat in `src/cogs/combat.py` and `src/tools.py`
+- ✅ COMPLETE: browser campaign creator review/edit actions in `web/frontend/src/main.ts` are real pre-finalize editing flows backed by editable client-side preview state and compatible finalize persistence in `web/api.py`
 - ✅ COMPLETE: Discord runtime pack-awareness is complete for GM interview creation, spell reads, skill reads, inventory/item flows, and core tool/web reads for the current v1 slice set
 - ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
 - ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics

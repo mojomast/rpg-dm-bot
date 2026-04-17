@@ -78,6 +78,148 @@ async def test_finalize_campaign_persists_playable_session_state(db):
 
 
 @pytest.mark.asyncio
+async def test_finalize_campaign_persists_user_edited_preview_content(db):
+    api_module.db = db
+
+    payload = api_module.CampaignFinalize(
+        guild_id=67890,
+        dm_user_id=12345,
+        name="Edited Campaign",
+        description="Edited browser review content.",
+        world_setting={
+            "theme": "fantasy",
+            "name": "Starfall Reach",
+            "description": "A rewritten world description.",
+            "history": "Ages of skyfire altered the realm.",
+            "current_state": "Uneasy peace between city-states.",
+        },
+        locations=[
+            {
+                "id": "loc_harbor",
+                "name": "Glassharbor",
+                "type": "city",
+                "description": "A glittering trade port.",
+                "danger_level": 2,
+                "points_of_interest": ["Sun Docks"],
+                "connections": [],
+            }
+        ],
+        npcs=[
+            {
+                "id": "npc_warden",
+                "name": "Warden Sel",
+                "type": "ally",
+                "description": "Harbor master and fixer.",
+                "personality": "Calm and incisive",
+                "goals": "Keep the port stable",
+                "location_id": "loc_harbor",
+            }
+        ],
+        factions=[{"id": "faction_merchants", "name": "The Meridian League", "description": "A coalition of trade houses."}],
+        quest_hooks=[
+            {
+                "id": "quest_signal",
+                "title": "The Silent Beacon",
+                "description": "Investigate why the sea beacon went dark.",
+                "difficulty": "hard",
+                "quest_giver_id": "npc_warden",
+            }
+        ],
+        starting_scenario="The party arrives as emergency bells ring across Glassharbor.",
+        generation_settings={"world_theme": "fantasy"},
+    )
+
+    result = await api_module.finalize_campaign(payload)
+
+    session = await db.get_session(result["session_id"])
+    assert session["name"] == "Edited Campaign"
+    assert session["description"] == "Edited browser review content."
+
+    game_state = await db.get_game_state(result["session_id"])
+    assert game_state["current_scene"] == "The party arrives as emergency bells ring across Glassharbor."
+    assert game_state["current_location"] == "Glassharbor"
+
+    location = await db.get_location(game_state["current_location_id"])
+    assert location["location_type"] == "city"
+    assert location["danger_level"] == 2
+
+    npcs = await db.get_npcs_by_session(result["session_id"])
+    assert npcs[0]["name"] == "Warden Sel"
+    assert npcs[0]["location"] == "Glassharbor"
+
+    quests = await db.get_quests(session_id=result["session_id"])
+    assert quests[0]["title"] == "The Silent Beacon"
+    assert quests[0]["difficulty"] == "hard"
+
+
+@pytest.mark.asyncio
+async def test_finalize_campaign_preserves_links_after_client_side_additions(db):
+    api_module.db = db
+
+    payload = api_module.CampaignFinalize(
+        guild_id=67890,
+        dm_user_id=12345,
+        name="Linked Campaign",
+        description="Client-side additions should keep links.",
+        world_setting={"theme": "fantasy", "name": "Linked Realm"},
+        locations=[
+            {
+                "id": "loc_keep",
+                "name": "Old Keep",
+                "type": "fortress",
+                "description": "A crumbling keep.",
+                "danger_level": 3,
+                "connections": [{"target_id": "loc_woods", "direction": "east", "travel_time": 1, "bidirectional": True}],
+            },
+            {
+                "id": "loc_woods",
+                "name": "Mistwoods",
+                "type": "wilderness",
+                "description": "Fog-shrouded trees.",
+                "danger_level": 2,
+                "connections": [],
+            },
+        ],
+        npcs=[
+            {
+                "id": "npc_ranger",
+                "name": "Tarin",
+                "type": "ally",
+                "description": "A scout from the woods.",
+                "location_id": "loc_woods",
+            }
+        ],
+        factions=[],
+        quest_hooks=[
+            {
+                "id": "quest_path",
+                "name": "Trail of Cinders",
+                "description": "Follow the ash trail into the Mistwoods.",
+                "quest_giver_id": "npc_ranger",
+            }
+        ],
+        starting_scenario="Smoke rises from the keep.",
+        generation_settings={"world_theme": "fantasy"},
+    )
+
+    result = await api_module.finalize_campaign(payload)
+
+    game_state = await db.get_game_state(result["session_id"])
+    keep_id = game_state["current_location_id"]
+    nearby = await db.get_nearby_locations(keep_id)
+    assert len(nearby) == 1
+    assert nearby[0]["name"] == "Mistwoods"
+
+    npcs = await db.get_npcs_by_session(result["session_id"])
+    assert npcs[0]["location"] == "Mistwoods"
+    assert npcs[0]["location_id"] is not None
+
+    quests = await db.get_quests(session_id=result["session_id"])
+    assert quests[0]["title"] == "Trail of Cinders"
+    assert quests[0]["quest_giver_npc_id"] == npcs[0]["id"]
+
+
+@pytest.mark.asyncio
 async def test_chat_bootstrap_and_chat_validate_session_bound_character(db):
     api_module.db = db
     api_module.chat_handler = SimpleNamespace(

@@ -10,7 +10,7 @@ import random
 import logging
 
 from src.cogs.inventory import get_item_data
-from src.tools import DiceRoller
+from src.tools import DiceRoller, ToolExecutor
 from src.utils import load_runtime_content
 
 logger = logging.getLogger('rpg.combat')
@@ -306,6 +306,7 @@ class Combat(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.tool_executor = ToolExecutor(bot.db)
     
     @property
     def db(self):
@@ -346,18 +347,16 @@ class Combat(commands.Cog):
             channel_id=interaction.channel.id,
             session_id=session['id'] if session else None
         )
-        
-        # Add the initiator's character
-        char = await self.db.get_active_character(interaction.user.id, guild_id)
-        if char:
-            dex_mod = (char['dexterity'] - 10) // 2
-            armor_class = await self.db.calculate_character_armor_class(char['id'])
-            await self.db.add_combatant(
-                encounter_id, 'character', char['id'], char['name'],
-                char['hp'], char['max_hp'], dex_mod, is_player=True,
-                armor_class=armor_class,
-                combat_stats={'armor_class': armor_class, 'ac': armor_class}
-            )
+
+        if session:
+            participants = await self.db.get_session_participants(session['id'])
+            for participant in participants:
+                if participant.get('character_id'):
+                    await self.tool_executor.add_character_combatant(encounter_id, participant['character_id'])
+        else:
+            char = await self.db.get_active_character(interaction.user.id, guild_id)
+            if char:
+                await self.tool_executor.add_character_combatant(encounter_id, char['id'])
         
         embed = discord.Embed(
             title="⚔️ Combat Started!",
@@ -401,14 +400,7 @@ class Combat(commands.Cog):
             )
             return
         
-        dex_mod = (char['dexterity'] - 10) // 2
-        armor_class = await self.db.calculate_character_armor_class(char['id'])
-        await self.db.add_combatant(
-            combat['id'], 'character', char['id'], char['name'],
-            char['hp'], char['max_hp'], dex_mod, is_player=True,
-            armor_class=armor_class,
-            combat_stats={'armor_class': armor_class, 'ac': armor_class}
-        )
+        await self.tool_executor.add_character_combatant(combat['id'], char['id'])
         
         await interaction.response.send_message(
             f"⚔️ **{char['name']}** joins the battle!"
@@ -440,15 +432,13 @@ class Combat(commands.Cog):
         for i in range(count):
             name = f"{enemy_name}" if count == 1 else f"{enemy_name} {i+1}"
             init_bonus = random.randint(-1, 3)  # Random initiative bonus
-            armor_class = 10
-            
-            combatant_id = await self.db.add_combatant(
-                combat['id'], 'enemy', 0, name, hp, hp, init_bonus,
-                is_player=False,
-                armor_class=armor_class,
-                combat_stats={'armor_class': armor_class, 'ac': armor_class}
+            await self.tool_executor.add_enemy_combatant(
+                combat['id'],
+                name,
+                hp,
+                initiative_bonus=init_bonus,
             )
-            spawned.append(f"👹 {name} (HP: {hp}, AC: {armor_class})")
+            spawned.append(f"👹 {name} (HP: {hp}, AC: 10)")
         
         embed = discord.Embed(
             title="👹 Enemies Appear!",

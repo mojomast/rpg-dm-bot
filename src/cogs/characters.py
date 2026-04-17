@@ -12,10 +12,6 @@ import random
 
 logger = logging.getLogger('rpg.characters')
 
-# Available races and classes
-RACES = ["Human", "Elf", "Dwarf", "Halfling", "Orc", "Tiefling", "Dragonborn", "Gnome"]
-CLASSES = ["Warrior", "Mage", "Rogue", "Cleric", "Ranger", "Bard", "Paladin", "Warlock"]
-
 # Stat rolling methods
 STAT_METHODS = {
     "standard": [15, 14, 13, 12, 10, 8],  # Standard array
@@ -231,40 +227,26 @@ class Characters(commands.Cog):
     )
     
     @character_group.command(name="create", description="Create a new character")
-    @app_commands.describe(
-        race="Choose your character's race",
-        char_class="Choose your character's class"
-    )
-    @app_commands.choices(
-        race=[app_commands.Choice(name=r, value=r.lower()) for r in RACES],
-        char_class=[app_commands.Choice(name=c, value=c.lower()) for c in CLASSES]
-    )
-    async def create_character(
-        self,
-        interaction: discord.Interaction,
-        race: str,
-        char_class: str
-    ):
-        """Start character creation process"""
-        embed = discord.Embed(
-            title="🎭 Character Creation",
-            description=f"Creating a **{race.title()} {char_class.title()}**\n\nChoose how to determine your stats:",
-            color=discord.Color.purple()
+    async def create_character(self, interaction: discord.Interaction):
+        """Start the canonical session-bound character creation interview."""
+        game_master = self.bot.get_cog('GameMaster')
+        if not game_master:
+            await interaction.response.send_message(
+                "❌ Character creation is unavailable because the GameMaster cog is not loaded.",
+                ephemeral=True
+            )
+            return
+
+        await game_master.start_character_interview_for_session(
+            interaction.user,
+            interaction.guild,
+            channel_id=interaction.channel.id,
         )
-        
-        embed.add_field(
-            name="🎲 Roll Stats",
-            value="Roll 4d6, drop lowest for each stat. Exciting and random!",
-            inline=False
+
+        await interaction.response.send_message(
+            "🎭 Check your DMs. Character creation now uses the canonical session-bound interview flow.",
+            ephemeral=True
         )
-        embed.add_field(
-            name="📊 Standard Array",
-            value="Assign values: 15, 14, 13, 12, 10, 8 to your stats.",
-            inline=False
-        )
-        
-        view = StatAllocationView(race.title(), char_class.title())
-        await interaction.response.send_message(embed=embed, view=view)
     
     @character_group.command(name="sheet", description="View your character sheet")
     async def character_sheet(self, interaction: discord.Interaction):

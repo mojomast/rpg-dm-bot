@@ -512,6 +512,57 @@ Backstory: {char['backstory'] or 'Unknown'}"""
     # =========================================================================
     # COMBAT TOOL IMPLEMENTATIONS
     # =========================================================================
+
+    async def add_character_combatant(self, encounter_id: int, character_id: int) -> Optional[int]:
+        """Insert a character into combat using the canonical DB snapshot path."""
+        char = await self.db.get_character(character_id)
+        if not char:
+            return None
+
+        dex_mod = (char['dexterity'] - 10) // 2
+        return await self.db.add_combatant(
+            encounter_id,
+            'character',
+            char['id'],
+            char['name'],
+            char['hp'],
+            char['max_hp'],
+            dex_mod,
+            is_player=True,
+        )
+
+    async def add_enemy_combatant(
+        self,
+        encounter_id: int,
+        name: str,
+        hp: int,
+        initiative_bonus: int = 0,
+        stats: Optional[Dict[str, Any]] = None,
+        armor_class: Optional[int] = None,
+    ) -> int:
+        """Insert an enemy into combat using canonical stat normalization."""
+        stats = dict(stats or {})
+        if armor_class is None:
+            armor_class = stats.get('ac') or stats.get('armor_class')
+        if armor_class is None:
+            armor_class = 10
+
+        stats.setdefault('ac', armor_class)
+        stats.setdefault('armor_class', armor_class)
+        stats.setdefault('max_hp', max(hp or 0, 0))
+
+        return await self.db.add_combatant(
+            encounter_id,
+            'enemy',
+            0,
+            name,
+            hp,
+            hp,
+            initiative_bonus,
+            is_player=False,
+            armor_class=armor_class,
+            combat_stats=stats,
+        )
     
     async def _start_combat(self, context: Dict, args: Dict) -> str:
         """Start a combat encounter"""
@@ -535,13 +586,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             participants = await self.db.get_session_participants(session['id'])
             for p in participants:
                 if p.get('character_id'):
-                    char = await self.db.get_character(p['character_id'])
-                    if char:
-                        dex_mod = (char['dexterity'] - 10) // 2
-                        await self.db.add_combatant(
-                            encounter_id, 'character', char['id'], char['name'],
-                            char['hp'], char['max_hp'], dex_mod, is_player=True
-                        )
+                    await self.add_character_combatant(encounter_id, p['character_id'])
         
         return f"⚔️ Combat started! (Encounter #{encounter_id})\n{description}\nUse add_enemy to add enemies, then roll_initiative to begin."
     
@@ -553,24 +598,23 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         init_bonus = args.get('initiative_bonus', 0)
         stats = dict(args.get('stats') or {})
         armor_class = args.get('armor_class')
-        if armor_class is None:
-            armor_class = stats.get('ac') or stats.get('armor_class')
-        if armor_class is None:
-            armor_class = 10
-        stats.setdefault('ac', armor_class)
-        stats.setdefault('armor_class', armor_class)
-        stats.setdefault('max_hp', max(hp or 0, 0))
         
         combat = await self.db.get_active_combat(channel_id=channel_id)
         if not combat:
             return "Error: No active combat. Start combat first."
         
-        combatant_id = await self.db.add_combatant(
-            combat['id'], 'enemy', 0, name, hp, hp, init_bonus,
-            is_player=False, armor_class=armor_class, combat_stats=stats
+        combatant_id = await self.add_enemy_combatant(
+            combat['id'],
+            name,
+            hp,
+            initiative_bonus=init_bonus,
+            stats=stats,
+            armor_class=armor_class,
         )
+
+        normalized_ac = armor_class or stats.get('ac') or stats.get('armor_class') or 10
         
-        return f"Added {name} to combat (HP: {hp}, AC: {armor_class}, ID: {combatant_id})"
+        return f"Added {name} to combat (HP: {hp}, AC: {normalized_ac}, ID: {combatant_id})"
     
     async def _roll_initiative(self, context: Dict) -> str:
         """Roll initiative for all combatants"""

@@ -248,6 +248,7 @@ async def test_combat_start_prefers_channel_bound_session(mock_interaction):
         get_user_active_session=AsyncMock(return_value=None),
         get_active_session=AsyncMock(return_value={"id": 12}),
         create_combat=AsyncMock(return_value=303),
+        get_session_participants=AsyncMock(return_value=[]),
         get_active_character=AsyncMock(return_value=None),
     )
     bot = SimpleNamespace(db=db)

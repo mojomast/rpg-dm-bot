@@ -2299,6 +2299,106 @@ interface CampaignConfig {
 let currentCampaignStep = 1;
 let generatedCampaignData: any = null;
 let selectedTemplate: string = 'custom';
+let campaignPreviewEditState: { mode: 'add' | 'edit'; type: string; index?: number } | null = null;
+
+function slugifyPreviewId(value: string, prefix: string): string {
+    const normalized = (value || prefix).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return `${prefix}_${normalized || Date.now()}`;
+}
+
+function buildDefaultPreviewItem(type: string): Record<string, any> {
+    switch (type) {
+        case 'location':
+            return { id: `loc_${Date.now()}`, name: 'New Location', type: 'town', description: '', danger_level: 1, points_of_interest: [], connections: [] };
+        case 'npc':
+            return { id: `npc_${Date.now()}`, name: 'New NPC', type: 'neutral', description: '', personality: '', goals: '', location_id: '' };
+        case 'faction':
+            return { id: `faction_${Date.now()}`, name: 'New Faction', type: 'political', alignment: 'neutral', description: '', goals: '' };
+        case 'quest':
+            return { id: `quest_${Date.now()}`, title: 'New Quest Hook', type: 'main', description: '', difficulty: 'medium', quest_giver_id: '' };
+        default:
+            return {};
+    }
+}
+
+function getCampaignPreviewCollection(type: string): any[] {
+    if (!generatedCampaignData) {
+        return [];
+    }
+    const key = `${type}s`;
+    if (!generatedCampaignData[key]) {
+        generatedCampaignData[key] = [];
+    }
+    return generatedCampaignData[key];
+}
+
+function renderPreviewFormFields(type: string, value: Record<string, any>): string {
+    const locationOptions = (generatedCampaignData?.locations || []).map((loc: any) =>
+        `<option value="${escapeHtml(loc.id)}" ${loc.id === value.location_id ? 'selected' : ''}>${escapeHtml(loc.name)}</option>`
+    ).join('');
+    const npcOptions = (generatedCampaignData?.npcs || []).map((npc: any) =>
+        `<option value="${escapeHtml(npc.id)}" ${npc.id === value.quest_giver_id ? 'selected' : ''}>${escapeHtml(npc.name)}</option>`
+    ).join('');
+
+    if (type === 'world') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">World Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}"></div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-history">History</label><textarea id="preview-edit-history" rows="3">${escapeHtml(value.history || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-current-state">Current State</label><textarea id="preview-edit-current-state" rows="3">${escapeHtml(value.current_state || '')}</textarea></div>
+        `;
+    }
+
+    if (type === 'scenario') {
+        return `<div class="form-group"><label for="preview-edit-description">Starting Scenario</label><textarea id="preview-edit-description" rows="4">${escapeHtml(value.description || '')}</textarea></div>`;
+    }
+
+    if (type === 'location') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'town')}"></div>
+                <div class="form-group"><label for="preview-edit-danger-level">Danger Level</label><input type="number" id="preview-edit-danger-level" min="0" max="10" value="${value.danger_level ?? 1}"></div>
+            </div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+        `;
+    }
+
+    if (type === 'npc') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'neutral')}"></div>
+                <div class="form-group"><label for="preview-edit-location-id">Location</label><select id="preview-edit-location-id"><option value="">Unassigned</option>${locationOptions}</select></div>
+            </div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-personality">Personality</label><textarea id="preview-edit-personality" rows="2">${escapeHtml(value.personality || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-goals">Goals</label><textarea id="preview-edit-goals" rows="2">${escapeHtml(value.goals || '')}</textarea></div>
+        `;
+    }
+
+    if (type === 'faction') {
+        return `
+            <div class="form-group"><label for="preview-edit-name">Name</label><input type="text" id="preview-edit-name" value="${escapeHtml(value.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'political')}"></div>
+                <div class="form-group"><label for="preview-edit-alignment">Alignment</label><input type="text" id="preview-edit-alignment" value="${escapeHtml(value.alignment || 'neutral')}"></div>
+            </div>
+            <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+            <div class="form-group"><label for="preview-edit-goals">Goals</label><textarea id="preview-edit-goals" rows="2">${escapeHtml(value.goals || '')}</textarea></div>
+        `;
+    }
+
+    return `
+        <div class="form-group"><label for="preview-edit-title">Title</label><input type="text" id="preview-edit-title" value="${escapeHtml(value.title || value.name || '')}" required></div>
+        <div class="form-row">
+            <div class="form-group"><label for="preview-edit-type">Type</label><input type="text" id="preview-edit-type" value="${escapeHtml(value.type || 'main')}"></div>
+            <div class="form-group"><label for="preview-edit-difficulty">Difficulty</label><input type="text" id="preview-edit-difficulty" value="${escapeHtml(value.difficulty || 'medium')}"></div>
+        </div>
+        <div class="form-group"><label for="preview-edit-description">Description</label><textarea id="preview-edit-description" rows="3">${escapeHtml(value.description || '')}</textarea></div>
+        <div class="form-group"><label for="preview-edit-quest-giver-id">Quest Giver</label><select id="preview-edit-quest-giver-id"><option value="">Unassigned</option>${npcOptions}</select></div>
+    `;
+}
 
 async function loadCampaignCreator(): Promise<void> {
     // Reset to step 1
@@ -2550,7 +2650,14 @@ function populatePreview(data: any): void {
     // World setting
     const worldPreview = document.getElementById('preview-world');
     if (worldPreview) {
-        worldPreview.innerHTML = `<p>${escapeHtml(data.world?.description || 'A world of adventure awaits...')}</p>`;
+        worldPreview.innerHTML = `
+            <div class="detail-stack">
+                <p><strong>${escapeHtml(data.world?.name || data.config?.name || 'World')}</strong></p>
+                <p>${escapeHtml(data.world?.description || 'A world of adventure awaits...')}</p>
+                ${data.world?.history ? `<p><strong>History:</strong> ${escapeHtml(data.world.history)}</p>` : ''}
+                ${data.world?.current_state ? `<p><strong>Current State:</strong> ${escapeHtml(data.world.current_state)}</p>` : ''}
+            </div>
+        `;
     }
 
     // Locations
@@ -2639,8 +2746,18 @@ function populatePreview(data: any): void {
 }
 
 function editPreviewItem(type: string, index: number): void {
-    // TODO: Open edit modal for the item
-    showToast(`Edit ${type} ${index + 1} - coming soon!`, 'info');
+    if (!generatedCampaignData) return;
+    const collection = getCampaignPreviewCollection(type);
+    const value = collection[index];
+    if (!value) return;
+
+    campaignPreviewEditState = { mode: 'edit', type, index };
+    (document.getElementById('campaign-preview-edit-type') as HTMLInputElement).value = type;
+    (document.getElementById('campaign-preview-edit-mode') as HTMLInputElement).value = 'edit';
+    (document.getElementById('campaign-preview-edit-index') as HTMLInputElement).value = String(index);
+    (document.getElementById('campaign-preview-modal-title') as HTMLElement).textContent = `✏️ Edit ${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+    (document.getElementById('campaign-preview-form-fields') as HTMLElement).innerHTML = renderPreviewFormFields(type, value);
+    openModal('campaign-preview-modal');
 }
 
 function removePreviewItem(type: string, index: number): void {
@@ -2655,13 +2772,97 @@ function removePreviewItem(type: string, index: number): void {
 }
 
 function addItem(type: string): void {
-    // TODO: Open add modal for the item type
-    showToast(`Add ${type} - coming soon!`, 'info');
+    if (!generatedCampaignData) return;
+    const value = buildDefaultPreviewItem(type);
+
+    campaignPreviewEditState = { mode: 'add', type };
+    (document.getElementById('campaign-preview-edit-type') as HTMLInputElement).value = type;
+    (document.getElementById('campaign-preview-edit-mode') as HTMLInputElement).value = 'add';
+    (document.getElementById('campaign-preview-edit-index') as HTMLInputElement).value = '';
+    (document.getElementById('campaign-preview-modal-title') as HTMLElement).textContent = `➕ Add ${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+    (document.getElementById('campaign-preview-form-fields') as HTMLElement).innerHTML = renderPreviewFormFields(type, value);
+    openModal('campaign-preview-modal');
 }
 
 function editSection(section: string): void {
-    // TODO: Open edit modal for the section
-    showToast(`Edit ${section} - coming soon!`, 'info');
+    if (!generatedCampaignData) return;
+    const value = section === 'world' ? { ...(generatedCampaignData.world || {}) } : { ...(generatedCampaignData.scenario || {}) };
+
+    campaignPreviewEditState = { mode: 'edit', type: section };
+    (document.getElementById('campaign-preview-edit-type') as HTMLInputElement).value = section;
+    (document.getElementById('campaign-preview-edit-mode') as HTMLInputElement).value = 'edit';
+    (document.getElementById('campaign-preview-edit-index') as HTMLInputElement).value = '';
+    (document.getElementById('campaign-preview-modal-title') as HTMLElement).textContent = `✏️ Edit ${section === 'world' ? 'World Setting' : 'Starting Scenario'}`;
+    (document.getElementById('campaign-preview-form-fields') as HTMLElement).innerHTML = renderPreviewFormFields(section, value);
+    openModal('campaign-preview-modal');
+}
+
+async function saveCampaignPreviewEdit(event: Event): Promise<void> {
+    event.preventDefault();
+    if (!generatedCampaignData || !campaignPreviewEditState) {
+        return;
+    }
+
+    const { mode, type, index } = campaignPreviewEditState;
+    const getValue = (id: string) => (document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value || '';
+
+    if (type === 'world') {
+        generatedCampaignData.world = {
+            ...(generatedCampaignData.world || {}),
+            name: getValue('preview-edit-name'),
+            description: getValue('preview-edit-description'),
+            history: getValue('preview-edit-history'),
+            current_state: getValue('preview-edit-current-state'),
+        };
+    } else if (type === 'scenario') {
+        generatedCampaignData.scenario = {
+            ...(generatedCampaignData.scenario || {}),
+            description: getValue('preview-edit-description'),
+        };
+    } else {
+        const collection = getCampaignPreviewCollection(type);
+        const baseValue = mode === 'edit' && typeof index === 'number' ? { ...collection[index] } : buildDefaultPreviewItem(type);
+
+        if (type === 'location') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-name'), 'loc');
+            baseValue.name = getValue('preview-edit-name');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.danger_level = parseInt(getValue('preview-edit-danger-level')) || 1;
+        } else if (type === 'npc') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-name'), 'npc');
+            baseValue.name = getValue('preview-edit-name');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.personality = getValue('preview-edit-personality');
+            baseValue.goals = getValue('preview-edit-goals');
+            baseValue.location_id = getValue('preview-edit-location-id');
+        } else if (type === 'faction') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-name'), 'faction');
+            baseValue.name = getValue('preview-edit-name');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.alignment = getValue('preview-edit-alignment');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.goals = getValue('preview-edit-goals');
+        } else if (type === 'quest') {
+            baseValue.id = baseValue.id || slugifyPreviewId(getValue('preview-edit-title'), 'quest');
+            baseValue.title = getValue('preview-edit-title');
+            baseValue.type = getValue('preview-edit-type');
+            baseValue.description = getValue('preview-edit-description');
+            baseValue.difficulty = getValue('preview-edit-difficulty');
+            baseValue.quest_giver_id = getValue('preview-edit-quest-giver-id');
+        }
+
+        if (mode === 'edit' && typeof index === 'number') {
+            collection[index] = baseValue;
+        } else {
+            collection.push(baseValue);
+        }
+    }
+
+    populatePreview(generatedCampaignData);
+    closeModal('campaign-preview-modal');
+    showToast('Campaign preview updated', 'success');
 }
 
 async function finalizeCampaign(): Promise<void> {

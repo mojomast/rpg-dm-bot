@@ -2028,6 +2028,7 @@ async def finalize_campaign(data: CampaignFinalize):
         
         # Create locations
         for loc in data.locations:
+            preview_location_id = loc.get('id') or f"loc_{len(location_id_map) + 1}"
             cursor = await conn.execute("""
                 INSERT INTO locations (
                     session_id, guild_id, name, description, location_type, danger_level,
@@ -2044,11 +2045,11 @@ async def finalize_campaign(data: CampaignFinalize):
                 json.dumps({}),
                 json.dumps(loc.get('points_of_interest', [])),
                 now,
-                now,
-            ))
-            location_id_map[loc['id']] = cursor.lastrowid
+                    now,
+                ))
+            location_id_map[preview_location_id] = cursor.lastrowid
 
-            if loc.get('id') == starting_location_preview_id:
+            if preview_location_id == starting_location_preview_id:
                 starting_location_id = cursor.lastrowid
 
         if starting_location_id is not None:
@@ -2081,6 +2082,7 @@ async def finalize_campaign(data: CampaignFinalize):
         
         # Create NPCs
         for npc in data.npcs:
+            preview_npc_id = npc.get('id') or f"npc_{len(npc_id_map) + 1}"
             # Find location name if assigned (npcs uses 'location' TEXT, not location_id)
             location_name = None
             if npc.get('location_id') and npc['location_id'] in location_id_map:
@@ -2110,7 +2112,7 @@ async def finalize_campaign(data: CampaignFinalize):
                     "is_party_member_candidate": npc.get('is_party_member_candidate', False),
                 }),
             ))
-            npc_id_map[npc['id']] = cursor.lastrowid
+            npc_id_map[preview_npc_id] = cursor.lastrowid
         
         # Create quests
         for quest in data.quest_hooks:
@@ -2122,7 +2124,7 @@ async def finalize_campaign(data: CampaignFinalize):
                 INSERT INTO quests (session_id, guild_id, title, description, objectives, 
                                     rewards, status, difficulty, quest_giver_npc_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?)
-            """, (session_id, data.guild_id, quest['title'], quest.get('description', ''),
+            """, (session_id, data.guild_id, quest.get('title') or quest.get('name') or 'Untitled Quest', quest.get('description', ''),
                   json.dumps(quest.get('objectives', [])), json.dumps(quest.get('rewards', {})),
                   quest.get('difficulty', 'medium'), quest_giver_id, data.dm_user_id, now))
         

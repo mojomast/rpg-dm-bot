@@ -80,6 +80,15 @@ This follow-up pass continued the worldbuilding/campaign gap-spec implementation
 **`src/cogs/combat.py`:**
 - Updated combat consumable item selection to use the same session-scoped pack item metadata as inventory
 
+**`src/cogs/characters.py`:**
+- Replaced the standalone `/character create` race/class/stat allocation flow with a thin compatibility wrapper that delegates to the canonical session-bound GM interview flow
+
+**`src/tools.py` + `src/cogs/combat.py`:**
+- Unified slash-command combat setup/join/spawn with the canonical combat encounter and participant creation helpers used by tool-driven combat
+
+**`web/frontend/src/main.ts` + `web/api.py`:**
+- Replaced campaign creator review/edit placeholder actions with real pre-finalize editing flows and finalize-time persistence hardening for edited/client-added preview data
+
 **Tests:**
 - Added regression coverage for channel-bound session selection, GM interview session/pack binding, batched actor-context tool routing, runtime session helper preference, and pack-aware spell runtime lookups
 
@@ -98,7 +107,7 @@ Results:
 
 #### Remaining Limitation
 
-- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; remaining work is now broader canonicalization and roadmap-scale features rather than flat-data parity in those core flows.
+- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; `/character create` also now routes into the same canonical character creation path. Combat setup/spawn drift and campaign creator review/edit placeholders are also closed. Remaining work is now the larger roadmap/admin systems and deeper canonicalization gaps.
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion
 

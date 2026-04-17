@@ -273,6 +273,29 @@ class TestCombatTools:
         assert "Combat started" in result
         assert "Goblins emerge" in result
 
+    async def test_start_combat_adds_session_participants_with_snapshot_ac(self, tool_executor, mock_context):
+        """Tool combat start should add all bound session participants with canonical AC snapshots."""
+        db = tool_executor.db
+        session_id = await db.create_session(67890, "Test Campaign", 12345)
+        stats_one = {"strength": 16, "dexterity": 14, "constitution": 15, "intelligence": 10, "wisdom": 12, "charisma": 8}
+        stats_two = {"strength": 12, "dexterity": 10, "constitution": 14, "intelligence": 10, "wisdom": 15, "charisma": 11}
+        char_one = await db.create_character(12345, 67890, "Aria", "human", "warrior", stats_one, session_id=session_id)
+        char_two = await db.create_character(54321, 67890, "Borin", "dwarf", "cleric", stats_two, session_id=session_id)
+        await db.add_item(char_one, "armor_chain", "Chain Mail", "armor", is_equipped=True, slot="body", properties={"ac_base": 16, "max_dex_bonus": 0})
+        await db.add_item(char_one, "shield_wooden", "Wooden Shield", "armor", is_equipped=True, slot="off_hand", properties={"ac_bonus": 2})
+        await db.add_session_player(session_id, char_one)
+        await db.add_session_player(session_id, char_two)
+        mock_context['session_id'] = session_id
+
+        result = await tool_executor.execute_tool("start_combat", {}, mock_context)
+
+        assert "Combat started" in result
+        combat = await db.get_active_combat(channel_id=11111)
+        combatants = await db.get_combatants(combat['id'])
+        assert {combatant['name'] for combatant in combatants} == {"Aria", "Borin"}
+        aria = next(c for c in combatants if c['name'] == "Aria")
+        assert aria['armor_class'] == 18
+
     async def test_start_combat_already_active(self, tool_executor, mock_context):
         """Test starting combat when one is already active"""
         # Start first combat
@@ -309,6 +332,7 @@ class TestCombatTools:
         enemy = next(c for c in combatants if c['participant_type'] == 'enemy')
         assert enemy['armor_class'] == 15
         assert enemy['combat_stats']['ac'] == 15
+        assert enemy['combat_stats']['armor_class'] == 15
 
     async def test_add_enemy_no_combat(self, tool_executor, mock_context, sample_enemy):
         """Test adding enemy when no combat active"""

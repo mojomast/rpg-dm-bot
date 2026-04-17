@@ -398,10 +398,12 @@ class DMChat(commands.Cog):
         return self.queue_locks[channel_id]
     
     async def cog_load(self):
-        self.proactive_dm_check.start()
+        if not self.proactive_dm_check.is_running():
+            self.proactive_dm_check.start()
 
     async def cog_unload(self):
-        self.proactive_dm_check.cancel()
+        if self.proactive_dm_check.is_running():
+            self.proactive_dm_check.cancel()
 
     def _history_key(self, guild_id: int, channel_id: int) -> tuple[int, int]:
         return (guild_id, channel_id)
@@ -1013,6 +1015,9 @@ class DMChat(commands.Cog):
     @tasks.loop(minutes=1)
     async def proactive_dm_check(self):
         """Prompt inactive channels with a gentle DM nudge."""
+        if not self.bot or not self.llm:
+            return
+
         now = datetime.utcnow()
         for channel_id, last_time in list(self.last_activity.items()):
             elapsed = (now - last_time).total_seconds()

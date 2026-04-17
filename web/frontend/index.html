@@ -34,6 +34,10 @@
                     <span class="nav-icon">🎮</span>
                     <span class="nav-text">Sessions</span>
                 </li>
+                <li class="nav-item" data-page="chat">
+                    <span class="nav-icon">🎭</span>
+                    <span class="nav-text">Browser Chat</span>
+                </li>
                 <li class="nav-item" data-page="characters">
                     <span class="nav-icon">⚔️</span>
                     <span class="nav-text">Characters</span>
@@ -478,6 +482,56 @@
                 </header>
                 <div class="content-grid" id="sessions-list">
                     <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+
+            <div id="chat-page" class="page">
+                <header class="page-header">
+                    <div>
+                        <h1>🎭 Browser Chat</h1>
+                        <p class="header-subtitle">Talk to the Dungeon Master from the web UI</p>
+                    </div>
+                </header>
+
+                <div class="chat-layout">
+                    <section class="chat-panel">
+                        <div class="chat-toolbar">
+                            <div class="chat-toolbar-group">
+                                <label for="chat-session-select">Session</label>
+                                <select id="chat-session-select"></select>
+                            </div>
+                            <div class="chat-toolbar-group">
+                                <label for="chat-character-select">Character</label>
+                                <select id="chat-character-select"></select>
+                            </div>
+                        </div>
+
+                        <div id="chat-quick-actions" class="chat-quick-actions">
+                            <button class="btn btn-small btn-secondary" onclick="window.chatInterface?.sendQuickAction('Look around carefully.')">Look</button>
+                            <button class="btn btn-small btn-secondary" onclick="window.chatInterface?.sendQuickAction('Continue forward with the current objective.')">Continue</button>
+                            <button class="btn btn-small btn-secondary" onclick="window.chatInterface?.sendQuickAction('Search the area for secrets or clues.')">Search</button>
+                            <button class="btn btn-small btn-secondary" onclick="window.chatInterface?.sendQuickAction('What are my best options right now?')">Options</button>
+                        </div>
+
+                        <div id="chat-messages" class="chat-messages">
+                            <div class="empty-state">Choose a session and character, then start the conversation.</div>
+                        </div>
+
+                        <div id="chat-typing" class="chat-typing hidden">The Dungeon Master is thinking...</div>
+                        <div id="chat-tool-feedback" class="chat-tool-feedback"></div>
+
+                        <form id="chat-form" class="chat-input-row">
+                            <textarea id="chat-input" rows="3" placeholder="Describe what your character does..."></textarea>
+                            <button type="submit" class="btn btn-primary">Send</button>
+                        </form>
+                    </section>
+
+                    <aside class="chat-state-panel">
+                        <h3>📚 Session Snapshot</h3>
+                        <div id="chat-session-state" class="chat-session-state">
+                            <div class="empty-state">Session state updates will appear here after each DM response.</div>
+                        </div>
+                    </aside>
                 </div>
             </div>
 

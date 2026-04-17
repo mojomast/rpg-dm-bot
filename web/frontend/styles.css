@@ -1347,6 +1347,15 @@ form {
         width: 100%;
         justify-content: flex-end;
     }
+
+    .chat-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .chat-toolbar,
+    .chat-input-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* ============================================================================

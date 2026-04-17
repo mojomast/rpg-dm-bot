@@ -14,6 +14,7 @@ import re
 from typing import Optional, Dict, List
 from datetime import datetime
 
+from src.chat_handler import ChatActor, ChatHandler
 from src.mechanics_tracker import new_tracker, get_tracker
 from src.utils import send_chunked
 
@@ -364,6 +365,7 @@ class DMChat(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.chat_handler = ChatHandler(bot.db, bot.llm, bot.prompts, bot.tool_schemas, bot.tools)
         # Channel conversation histories with session tracking
         # Format: {channel_id: {'session_id': int, 'messages': []}}
         self.histories: Dict[tuple[int, int], Dict] = {}
@@ -452,22 +454,15 @@ class DMChat(commands.Cog):
     async def resolve_session(self, guild_id: int, user_id: int = None, channel_id: int = None):
         """Resolve the active session for this channel/user context."""
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
-        if not session_id:
-            return None
-        session = await self.db.get_session(session_id)
-        if not session or session.get('guild_id') != guild_id:
-            return None
-        return session
+        return await self.chat_handler.resolve_session(guild_id, session_id=session_id, user_id=user_id)
 
     def build_full_response(self, response_text: str, mechanics_text: str = "") -> str:
         """Combine mechanics and response text for sending."""
-        return f"{mechanics_text}\n{response_text}" if mechanics_text else response_text
+        return self.chat_handler.build_full_response(response_text, mechanics_text)
 
     def extract_response_options(self, response_text: str) -> List[str]:
         """Extract numbered options from a DM response."""
-        if not response_text:
-            return []
-        return [match.group(1).strip() for match in re.finditer(r'^\s*[1-3][.)]\s*(.+)', response_text, re.MULTILINE)]
+        return self.chat_handler.extract_response_options(response_text)
     
     async def get_game_context(
         self,
@@ -484,152 +479,7 @@ class DMChat(commands.Cog):
             channel_id: The channel ID  
             session_id: Optional - the session ID to use (avoids database lookup if provided)
         """
-        context_parts = []
-        
-        # Get user's character with full details
-        char = await self.db.get_active_character(user_id, guild_id)
-        if char:
-            char_class = char.get('char_class') or char.get('class', 'Unknown')
-            context_parts.append(f"""
-PLAYER CHARACTER:
-- Name: {char['name']}
-- Class: {char_class} | Race: {char['race']}
-- Level: {char['level']} | XP: {char.get('xp', char.get('experience', 0))}
-- HP: {char['hp']}/{char['max_hp']}
-- Stats: STR {char['strength']}, DEX {char['dexterity']}, CON {char['constitution']}, INT {char['intelligence']}, WIS {char['wisdom']}, CHA {char['charisma']}
-- Gold: {char['gold']}""")
-            
-            # Include backstory if available
-            if char.get('backstory'):
-                context_parts.append(f"- Backstory: {char['backstory']}")
-            
-            # Get character's current location if set
-            if char.get('current_location_id'):
-                char_location = await self.db.get_location(char['current_location_id'])
-                if char_location:
-                    context_parts.append(f"- Current Location: {char_location['name']}")
-        
-        session = await self.db.get_session(session_id) if session_id else await self.resolve_session(guild_id, user_id, channel_id)
-        
-        if session:
-            context_parts.append(f"""
-ACTIVE SESSION: {session['name']}
-Game Description: {session.get('description', 'An adventure awaits!')}""")
-            
-            # Get all party members with backstories
-            players = await self.db.get_session_players(session['id'])
-            if players:
-                context_parts.append("\nPARTY MEMBERS:")
-                for p in players:
-                    # Skip players without a character assigned
-                    if not p.get('character_id'):
-                        continue
-                    party_char = await self.db.get_character(p['character_id'])
-                    if party_char:
-                        pc_class = party_char.get('char_class') or party_char.get('class', 'Unknown')
-                        context_parts.append(f"- {party_char['name']}: Level {party_char['level']} {party_char['race']} {pc_class}")
-                        context_parts.append(f"  HP: {party_char['hp']}/{party_char['max_hp']}")
-                        if party_char.get('backstory'):
-                            context_parts.append(f"  Backstory: {party_char['backstory'][:200]}...")
-            
-            # Get game state for persistent context
-            game_state = await self.db.get_game_state(session['id'])
-            current_location = None
-            if game_state:
-                if game_state.get('current_scene'):
-                    context_parts.append(f"\nCURRENT SCENE: {game_state['current_scene']}")
-                if game_state.get('current_location'):
-                    context_parts.append(f"CURRENT LOCATION (NAME): {game_state['current_location']}")
-                if game_state.get('current_location_id'):
-                    current_location = await self.db.get_location(game_state['current_location_id'])
-                if game_state.get('dm_notes'):
-                    context_parts.append(f"DM NOTES: {game_state['dm_notes']}")
-            
-            # Enhanced location context
-            if current_location:
-                loc_details = [f"\nLOCATION DETAILS ({current_location['name']}):"]
-                loc_details.append(f"- Type: {current_location.get('location_type', 'generic')}")
-                loc_details.append(f"- Description: {current_location.get('description', 'Unknown')}")
-                if current_location.get('current_weather'):
-                    loc_details.append(f"- Weather: {current_location['current_weather']}")
-                if current_location.get('danger_level', 0) > 0:
-                    danger = current_location['danger_level']
-                    danger_text = "Low" if danger < 3 else "Moderate" if danger < 5 else "High" if danger < 8 else "Deadly"
-                    loc_details.append(f"- Danger Level: {danger_text}")
-                if current_location.get('points_of_interest'):
-                    poi = current_location['points_of_interest']
-                    if isinstance(poi, list):
-                        loc_details.append(f"- Points of Interest: {', '.join(poi)}")
-                context_parts.extend(loc_details)
-                
-                # Get NPCs at this location
-                npcs_at_location = await self.db.get_npcs_at_location(current_location['id'])
-                if npcs_at_location:
-                    context_parts.append("\nNPCS AT THIS LOCATION:")
-                    for npc in npcs_at_location[:5]:  # Limit to 5 for context size
-                        merchant = " (Merchant)" if npc.get('is_merchant') else ""
-                        context_parts.append(f"- {npc['name']}{merchant} ({npc.get('npc_type', 'neutral')})")
-                        if npc.get('personality'):
-                            context_parts.append(f"  Personality: {npc['personality'][:100]}...")
-                
-                # Get nearby locations
-                nearby = await self.db.get_nearby_locations(current_location['id'])
-                if nearby:
-                    context_parts.append("\nNEARBY LOCATIONS (EXITS):")
-                    for loc in nearby[:5]:
-                        direction = f" ({loc.get('direction', 'path')})" if loc.get('direction') else ""
-                        context_parts.append(f"- {loc.get('to_name', loc.get('name', 'Unknown'))}{direction}")
-                
-                # Get story items at this location
-                story_items = await self.db.get_story_items_at_location(current_location['id'])
-                if story_items:
-                    context_parts.append("\nSTORY ITEMS HERE:")
-                    for item in story_items[:5]:
-                        discovered = "(Discovered)" if item.get('is_discovered') else "(Hidden)"
-                        context_parts.append(f"- {item['name']} {discovered}: {item.get('description', '')[:60]}...")
-            
-            # Get active story events
-            active_events = await self.db.get_active_events(session['id'])
-            if active_events:
-                context_parts.append("\nACTIVE STORY EVENTS:")
-                for event in active_events[:3]:  # Limit for context size
-                    context_parts.append(f"- {event['name']} ({event.get('event_type', 'unknown')})")
-                    if event.get('description'):
-                        context_parts.append(f"  {event['description'][:100]}...")
-            
-            # Get session quest
-            if session.get('current_quest_id'):
-                quest = await self.db.get_quest(session['current_quest_id'])
-                if quest:
-                    stages = await self.db.get_quest_stages(quest['id'])
-                    current_stage = stages[quest['current_stage']] if quest['current_stage'] < len(stages) else None
-                    
-                    context_parts.append(f"""
-CURRENT QUEST: {quest['title']}
-Description: {quest['description']}
-Difficulty: {quest['difficulty']}
-Stage: {quest['current_stage'] + 1}/{len(stages)}""")
-                    if current_stage:
-                        context_parts.append(f"""
-CURRENT STAGE: {current_stage['title']}
-{current_stage['description']}""")
-        
-        # Get active combat
-        combat = await self.db.get_active_combat(guild_id, channel_id)
-        if combat:
-            participants = await self.db.get_combat_participants(combat['id'])
-            context_parts.append(f"\nACTIVE COMBAT:")
-            context_parts.append(f"Turn: {combat['current_turn']}")
-            context_parts.append("Combatants:")
-            for p in participants:
-                # Skip participants without a character assigned
-                if not p.get('character_id'):
-                    continue
-                char_info = await self.db.get_character(p['character_id'])
-                if char_info:
-                    context_parts.append(f"- {char_info['name']}: {p['current_hp']} HP, Initiative {p['initiative']}")
-        
-        return "\n".join(context_parts) if context_parts else "No active game context."
+        return await self.chat_handler.get_game_context(guild_id, user_id, channel_id, session_id)
     
     def get_channel_session_id(self, guild_id: int, channel_id: int) -> Optional[int]:
         """Get the session ID stored for a channel (from when game started in this channel)"""
@@ -681,157 +531,25 @@ CURRENT STAGE: {current_stage['title']}
         """
         if not messages:
             return "*The Dungeon Master waits for your actions.*", ""
-        
-        # Initialize new mechanics tracker for this message
-        tracker = new_tracker()
-        
+
         guild_id = channel.guild.id
         channel_id = channel.id
-        
-        # Get game context using first player's ID (for their character)
-        # but context includes all party members
         first_user_id = messages[0]['user_id']
-        
-        # Get session ID for history tracking - prioritize channel's session over user lookup
         session_id = await self.get_active_session_id(guild_id, first_user_id, channel_id)
-        
-        # Track activity
         self.last_activity[channel_id] = datetime.utcnow()
-        
-        game_context = await self.get_game_context(guild_id, first_user_id, channel_id, session_id)
-        
-        # Build multi-player instruction
-        player_actions = "\n".join([
-            f"**{msg['display_name']}** ({msg['character_name']}): {msg['content']}"
-            for msg in messages
-        ])
-        
-        multi_player_instructions = """
-**MULTI-PLAYER HANDLING:**
-Multiple players may act simultaneously. Handle each player's action in sequence:
-1. Acknowledge each player's declared action by name
-2. Roll any needed checks FOR THE SPECIFIC PLAYER taking that action
-3. Describe the results for each player
-4. If players are doing different things, describe each separately but in the same scene
-5. Keep all players in the same location unless they explicitly split up
-6. End with a prompt that addresses the whole party
 
-IMPORTANT: Each player's action is prefixed with their name. Make sure you address each player's action!
-"""
-        
-        # Build system prompt with context and proactive guidelines
-        system_prompt = f"""{self.bot.prompts.get_dm_system_prompt()}
-
-{PROACTIVE_DM_GUIDELINES}
-
-{multi_player_instructions}
-
-CURRENT GAME STATE:
-{game_context}
-
-TOOLS AVAILABLE:
-You have access to tools for managing the game. Use them when players want to:
-- Create/modify characters
-- Manage inventory and items  
-- Roll dice for checks and combat
-- Control NPCs and dialogue
-- Manage quests and progression
-- Run combat encounters
-
-Always use dice rolls for skill checks and combat. Make the game interactive and engaging.
-
-CRITICAL: 
-- Always end your response with a prompt for player action. Keep the game moving!
-- Address ALL player actions in your response, not just one!
-- Use get_character_info if you need to know who a player is playing
-"""
-        
-        # Get conversation history (with session checking)
         history = self.get_history(guild_id, channel_id, session_id)
-        
-        # Add batched player messages as a single user turn
-        batched_content = f"[PLAYER ACTIONS THIS TURN]\n{player_actions}"
-        user_msg = {"role": "user", "content": batched_content}
-        self.add_to_history(guild_id, channel_id, user_msg, session_id)
-        
-        # Build messages for LLM
-        messages_for_llm = [
-            {"role": "system", "content": system_prompt},
-            *history
-        ]
-        
-        # Get tool schemas
-        tool_schemas = self.bot.tool_schemas.get_all_schemas()
-        
-        # Process with tool loop
-        response_text = ""
-        
-        for round_num in range(MAX_TOOL_ROUNDS):
-            try:
-                response = await self.llm.chat_with_tools(
-                    messages=messages_for_llm,
-                    tools=tool_schemas
-                )
-                
-                # Check for tool calls
-                tool_calls = response.get('tool_calls', [])
-                content = response.get('content', '')
-                
-                if not tool_calls:
-                    # No more tools, we have final response
-                    response_text = content
-                    break
-                
-                # Execute tools
-                for tool_call in tool_calls:
-                    tool_name = tool_call['function']['name']
-                    try:
-                        tool_args = json.loads(tool_call['function']['arguments'])
-                    except json.JSONDecodeError:
-                        tool_args = {}
-                    
-                    logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
-                    
-                    # Build context for tool execution - include session_id for proper isolation
-                    context = {
-                        'guild_id': guild_id,
-                        'user_id': first_user_id,
-                        'channel_id': channel_id,
-                        'session_id': session_id  # Critical for session isolation
-                    }
-                    
-                    # Execute the tool
-                    tool_result = await self.tools.execute_tool(
-                        tool_name,
-                        tool_args,
-                        context
-                    )
-                    
-                    # Add tool call and result to messages
-                    messages_for_llm.append({
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": [tool_call]
-                    })
-                    messages_for_llm.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call['id'],
-                        "content": json.dumps(tool_result) if isinstance(tool_result, dict) else str(tool_result)
-                    })
-                
-            except Exception as e:
-                logger.error(f"Error in DM chat: {e}", exc_info=True)
-                response_text = f"*The Dungeon Master pauses, gathering their thoughts...* (Error: {str(e)[:100]})"
-                break
-        
-        # Add response to history
-        if response_text:
-            self.add_to_history(guild_id, channel_id, {"role": "assistant", "content": response_text}, session_id)
-        
-        # Get formatted mechanics
-        mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""
-        
-        return response_text or "*The Dungeon Master remains silent.*", mechanics_text
+        result = await self.chat_handler.process_batched_messages(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            messages=messages,
+            history=history,
+            session_id=session_id,
+        )
+
+        self.add_to_history(guild_id, channel_id, result['user_message'], result['session_id'])
+        self.add_to_history(guild_id, channel_id, result['assistant_message'], result['session_id'])
+        return result['response'], result['mechanics_text']
     
     async def process_dm_input(
         self,
@@ -848,130 +566,29 @@ CRITICAL:
         channel_id = channel.id
         guild_id = guild.id
         user_id = author.id
-        
-        # Initialize new mechanics tracker for this message
-        tracker = new_tracker()
-        
-        # Get session ID for history tracking - prioritize channel's session over user lookup
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
-        
-        # Track activity
         self.last_activity[channel_id] = datetime.utcnow()
-        
-        # Get game context
-        game_context = await self.get_game_context(guild_id, user_id, channel_id, session_id)
-        
-        # Build system prompt with context and proactive guidelines
-        system_prompt = f"""{self.bot.prompts.get_dm_system_prompt()}
 
-{PROACTIVE_DM_GUIDELINES}
-
-CURRENT GAME STATE:
-{game_context}
-
-TOOLS AVAILABLE:
-You have access to tools for managing the game. Use them when players want to:
-- Create/modify characters
-- Manage inventory and items  
-- Roll dice for checks and combat
-- Control NPCs and dialogue
-- Manage quests and progression
-- Run combat encounters
-
-Always use dice rolls for skill checks and combat. Make the game interactive and engaging.
-
-CRITICAL: Always end your response with a prompt for player action. Keep the game moving!
-"""
-        
-        # Get conversation history (with session tracking)
         history = self.get_history(guild_id, channel_id, session_id)
-        
-        # Get character name for this player
         char = await self.db.get_active_character(user_id, guild_id)
-        char_name = char['name'] if char else author.display_name
-        
-        # Add user message to history with character name
-        user_msg = {"role": "user", "content": f"[{author.display_name}] ({char_name}): {user_message}"}
-        self.add_to_history(guild_id, channel_id, user_msg, session_id)
-        
-        # Build messages for LLM
-        messages = [
-            {"role": "system", "content": system_prompt},
-            *history
-        ]
-        
-        # Get tool schemas
-        tool_schemas = self.bot.tool_schemas.get_all_schemas()
-        
-        # Process with tool loop
-        response_text = ""
-        
-        for round_num in range(MAX_TOOL_ROUNDS):
-            try:
-                response = await self.llm.chat_with_tools(
-                    messages=messages,
-                    tools=tool_schemas
-                )
-                
-                # Check for tool calls
-                tool_calls = response.get('tool_calls', [])
-                content = response.get('content', '')
-                
-                if not tool_calls:
-                    # No more tools, we have final response
-                    response_text = content
-                    break
-                
-                # Execute tools
-                for tool_call in tool_calls:
-                    tool_name = tool_call['function']['name']
-                    try:
-                        tool_args = json.loads(tool_call['function']['arguments'])
-                    except json.JSONDecodeError:
-                        tool_args = {}
-                    
-                    logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
-                    
-                    # Build context for tool execution - include session_id for proper isolation
-                    context = {
-                        'guild_id': guild_id,
-                        'user_id': user_id,
-                        'channel_id': channel_id,
-                        'session_id': session_id  # Critical for session isolation
-                    }
-                    
-                    # Execute the tool
-                    tool_result = await self.tools.execute_tool(
-                        tool_name,
-                        tool_args,
-                        context
-                    )
-                    
-                    # Add tool call and result to messages
-                    messages.append({
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": [tool_call]
-                    })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call['id'],
-                        "content": json.dumps(tool_result) if isinstance(tool_result, dict) else str(tool_result)
-                    })
-                
-            except Exception as e:
-                logger.error(f"Error in DM chat: {e}", exc_info=True)
-                response_text = f"*The Dungeon Master pauses, gathering their thoughts...* (Error: {str(e)[:100]})"
-                break
-        
-        # Add response to history
-        if response_text:
-            self.add_to_history(guild_id, channel_id, {"role": "assistant", "content": response_text}, session_id)
-        
-        # Get formatted mechanics
-        mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""
-        
-        return response_text or "*The Dungeon Master remains silent.*", mechanics_text
+        actor = ChatActor(
+            user_id=user_id,
+            display_name=author.display_name,
+            character_name=char['name'] if char else author.display_name,
+            character_id=char['id'] if char else None,
+        )
+        result = await self.chat_handler.process_single_message(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            actor=actor,
+            user_message=user_message,
+            history=history,
+            session_id=session_id,
+        )
+
+        self.add_to_history(guild_id, channel_id, result['user_message'], result['session_id'])
+        self.add_to_history(guild_id, channel_id, result['assistant_message'], result['session_id'])
+        return result['response'], result['mechanics_text']
 
     async def process_dm_message(
         self,

@@ -97,6 +97,19 @@ class ToolExecutor:
     def __init__(self, db):
         self.db = db
         self.dice = DiceRoller()
+
+    async def _get_context_character(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Prefer an explicit character in context before active-character lookup."""
+        character_id = context.get('character_id')
+        if character_id:
+            return await self.db.get_character(character_id)
+
+        user_id = context.get('user_id')
+        guild_id = context.get('guild_id')
+        if user_id and guild_id:
+            return await self.db.get_active_character(user_id, guild_id)
+
+        return None
     
     async def _get_session_for_context(self, context: Dict[str, Any]) -> Optional[Dict]:
         """Get the correct session for the given context.
@@ -355,7 +368,7 @@ class ToolExecutor:
         if char_id:
             char = await self.db.get_character(char_id)
         else:
-            char = await self.db.get_active_character(user_id, guild_id)
+            char = await self._get_context_character(context)
         
         if not char:
             return "No character found."
@@ -683,7 +696,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         # Log the roll
         user_id = context.get('user_id')
         guild_id = context.get('guild_id')
-        char = await self.db.get_active_character(user_id, guild_id)
+        char = await self._get_context_character(context)
         char_name = char['name'] if char else 'Unknown'
         
         await self.db.log_dice_roll(

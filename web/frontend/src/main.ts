@@ -15,6 +15,26 @@ interface ApiResponse<T> {
     [key: string]: T;
 }
 
+interface ChatHistoryMessage {
+    role: 'user' | 'assistant' | 'mechanics';
+    content: string;
+}
+
+interface ChatToolResult {
+    tool_name: string;
+    args: Record<string, any>;
+    result: any;
+}
+
+interface ChatApiResponse {
+    response: string;
+    mechanics_text: string;
+    tool_results: ChatToolResult[];
+    updated_state: any;
+    options: string[];
+    session_id: number;
+}
+
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
     const defaultOptions: RequestInit = {
@@ -43,6 +63,7 @@ const api = {
     getSession: (id: number) => apiCall<any>(`/sessions/${id}`),
     createSession: (data: any) => apiCall<{ id: number }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
     updateSession: (id: number, data: any) => apiCall<any>(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    chatWithDM: (data: any) => apiCall<ChatApiResponse>('/chat', { method: 'POST', body: JSON.stringify(data) }),
 
     // Locations
     getLocations: () => apiCall<{ locations: any[] }>('/locations'),
@@ -209,6 +230,9 @@ async function loadPageData(pageId: string): Promise<void> {
             case 'sessions':
                 await loadSessions();
                 break;
+            case 'chat':
+                await loadChatPage();
+                break;
             case 'locations':
                 await loadLocations();
                 break;
@@ -350,10 +374,12 @@ async function createSession(event: Event): Promise<void> {
 async function viewSession(id: number): Promise<void> {
     try {
         const data = await api.getSession(id);
-        const session = data.session;
-        const characters = data.characters || [];
+        const activeCombatData = await api.getActiveCombat(id);
+        const session = data;
+        const characters = (data.participants || []).filter((participant: any) => participant.character_id);
         const npcs = data.npcs || [];
         const locations = data.locations || [];
+        const activeCombat = activeCombatData.combat;
         
         // Populate the session detail modal
         const content = `
@@ -373,13 +399,18 @@ async function viewSession(id: number): Promise<void> {
                         <div class="mini-card-list">
                             ${characters.map((c: any) => `
                                 <div class="mini-card">
-                                    <strong>${escapeHtml(c.name)}</strong>
-                                    <span>Lvl ${c.level} ${escapeHtml(c.char_class || c.class || '')}</span>
-                                    <span>❤️ ${c.hp}/${c.max_hp}</span>
+                                    <strong>${escapeHtml(c.character_name || 'Unknown')}</strong>
+                                    <span>Lvl ${c.character_level || '?'} ${escapeHtml(c.character_class || '')}</span>
+                                    <span>Player ${c.user_id}</span>
                                 </div>
                             `).join('')}
                         </div>
                     `}
+                </div>
+
+                <div class="session-section">
+                    <h3>⚔️ Combat Viewer</h3>
+                    ${renderCombatPanel(activeCombat)}
                 </div>
                 
                 <div class="session-section">
@@ -451,6 +482,7 @@ async function loadLocations(): Promise<void> {
                     <span>🌤️ ${loc.current_weather || 'Unknown'}</span>
                 </div>
                 <div class="entity-actions">
+                    <button class="btn btn-small btn-primary" onclick="showLocationDetails(${loc.id})">🧭 Connections</button>
                     <button class="btn btn-small btn-secondary" onclick="editLocation(${loc.id})">Edit</button>
                     <button class="btn btn-small btn-danger" onclick="deleteLocation(${loc.id})">Delete</button>
                 </div>
@@ -871,6 +903,7 @@ async function loadCharacters(): Promise<void> {
                 </div>
                 <div class="entity-actions">
                     <button class="btn btn-small btn-primary" onclick="showCharacterInventory(${char.id})">🎒 Inventory</button>
+                    <button class="btn btn-small btn-secondary" onclick="showCharacterDetails(${char.id})">✨ Details</button>
                     <button class="btn btn-small btn-secondary" onclick="editCharacter(${char.id})">Edit</button>
                 </div>
             </div>
@@ -2652,6 +2685,391 @@ async function finalizeCampaign(): Promise<void> {
     }
 }
 
+function renderSimpleList(items: Array<{ title: string; meta: string }>): string {
+    if (items.length === 0) {
+        return '<p class="empty-hint">Nothing to show</p>';
+    }
+
+    return `
+        <div class="detail-list">
+            ${items.map(item => `
+                <div class="detail-list-item">
+                    <strong>${escapeHtml(item.title)}</strong>
+                    <span>${escapeHtml(item.meta)}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderCombatPanel(combat: any): string {
+    if (!combat) {
+        return '<p class="empty-hint">No active combat in this session.</p>';
+    }
+
+    return `
+        <div class="detail-stack">
+            <div class="detail-list-item"><strong>Status</strong><span>Round ${combat.round_number || 1}, Turn ${combat.current_turn || 0}</span></div>
+            <div class="detail-list">
+                ${(combat.participants || []).map((participant: any) => `
+                    <div class="detail-list-item combat-participant ${participant.current_hp <= 0 ? 'dead' : ''}">
+                        <strong>${escapeHtml(participant.name || 'Unknown')}</strong>
+                        <span>${participant.current_hp}/${participant.max_hp} HP${participant.initiative ? `, Init ${participant.initiative}` : ''}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderSpellPanel(spells: any[], spellSlots: Record<string, any>): string {
+    const slots = Object.entries(spellSlots || {}).map(([level, slot]: [string, any]) => `
+        <div class="detail-list-item"><strong>Level ${escapeHtml(level)}</strong><span>${slot.remaining}/${slot.total} slots</span></div>
+    `).join('');
+
+    return `
+        <div class="detail-stack">
+            ${slots || '<p class="empty-hint">No spell slots tracked</p>'}
+            ${renderSimpleList(spells.map((spell: any) => ({
+                title: `${spell.spell_name || spell.name || 'Spell'}${spell.is_prepared ? ' (Prepared)' : ''}`,
+                meta: `${spell.school || 'Unknown school'} • Level ${spell.spell_level ?? '?'}${spell.is_cantrip ? ' • Cantrip' : ''}`,
+            })))}
+        </div>
+    `;
+}
+
+function renderStatusEffectsPanel(statusEffects: any[]): string {
+    if (statusEffects.length === 0) {
+        return '<p class="empty-hint">No active status effects.</p>';
+    }
+
+    return `
+        <div>
+            ${statusEffects.map((effect: any) => `<span class="status-chip">${escapeHtml(effect.effect_name || effect.effect || 'Effect')}${effect.duration ? ` (${effect.duration})` : ''}</span>`).join('')}
+        </div>
+    `;
+}
+
+function renderLocationConnectionsPanel(connections: any[]): string {
+    if (connections.length === 0) {
+        return '<p class="empty-hint">No visible connections from this location.</p>';
+    }
+
+    return `
+        <div class="location-connection-map">
+            ${connections.map((connection: any) => `
+                <div class="connection-card">
+                    <div class="direction">${escapeHtml(connection.direction || 'path')}</div>
+                    <div class="target">${escapeHtml(connection.to_name || connection.name || 'Unknown')}</div>
+                    <div class="meta">${escapeHtml(connection.location_type || 'unknown')} • ${connection.travel_time || 1} travel unit(s)</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+async function showCharacterDetails(charId: number): Promise<void> {
+    try {
+        const [char, spellsData, abilitiesData, skillsData, statusData] = await Promise.all([
+            api.getCharacter(charId),
+            api.getCharacterSpells(charId),
+            api.getCharacterAbilities(charId),
+            api.getCharacterSkills(charId),
+            api.getCharacterStatusEffects(charId),
+        ]);
+
+        const content = `
+            <div class="session-detail">
+                <div class="session-info">
+                    <h3>⚔️ ${escapeHtml(char.name)}</h3>
+                    <p><strong>Class:</strong> ${escapeHtml(char.char_class || char.class || 'Unknown')}</p>
+                    <p><strong>Race:</strong> ${escapeHtml(char.race || 'Unknown')}</p>
+                    <p><strong>Level:</strong> ${char.level}</p>
+                </div>
+
+                <div class="detail-grid">
+                    <div class="detail-panel">
+                        <h4>📖 Spell Management</h4>
+                        ${renderSpellPanel(spellsData.spells || [], spellsData.spell_slots || {})}
+                    </div>
+                    <div class="detail-panel">
+                        <h4>✨ Status Effects</h4>
+                        ${renderStatusEffectsPanel(statusData.status_effects || [])}
+                    </div>
+                </div>
+
+                <div class="detail-grid">
+                    <div class="detail-panel">
+                        <h4>🛡️ Abilities</h4>
+                        ${renderSimpleList((abilitiesData.abilities || []).map((ability: any) => ({
+                            title: ability.ability_name || ability.name || 'Ability',
+                            meta: ability.description || ability.effect || 'No description',
+                        })))}
+                    </div>
+                    <div class="detail-panel">
+                        <h4>🌳 Skills</h4>
+                        <div class="detail-stack">
+                            <div class="detail-list-item"><strong>Points</strong><span>${skillsData.skill_points?.available || 0} available / ${skillsData.skill_points?.total || 0} total</span></div>
+                            ${renderSimpleList((skillsData.skills || []).map((skill: any) => ({
+                                title: skill.skill_name || skill.name || 'Skill',
+                                meta: `Level ${skill.skill_level || skill.level || 1}`,
+                            })))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('session-detail-content')!.innerHTML = content;
+        document.getElementById('session-detail-title')!.textContent = `⚔️ ${char.name}`;
+        openModal('session-detail-modal');
+    } catch (error) {
+        showToast('Failed to load character details', 'error');
+    }
+}
+
+async function showLocationDetails(locationId: number): Promise<void> {
+    try {
+        const [location, connectionData] = await Promise.all([
+            api.getLocation(locationId),
+            api.getLocationConnections(locationId),
+        ]);
+
+        const content = `
+            <div class="session-detail">
+                <div class="session-info">
+                    <h3>🗺️ ${escapeHtml(location.name)}</h3>
+                    <p><strong>Type:</strong> ${escapeHtml(location.location_type || 'Unknown')}</p>
+                    <p><strong>Danger:</strong> ${location.danger_level || 0}/10</p>
+                    <p><strong>Description:</strong> ${escapeHtml(location.description || 'No description')}</p>
+                </div>
+
+                <div class="session-section">
+                    <h3>🧭 Location Connection Map</h3>
+                    ${renderLocationConnectionsPanel(connectionData.connections || [])}
+                </div>
+            </div>
+        `;
+
+        document.getElementById('session-detail-content')!.innerHTML = content;
+        document.getElementById('session-detail-title')!.textContent = `🗺️ ${location.name}`;
+        openModal('session-detail-modal');
+    } catch (error) {
+        showToast('Failed to load location details', 'error');
+    }
+}
+
+class ChatInterface {
+    private sessionId: number | null = null;
+    private characterId: number | null = null;
+    private userId: string;
+    private chatHistory: ChatHistoryMessage[] = [];
+    private latestState: any = null;
+
+    constructor() {
+        this.userId = this.getOrCreateUserId();
+    }
+
+    private getOrCreateUserId(): string {
+        const key = 'rpgdm-web-user-id';
+        let existing = localStorage.getItem(key);
+        if (!existing) {
+            existing = crypto.randomUUID();
+            localStorage.setItem(key, existing);
+        }
+        return existing;
+    }
+
+    async initialize(): Promise<void> {
+        const sessionsData = await api.getSessions();
+        const sessionSelect = document.getElementById('chat-session-select') as HTMLSelectElement | null;
+        const form = document.getElementById('chat-form') as HTMLFormElement | null;
+        if (!sessionSelect || !form) {
+            return;
+        }
+
+        const sessions = sessionsData.sessions || [];
+        sessionSelect.innerHTML = '<option value="">Select a session...</option>' +
+            sessions.map((session: any) => `<option value="${session.id}">${escapeHtml(session.name)}</option>`).join('');
+
+        sessionSelect.onchange = async () => {
+            this.sessionId = sessionSelect.value ? parseInt(sessionSelect.value) : null;
+            this.chatHistory = [];
+            this.renderMessages();
+            await this.populateCharacterSelect();
+            this.latestState = null;
+            this.renderSessionState();
+        };
+
+        form.onsubmit = async (event) => {
+            event.preventDefault();
+            const input = document.getElementById('chat-input') as HTMLTextAreaElement;
+            const message = input.value.trim();
+            if (!message) return;
+            input.value = '';
+            await this.sendMessage(message);
+        };
+    }
+
+    private async populateCharacterSelect(): Promise<void> {
+        const select = document.getElementById('chat-character-select') as HTMLSelectElement | null;
+        if (!select) {
+            return;
+        }
+
+        if (!this.sessionId) {
+            select.innerHTML = '<option value="">Select a session first...</option>';
+            return;
+        }
+
+        const session = await api.getSession(this.sessionId);
+        const participants = (session.participants || []).filter((participant: any) => participant.character_id);
+        select.innerHTML = '<option value="">Select a character...</option>' +
+            participants.map((participant: any) => `<option value="${participant.character_id}">${escapeHtml(participant.character_name || 'Unknown')}</option>`).join('');
+        select.onchange = () => {
+            this.characterId = select.value ? parseInt(select.value) : null;
+        };
+        this.characterId = null;
+    }
+
+    async sendQuickAction(message: string): Promise<void> {
+        await this.sendMessage(message);
+    }
+
+    async sendMessage(message: string): Promise<void> {
+        if (!this.sessionId) {
+            showToast('Select a session first', 'error');
+            return;
+        }
+
+        if (!this.characterId) {
+            showToast('Select a character first', 'error');
+            return;
+        }
+
+        const priorHistory = this.chatHistory.filter(entry => entry.role !== 'mechanics').map(entry => ({
+            role: entry.role,
+            content: entry.content,
+        }));
+
+        this.chatHistory.push({ role: 'user', content: message });
+        this.renderMessages();
+        this.setTyping(true);
+
+        try {
+            const response = await api.chatWithDM({
+                session_id: this.sessionId,
+                user_id: this.userId,
+                character_id: this.characterId,
+                message,
+                chat_history: priorHistory,
+            });
+
+            if (response.mechanics_text) {
+                this.chatHistory.push({ role: 'mechanics', content: response.mechanics_text });
+            }
+
+            this.chatHistory.push({ role: 'assistant', content: response.response });
+            this.renderMessages();
+            this.renderToolResults(response.tool_results || []);
+            this.latestState = response.updated_state;
+            this.renderSessionState();
+        } catch (error: any) {
+            this.chatHistory.pop();
+            this.renderMessages();
+            showToast(error?.message || 'Failed to send chat message', 'error');
+        } finally {
+            this.setTyping(false);
+        }
+    }
+
+    private setTyping(isTyping: boolean): void {
+        document.getElementById('chat-typing')?.classList.toggle('hidden', !isTyping);
+    }
+
+    private renderMessages(): void {
+        const container = document.getElementById('chat-messages');
+        if (!container) {
+            return;
+        }
+
+        if (this.chatHistory.length === 0) {
+            container.innerHTML = '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
+            return;
+        }
+
+        container.innerHTML = this.chatHistory.map(message => `
+            <div class="chat-message ${message.role}">
+                <div class="chat-message-meta">${message.role === 'user' ? 'Player' : message.role === 'mechanics' ? 'Mechanics' : 'Dungeon Master'}</div>
+                <div>${escapeHtml(message.content)}</div>
+            </div>
+        `).join('');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    private renderToolResults(toolResults: ChatToolResult[]): void {
+        const container = document.getElementById('chat-tool-feedback');
+        if (!container) {
+            return;
+        }
+
+        if (toolResults.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = toolResults.map(result => `
+            <div class="tool-result-card">
+                <strong>${escapeHtml(result.tool_name)}</strong><br>
+                <span>${escapeHtml(typeof result.result === 'string' ? result.result : JSON.stringify(result.result))}</span>
+            </div>
+        `).join('');
+    }
+
+    private renderSessionState(): void {
+        const container = document.getElementById('chat-session-state');
+        if (!container) {
+            return;
+        }
+
+        if (!this.latestState) {
+            container.innerHTML = '<div class="empty-state">Session state updates will appear here after each DM response.</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="state-block">
+                <h4>Session</h4>
+                <div>${escapeHtml(this.latestState.name || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
+                <h4>Party</h4>
+                ${renderSimpleList((this.latestState.participants || []).filter((p: any) => p.character_id).map((p: any) => ({
+                    title: p.character_name || 'Unknown',
+                    meta: `${p.character_class || 'Unknown'} Lvl ${p.character_level || '?'}`,
+                })))}
+            </div>
+            <div class="state-block">
+                <h4>Locations</h4>
+                ${renderSimpleList((this.latestState.locations || []).slice(0, 5).map((location: any) => ({
+                    title: location.name || 'Unknown',
+                    meta: `${location.location_type || 'unknown'} • danger ${location.danger_level || 0}`,
+                })))}
+            </div>
+        `;
+    }
+}
+
+let chatInterface: ChatInterface | null = null;
+
+async function loadChatPage(): Promise<void> {
+    if (!chatInterface) {
+        chatInterface = new ChatInterface();
+    }
+    (window as any).chatInterface = chatInterface;
+    await chatInterface.initialize();
+}
+
 function startNewCampaign(): void {
     // Reset and start over
     generatedCampaignData = null;
@@ -2700,6 +3118,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load initial dashboard
     loadDashboard();
 
+    chatInterface = new ChatInterface();
+    (window as any).chatInterface = chatInterface;
+
     console.log('🎲 RPG DM Bot Manager initialized');
 });
 
@@ -2709,6 +3130,7 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).closeModal = closeModal;
 (window as any).createSession = createSession;
 (window as any).viewSession = viewSession;
+(window as any).chatInterface = chatInterface;
 (window as any).createLocation = createLocation;
 (window as any).deleteLocation = deleteLocation;
 (window as any).editLocation = editLocation;
@@ -2735,6 +3157,7 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).editCharacter = editCharacter;
 (window as any).updateCharacter = updateCharacter;
 (window as any).showCharacterInventory = showCharacterInventory;
+(window as any).showCharacterDetails = showCharacterDetails;
 (window as any).equipItem = equipItem;
 (window as any).unequipItem = unequipItem;
 (window as any).removeInventoryItem = removeInventoryItem;
@@ -2780,6 +3203,8 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).filterSpells = filterSpells;
 
 // Campaign creator
+(window as any).loadChatPage = loadChatPage;
+(window as any).showLocationDetails = showLocationDetails;
 (window as any).loadCampaignCreator = loadCampaignCreator;
 (window as any).generateCampaignPreview = generateCampaignPreview;
 (window as any).finalizeCampaign = finalizeCampaign;

@@ -19,7 +19,12 @@ import logging
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.database import Database
+from src.chat_handler import ChatActor, ChatHandler
+from src.chat_web_identity import web_user_id_from_uuid
 from src.llm import LLMClient
+from src.prompts import Prompts
+from src.tool_schemas import ToolSchemas
+from src.tools import ToolExecutor
 
 logger = logging.getLogger('rpg.api')
 
@@ -52,6 +57,10 @@ app.add_middleware(
 
 # Database instance
 db = Database("data/rpg.db")
+prompts = Prompts()
+tool_schemas = ToolSchemas()
+tools = ToolExecutor(db)
+chat_handler: Optional[ChatHandler] = None
 
 # ============================================================================
 # PYDANTIC MODELS
@@ -195,6 +204,28 @@ class QuestUpdate(BaseModel):
     difficulty: Optional[str] = None
     dm_notes: Optional[str] = None
 
+
+class ChatHistoryMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    session_id: int
+    user_id: str
+    message: str
+    character_id: Optional[int] = None
+    chat_history: List[ChatHistoryMessage] = []
+
+
+class ChatResponse(BaseModel):
+    response: str
+    mechanics_text: str
+    tool_results: List[Dict[str, Any]]
+    updated_state: Dict[str, Any]
+    options: List[str]
+    session_id: int
+
 # ============================================================================
 # STARTUP / SHUTDOWN
 # ============================================================================
@@ -202,6 +233,15 @@ class QuestUpdate(BaseModel):
 @app.on_event("startup")
 async def startup():
     await db.init()
+    global chat_handler
+    if llm_client:
+        chat_handler = ChatHandler(db, llm_client, prompts, tool_schemas, tools)
+
+
+def get_chat_handler() -> ChatHandler:
+    if not chat_handler:
+        raise HTTPException(status_code=503, detail="Chat is unavailable until REQUESTY_API_KEY is configured")
+    return chat_handler
 
 # ============================================================================
 # DASHBOARD ENDPOINTS
@@ -295,6 +335,48 @@ async def update_session(session_id: int, session: SessionUpdate):
     if updates:
         await db.update_session(session_id, **updates)
     return {"message": "Session updated"}
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat_with_dm(request: ChatRequest):
+    """Send a message to the AI DM and get a response."""
+    handler = get_chat_handler()
+    session = await db.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    web_user_id = web_user_id_from_uuid(request.user_id)
+    synthetic_channel_id = web_user_id_from_uuid(f"web-session:{request.session_id}:user:{request.user_id}")
+    character = await db.get_character(request.character_id) if request.character_id else None
+    actor_name = character['name'] if character else f"Web Player {request.user_id[:8]}"
+    actor = ChatActor(
+        user_id=web_user_id,
+        display_name=actor_name,
+        character_name=character['name'] if character else None,
+        character_id=character['id'] if character else None,
+    )
+
+    result = await handler.process_single_message(
+        guild_id=session['guild_id'],
+        channel_id=synthetic_channel_id,
+        actor=actor,
+        user_message=request.message,
+        history=[msg.dict() for msg in request.chat_history],
+        session_id=request.session_id,
+    )
+
+    await db.save_message(web_user_id, session['guild_id'], synthetic_channel_id, 'user', result['user_message']['content'])
+    await db.save_message(web_user_id, session['guild_id'], synthetic_channel_id, 'assistant', result['assistant_message']['content'])
+
+    updated_state = await db.get_full_session_state(request.session_id)
+    return ChatResponse(
+        response=result['response'],
+        mechanics_text=result['mechanics_text'],
+        tool_results=result['tool_results'],
+        updated_state=updated_state or {},
+        options=handler.extract_response_options(result['response']),
+        session_id=request.session_id,
+    )
 
 # ============================================================================
 # LOCATION ENDPOINTS

@@ -245,6 +245,58 @@ class ChatResponse(BaseModel):
 class ChatIdentityResponse(BaseModel):
     user_id: str
 
+
+class ChatBootstrapResponse(BaseModel):
+    session: Dict[str, Any]
+    participants: List[Dict[str, Any]]
+    available_characters: List[Dict[str, Any]]
+    game_state: Dict[str, Any]
+    recent_messages: List[Dict[str, str]]
+    active_combat: Optional[Dict[str, Any]] = None
+    location: Optional[Dict[str, Any]] = None
+    connections: List[Dict[str, Any]] = []
+
+
+def _normalize_preview_connections(locations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize preview location connections into unique DB-ready edges."""
+    connections: List[Dict[str, Any]] = []
+    seen_edges = set()
+
+    for location in locations:
+        source_id = location.get('id')
+        for raw_connection in location.get('connections', []) or []:
+            if isinstance(raw_connection, str):
+                target_id = raw_connection
+                direction = 'path'
+                travel_time = 1
+                hidden = False
+                bidirectional = True
+            else:
+                target_id = raw_connection.get('target_id') or raw_connection.get('to_location_id') or raw_connection.get('id')
+                direction = raw_connection.get('direction') or raw_connection.get('type') or 'path'
+                travel_time = raw_connection.get('travel_time') or 1
+                hidden = bool(raw_connection.get('hidden', False))
+                bidirectional = raw_connection.get('bidirectional', True)
+
+            if not source_id or not target_id or source_id == target_id:
+                continue
+
+            edge_key = (source_id, target_id, direction)
+            if edge_key in seen_edges:
+                continue
+
+            seen_edges.add(edge_key)
+            connections.append({
+                'from_preview_id': source_id,
+                'to_preview_id': target_id,
+                'direction': direction,
+                'travel_time': travel_time,
+                'hidden': hidden,
+                'bidirectional': bidirectional,
+            })
+
+    return connections
+
 # ============================================================================
 # STARTUP / SHUTDOWN
 # ============================================================================
@@ -383,6 +435,12 @@ async def chat_with_dm(
     web_user_id = web_user_id_from_uuid(x_web_identity)
     synthetic_channel_id = web_user_id_from_uuid(f"web-session:{request.session_id}:user:{x_web_identity}")
     character = await db.get_character(request.character_id) if request.character_id else None
+    if request.character_id:
+        participants = await db.get_session_participants(request.session_id)
+        valid_character_ids = {participant.get('character_id') for participant in participants if participant.get('character_id')}
+        if not character or character.get('session_id') != request.session_id or character['id'] not in valid_character_ids:
+            raise HTTPException(status_code=400, detail="Character does not belong to the selected session")
+
     actor_name = character['name'] if character else f"Web Player {x_web_identity[:8]}"
     actor = ChatActor(
         user_id=web_user_id,
@@ -434,6 +492,54 @@ async def chat_with_dm(
         updated_state=updated_state or {},
         options=handler.extract_response_options(result['response']),
         session_id=request.session_id,
+    )
+
+
+@app.get("/api/chat/bootstrap", response_model=ChatBootstrapResponse)
+async def get_chat_bootstrap(
+    session_id: int,
+    character_id: Optional[int] = None,
+    x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity"),
+):
+    """Return browser-chat bootstrap state for a playable session."""
+    if not x_web_identity or not await db.web_identity_exists(x_web_identity):
+        raise HTTPException(status_code=401, detail="Invalid web chat identity")
+
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    full_state = await db.get_full_session_state(session_id)
+    participants = full_state.get('participants', []) if full_state else []
+    available_characters = [p for p in participants if p.get('character_id')]
+
+    if character_id is not None:
+        valid_character_ids = {participant.get('character_id') for participant in available_characters}
+        if character_id not in valid_character_ids:
+            raise HTTPException(status_code=400, detail="Character does not belong to the selected session")
+
+    web_user_id = web_user_id_from_uuid(x_web_identity)
+    recent = await db.get_recent_messages_by_session(web_user_id, session_id, limit=20)
+    recent_messages = [{"role": msg["role"], "content": msg["content"]} for msg in recent]
+
+    game_state = await db.get_game_state(session_id) or {}
+    location = None
+    connections: List[Dict[str, Any]] = []
+    if game_state.get('current_location_id'):
+        location = await db.get_location(game_state['current_location_id'])
+        connections = await db.get_nearby_locations(game_state['current_location_id'])
+
+    active_combat = await db.get_active_combat_by_session(session_id)
+
+    return ChatBootstrapResponse(
+        session=session,
+        participants=participants,
+        available_characters=available_characters,
+        game_state=game_state,
+        recent_messages=recent_messages,
+        active_combat=active_combat,
+        location=location,
+        connections=connections,
     )
 
 # ============================================================================
@@ -1816,39 +1922,61 @@ async def finalize_campaign(data: CampaignFinalize):
             "generation_settings": data.generation_settings,
         }
         
+        world_theme = data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'fantasy'
+        content_pack_id = DEFAULT_CONTENT_PACK_ID
+
         # Create the session (set to 'active' so it's immediately playable)
         cursor = await conn.execute("""
-            INSERT INTO sessions (guild_id, name, description, dm_user_id, status, setting, world_state, created_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+            INSERT INTO sessions (
+                guild_id, name, description, dm_user_id, status, setting, world_state,
+                world_theme, content_pack_id, created_at
+            )
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
         """, (
             data.guild_id,
             data.name,
             data.description or data.starting_scenario[:200],
             data.dm_user_id,
-            data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'custom',
+            world_theme,
             json.dumps(world_state),
+            world_theme,
+            content_pack_id,
             now,
         ))
         session_id = cursor.lastrowid
+
+        preview_connections = _normalize_preview_connections(data.locations)
+        starting_location_preview_id = data.locations[0].get('id') if data.locations else None
+        starting_location_id = None
         
         # Create game state
         await conn.execute("""
-            INSERT INTO game_state (session_id, current_scene, dm_notes)
-            VALUES (?, ?, ?)
-        """, (session_id, data.starting_scenario, json.dumps({
-            "world_setting": data.world_setting,
-            "factions": data.factions,
-            "generation_settings": data.generation_settings,
-            "campaign_description": data.description,
-        })))
+            INSERT INTO game_state (session_id, current_scene, current_location, current_location_id, dm_notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            session_id,
+            data.starting_scenario,
+            data.locations[0]['name'] if data.locations else None,
+            None,
+            json.dumps({
+                "world_setting": data.world_setting,
+                "factions": data.factions,
+                "generation_settings": data.generation_settings,
+                "campaign_description": data.description,
+                "active_content_pack_id": content_pack_id,
+            })
+        ))
         
         location_id_map = {}  # Map preview IDs to real IDs
         
         # Create locations
         for loc in data.locations:
             cursor = await conn.execute("""
-                INSERT INTO locations (session_id, guild_id, name, description, location_type, danger_level, hidden_secrets, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO locations (
+                    session_id, guild_id, name, description, location_type, danger_level,
+                    hidden_secrets, points_of_interest, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id,
                 data.guild_id,
@@ -1856,14 +1984,41 @@ async def finalize_campaign(data: CampaignFinalize):
                 loc.get('description', ''),
                 loc.get('type', 'generic'),
                 loc.get('danger_level', 1),
-                json.dumps({
-                    "points_of_interest": loc.get('points_of_interest', []),
-                    "connections": loc.get('connections', []),
-                }),
+                json.dumps({}),
+                json.dumps(loc.get('points_of_interest', [])),
                 now,
                 now,
             ))
             location_id_map[loc['id']] = cursor.lastrowid
+
+            if loc.get('id') == starting_location_preview_id:
+                starting_location_id = cursor.lastrowid
+
+        if starting_location_id is not None:
+            await conn.execute(
+                "UPDATE game_state SET current_location_id = ? WHERE session_id = ?",
+                (starting_location_id, session_id),
+            )
+
+        for connection in preview_connections:
+            from_location_id = location_id_map.get(connection['from_preview_id'])
+            to_location_id = location_id_map.get(connection['to_preview_id'])
+            if not from_location_id or not to_location_id:
+                continue
+
+            await conn.execute("""
+                INSERT OR IGNORE INTO location_connections (
+                    from_location_id, to_location_id, direction, travel_time, hidden, bidirectional
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                from_location_id,
+                to_location_id,
+                connection['direction'],
+                connection['travel_time'],
+                int(connection['hidden']),
+                int(connection['bidirectional']),
+            ))
         
         npc_id_map = {}  # Map preview IDs to real IDs
         

@@ -706,6 +706,10 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: canonical `/session resume` command added in `src/cogs/sessions.py`
 - ✅ COMPLETE: DB-backed session channel binding helpers added in `src/database.py`
 - ✅ COMPLETE: `DMChat` now prefers DB-backed session-channel binding over in-memory history
+- ✅ COMPLETE: campaign finalization now persists canonical `world_theme`, `content_pack_id`, starting `current_location_id`, normalized `locations.points_of_interest`, and `location_connections` in `web/api.py`
+- ✅ COMPLETE: browser chat bootstrap endpoint now returns session continuity state for messages, participants, combat, and location context in `web/api.py`
+- ✅ COMPLETE: browser chat frontend now hydrates from `/api/chat/bootstrap` in `web/frontend/src/main.ts`
+- ✅ COMPLETE: API continuity regressions added for campaign finalize and browser chat bootstrap/validation in `tests/test_web_phase7.py`
 - ⚠️ PARTIAL: `/game begin` and `/resume` compatibility delegation is improved, but full lifecycle consolidation is not complete yet
 - ⚠️ PARTIAL: snapshot UI/API contract is now backed by DB methods, but full snapshot restore semantics remain limited to v1 game-state restoration
 - ⚠️ PARTIAL: persistent Discord channel/session rebinding is not fully implemented yet

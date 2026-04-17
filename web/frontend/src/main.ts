@@ -10,6 +10,7 @@
 const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:8000/api'
     : '/api';
+const DEFAULT_GUILD_ID = '1444142672548986994';
 
 interface ApiResponse<T> {
     [key: string]: T;
@@ -33,6 +34,17 @@ interface ChatApiResponse {
     updated_state: any;
     options: string[];
     session_id: number;
+}
+
+interface ChatBootstrapResponse {
+    session: any;
+    participants: any[];
+    available_characters: any[];
+    game_state: any;
+    recent_messages: ChatHistoryMessage[];
+    active_combat: any | null;
+    location: any | null;
+    connections: any[];
 }
 
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -66,6 +78,15 @@ const api = {
     createSession: (data: any) => apiCall<{ id: number }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
     updateSession: (id: number, data: any) => apiCall<any>(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     createChatIdentity: () => apiCall<{ user_id: string }>('/chat/identity', { method: 'POST' }),
+    getChatBootstrap: (sessionId: number, webIdentity: string, characterId?: number) => {
+        const params = new URLSearchParams({ session_id: sessionId.toString() });
+        if (characterId) params.append('character_id', characterId.toString());
+        return apiCall<ChatBootstrapResponse>(`/chat/bootstrap?${params.toString()}`, {
+            headers: {
+                'X-Web-Identity': webIdentity,
+            },
+        });
+    },
     chatWithDM: (data: any, webIdentity: string) => apiCall<ChatApiResponse>('/chat', {
         method: 'POST',
         headers: {
@@ -2280,6 +2301,12 @@ async function loadCampaignCreator(): Promise<void> {
     // Show step 1
     goToStep(1);
 
+    const guildInput = document.getElementById('campaign-guild-id') as HTMLInputElement | null;
+    if (guildInput) {
+        guildInput.value = DEFAULT_GUILD_ID;
+        guildInput.readOnly = true;
+    }
+
     console.log('Campaign creator loaded');
 }
 
@@ -2381,7 +2408,7 @@ function getCampaignFormData(): CampaignConfig {
     return {
         name: (document.getElementById('campaign-name') as HTMLInputElement)?.value || 'New Campaign',
         description: (document.getElementById('world-description') as HTMLTextAreaElement)?.value || '',
-        guild_id: (document.getElementById('campaign-guild-id') as HTMLInputElement)?.value || '',
+        guild_id: DEFAULT_GUILD_ID,
         dm_user_id: (document.getElementById('campaign-dm-id') as HTMLInputElement)?.value || '',
         genre: selectedTemplate !== 'custom' ? selectedTemplate : (document.getElementById('world-theme') as HTMLSelectElement)?.value || 'fantasy',
         setting_tone: (document.getElementById('campaign-tone') as HTMLSelectElement)?.value || 'heroic',
@@ -2647,7 +2674,17 @@ async function finalizeCampaign(): Promise<void> {
             npcs: generatedCampaignData.npcs || [],
             factions: generatedCampaignData.factions || [],
             quest_hooks: generatedCampaignData.quests || [],
-            starting_scenario: generatedCampaignData.scenario?.description || 'Your adventure begins...'
+            starting_scenario: generatedCampaignData.scenario?.description || 'Your adventure begins...',
+            generation_settings: {
+                world_theme: config.world_theme,
+                world_scale: config.world_scale,
+                magic_level: config.magic_level,
+                technology_level: config.tech_level,
+                tone: config.setting_tone,
+                world_description: config.world_description,
+                key_events: config.key_events,
+                special_rules: config.special_rules,
+            }
         };
 
         // Call the finalize endpoint
@@ -2932,12 +2969,14 @@ class ChatInterface {
 
         sessionSelect.onchange = async () => {
             this.sessionId = sessionSelect.value ? parseInt(sessionSelect.value) : null;
+            this.characterId = null;
             this.chatHistory = [];
             this.renderMessages();
             await this.populateCharacterSelect();
             this.latestState = null;
             this.renderSessionState();
-            await this.refreshDashboardPanels();
+            this.renderToolResults([]);
+            await this.loadBootstrap();
         };
 
         form.onsubmit = async (event) => {
@@ -2961,15 +3000,59 @@ class ChatInterface {
             return;
         }
 
-        const session = await api.getSession(this.sessionId);
-        const participants = (session.participants || []).filter((participant: any) => participant.character_id);
+        const bootstrap = await api.getChatBootstrap(this.sessionId, this.userId);
+        const participants = bootstrap.available_characters || [];
         select.innerHTML = '<option value="">Select a character...</option>' +
             participants.map((participant: any) => `<option value="${participant.character_id}">${escapeHtml(participant.character_name || 'Unknown')}</option>`).join('');
         select.onchange = async () => {
             this.characterId = select.value ? parseInt(select.value) : null;
-            await this.refreshDashboardPanels();
+            await this.loadBootstrap();
         };
-        this.characterId = null;
+
+        if (participants.length === 1) {
+            this.characterId = participants[0].character_id;
+            select.value = String(participants[0].character_id);
+        } else {
+            this.characterId = null;
+        }
+    }
+
+    private async loadBootstrap(): Promise<void> {
+        if (!this.sessionId) {
+            return;
+        }
+
+        try {
+            const bootstrap = await api.getChatBootstrap(this.sessionId, this.userId, this.characterId || undefined);
+            this.chatHistory = bootstrap.recent_messages || [];
+            this.latestState = {
+                ...bootstrap.session,
+                participants: bootstrap.participants || [],
+                locations: bootstrap.location ? [bootstrap.location] : [],
+                game_state: bootstrap.game_state || {},
+            };
+            this.renderMessages();
+            this.renderSessionState();
+            this.renderCombatSidebar(bootstrap.active_combat || null);
+            this.renderLocationSidebar(bootstrap.location || null, bootstrap.connections || []);
+
+            if (!this.characterId) {
+                this.renderSpellSidebar(null, null);
+                this.renderStatusSidebar([]);
+                return;
+            }
+
+            const [spellsData, statusData] = await Promise.all([
+                api.getCharacterSpells(this.characterId),
+                api.getCharacterStatusEffects(this.characterId),
+            ]);
+
+            this.renderSpellSidebar(spellsData.spells || [], spellsData.spell_slots || {});
+            this.renderStatusSidebar(statusData.status_effects || []);
+        } catch (error) {
+            console.error('Failed to load chat bootstrap', error);
+            showToast('Failed to load chat session state', 'error');
+        }
     }
 
     async sendQuickAction(message: string): Promise<void> {
@@ -3048,7 +3131,9 @@ class ChatInterface {
         }
 
         if (this.chatHistory.length === 0) {
-            container.innerHTML = '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
+            container.innerHTML = this.sessionId
+                ? '<div class="empty-state">This session has no chat history yet. Pick a character and start the adventure.</div>'
+                : '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
             return;
         }
 
@@ -3106,10 +3191,16 @@ class ChatInterface {
             return;
         }
 
+        const currentLocation = this.latestState.game_state?.current_location || this.latestState.locations?.[0]?.name || 'Unknown';
+
         container.innerHTML = `
             <div class="state-block">
                 <h4>Session</h4>
                 <div>${escapeHtml(this.latestState.name || 'Unknown')}</div>
+            </div>
+            <div class="state-block">
+                <h4>Current Location</h4>
+                <div>${escapeHtml(currentLocation)}</div>
             </div>
             <div class="state-block">
                 <h4>Party</h4>
@@ -3129,46 +3220,7 @@ class ChatInterface {
     }
 
     private async refreshDashboardPanels(): Promise<void> {
-        this.renderCombatSidebar(null);
-        this.renderSpellSidebar(null, null);
-        this.renderLocationSidebar(null, []);
-        this.renderStatusSidebar([]);
-
-        if (!this.sessionId) {
-            return;
-        }
-
-        try {
-            const [session, activeCombatData] = await Promise.all([
-                api.getSession(this.sessionId),
-                api.getActiveCombat(this.sessionId),
-            ]);
-
-            this.renderCombatSidebar(activeCombatData.combat || null);
-
-            if (!this.characterId) {
-                return;
-            }
-
-            const [character, spellsData, statusData] = await Promise.all([
-                api.getCharacter(this.characterId),
-                api.getCharacterSpells(this.characterId),
-                api.getCharacterStatusEffects(this.characterId),
-            ]);
-
-            this.renderSpellSidebar(spellsData.spells || [], spellsData.spell_slots || {});
-            this.renderStatusSidebar(statusData.status_effects || []);
-
-            if (character.current_location_id) {
-                const [location, connectionData] = await Promise.all([
-                    api.getLocation(character.current_location_id),
-                    api.getLocationConnections(character.current_location_id),
-                ]);
-                this.renderLocationSidebar(location, connectionData.connections || []);
-            }
-        } catch (error) {
-            console.error('Failed to refresh chat dashboard panels', error);
-        }
+        await this.loadBootstrap();
     }
 
     private renderCombatSidebar(combat: any): void {

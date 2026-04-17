@@ -2268,10 +2268,24 @@ class Database:
                 quest = self._normalize_quest_progress_record(quest)
                 quests.append(quest)
             return quests
+
+    async def get_quest_progress(self, quest_id: int, character_id: int) -> Optional[Dict[str, Any]]:
+        """Get quest progress for a specific quest/character pair."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM quest_progress WHERE quest_id = ? AND character_id = ?",
+                (quest_id, character_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return self._normalize_quest_progress_record(dict(row))
     
     async def complete_objective(self, quest_id: int, character_id: int, 
                                 objective_index: int) -> Dict[str, Any]:
         """Mark a quest objective as complete"""
+        now = datetime.utcnow().isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             
@@ -2291,7 +2305,7 @@ class Database:
             await db.execute("""
                 UPDATE quest_progress SET objectives_completed = ?, current_node_id = ?, last_advanced_at = ?, branch_path_json = ?
                 WHERE quest_id = ? AND character_id = ?
-            """, (json.dumps(completed), len(completed), datetime.utcnow().isoformat(), json.dumps(completed), quest_id, character_id))
+            """, (json.dumps(completed), len(completed), now, json.dumps(completed), quest_id, character_id))
             await db.commit()
             
             # Check if all objectives complete
@@ -2299,6 +2313,30 @@ class Database:
             all_complete = len(completed) >= len(quest['objectives'])
             
             return {"completed_objectives": completed, "quest_complete": all_complete}
+
+    async def abandon_quest(self, quest_id: int, character_id: int, failure_reason: str = 'abandoned by player') -> Dict[str, Any]:
+        """Mark an accepted quest as failed for a character without granting rewards."""
+        progress = await self.get_quest_progress(quest_id, character_id)
+        if not progress:
+            return {"error": "Quest not accepted"}
+        if progress.get('status') == 'completed':
+            return {"error": "Quest already completed"}
+        if progress.get('status') == 'failed':
+            return {"error": "Quest already failed"}
+
+        now = datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE quest_progress
+                SET status = 'failed', failed_at = ?, failure_reason = ?, last_advanced_at = ?
+                WHERE quest_id = ? AND character_id = ?
+                """,
+                (now, failure_reason, now, quest_id, character_id),
+            )
+            await db.commit()
+
+        return {"success": True, "failed_at": now, "failure_reason": failure_reason}
     
     async def complete_quest(self, quest_id: int, character_id: int) -> Dict[str, Any]:
         """Mark a quest as complete and give rewards"""
@@ -2308,17 +2346,13 @@ class Database:
         if not quest:
             return {"error": "Quest not found"}
 
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT status FROM quest_progress WHERE quest_id = ? AND character_id = ?",
-                (quest_id, character_id),
-            )
-            progress = await cursor.fetchone()
-            if not progress:
-                return {"error": "Quest not accepted"}
-            if progress['status'] == 'completed':
-                return {"error": "Quest already completed"}
+        progress = await self.get_quest_progress(quest_id, character_id)
+        if not progress:
+            return {"error": "Quest not accepted"}
+        if progress.get('status') == 'completed':
+            return {"error": "Quest already completed", "already_completed": True}
+        if progress.get('status') == 'failed':
+            return {"error": "Quest already failed"}
         
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""

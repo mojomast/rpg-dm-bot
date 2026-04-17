@@ -16,9 +16,19 @@ class DummyTarget:
         self.messages.append((content, kwargs))
 
 
+def make_dm_chat_bot_stub():
+    return SimpleNamespace(
+        db=None,
+        llm=None,
+        tools=None,
+        prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+        tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+    )
+
+
 class TestDMChatHelpers:
     def test_extract_response_options(self):
-        cog = DMChat(SimpleNamespace(db=None, llm=None, tools=None))
+        cog = DMChat(make_dm_chat_bot_stub())
 
         options = cog.extract_response_options(
             "1. Open the door\n2) Search the room\n3. Talk to the guard"
@@ -27,7 +37,7 @@ class TestDMChatHelpers:
         assert options == ["Open the door", "Search the room", "Talk to the guard"]
 
     def test_clear_all_guild_histories_filters_by_guild(self):
-        cog = DMChat(SimpleNamespace(db=None, llm=None, tools=None))
+        cog = DMChat(make_dm_chat_bot_stub())
         cog.start_new_session(channel_id=10, session_id=1, guild_id=100)
         cog.start_new_session(channel_id=20, session_id=2, guild_id=200)
 
@@ -96,3 +106,45 @@ class TestChatHandlerContext:
         assert "ACTIVE COMBAT:" in context
         assert "Turn: 2" in context
         assert "Aria: 14 HP, Initiative 12" in context
+
+    @pytest.mark.asyncio
+    async def test_process_batched_messages_includes_all_batch_characters(self):
+        class StubBatchDb(StubChatContextDb):
+            async def get_character(self, character_id):
+                characters = {
+                    1: {"id": 1, "name": "Aria", "level": 3, "race": "Elf", "char_class": "Rogue", "hp": 18, "max_hp": 22, "gold": 10, "strength": 10, "dexterity": 16, "constitution": 12, "intelligence": 11, "wisdom": 13, "charisma": 14},
+                    2: {"id": 2, "name": "Borin", "level": 3, "race": "Dwarf", "char_class": "Cleric", "hp": 24, "max_hp": 24, "gold": 8, "strength": 14, "dexterity": 9, "constitution": 16, "intelligence": 10, "wisdom": 15, "charisma": 11},
+                }
+                return characters.get(character_id)
+
+            async def get_active_combat_by_session(self, session_id):
+                return None
+
+        llm_messages = {}
+
+        class StubLlm:
+            async def chat_with_tools(self, messages, tools):
+                llm_messages["messages"] = messages
+                return {"content": "The party acts.", "tool_calls": []}
+
+        handler = ChatHandler(
+            StubBatchDb(),
+            llm=StubLlm(),
+            prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+            tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+            tools=SimpleNamespace(),
+        )
+
+        await handler.process_batched_messages(
+            guild_id=123,
+            channel_id=456,
+            messages=[
+                {"user_id": 10, "display_name": "Alice", "character_name": "Aria", "character_id": 1, "content": "I scout ahead."},
+                {"user_id": 20, "display_name": "Bob", "character_name": "Borin", "character_id": 2, "content": "I guard the rear."},
+            ],
+            session_id=10,
+        )
+
+        system_prompt = llm_messages["messages"][0]["content"]
+        assert "Alice is playing Aria" in system_prompt
+        assert "Bob is playing Borin" in system_prompt

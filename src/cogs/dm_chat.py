@@ -623,6 +623,7 @@ class DMChat(commands.Cog):
             # Add message to queue
             queue['messages'].append({
                 'user_id': user_id,
+                'character_id': char['id'] if char else None,
                 'display_name': message.author.display_name,
                 'character_name': char_name,
                 'content': content,

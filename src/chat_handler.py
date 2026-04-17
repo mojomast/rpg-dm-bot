@@ -63,6 +63,31 @@ class ChatHandler:
             return []
         return [match.group(1).strip() for match in re.finditer(r"^\s*[1-3][.)]\s*(.+)", response_text, re.MULTILINE)]
 
+    async def build_batch_character_context(self, messages: List[Dict[str, Any]]) -> str:
+        """Build a character summary for every player acting in a batch."""
+        context_lines: List[str] = []
+        seen_character_ids: set[int] = set()
+
+        for message in messages:
+            character_id = message.get("character_id")
+            if not character_id or character_id in seen_character_ids:
+                continue
+
+            seen_character_ids.add(character_id)
+            char = await self.db.get_character(character_id)
+            if not char:
+                continue
+
+            char_class = char.get("char_class") or char.get("class", "Unknown")
+            context_lines.append(
+                f"- {message['display_name']} is playing {char['name']}: Level {char['level']} {char['race']} {char_class}, HP {char['hp']}/{char['max_hp']}"
+            )
+
+        if not context_lines:
+            return ""
+
+        return "\nBATCH PLAYER CHARACTERS:\n" + "\n".join(context_lines)
+
     async def get_game_context(
         self,
         guild_id: int,
@@ -389,6 +414,7 @@ CRITICAL:
             resolved_session_id,
             character_id=first_character_id,
         )
+        game_context += await self.build_batch_character_context(messages)
 
         player_actions = "\n".join(
             [f"**{msg['display_name']}** ({msg['character_name']}): {msg['content']}" for msg in messages]

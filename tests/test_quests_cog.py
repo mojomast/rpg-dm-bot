@@ -43,3 +43,30 @@ async def test_complete_quest_command_distributes_rewards_to_session_participant
     rewarded_field = next(field for field in embed.fields if field.name == 'Rewarded Characters')
     assert 'Aria' in rewarded_field.value
     assert 'Borin' in rewarded_field.value
+
+
+@pytest.mark.asyncio
+async def test_complete_quest_command_returns_early_when_already_completed(mock_interaction):
+    db = SimpleNamespace(
+        get_quest=AsyncMock(return_value={
+            'id': 7,
+            'title': 'Lost Relic',
+            'status': 'completed',
+            'session_id': 99,
+            'rewards': {'xp': 50, 'gold': 100},
+        }),
+        get_session_participants=AsyncMock(),
+        complete_quest=AsyncMock(),
+        get_character=AsyncMock(),
+        update_quest=AsyncMock(),
+    )
+    cog = Quests(SimpleNamespace(db=db))
+
+    await Quests.complete_quest.callback(cog, mock_interaction, 7)
+
+    db.get_session_participants.assert_not_called()
+    db.complete_quest.assert_not_called()
+    db.update_quest.assert_not_called()
+    mock_interaction.response.send_message.assert_awaited_once()
+    message = mock_interaction.response.send_message.await_args.args[0]
+    assert 'already completed' in message

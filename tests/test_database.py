@@ -616,6 +616,10 @@ class TestQuests:
         assert len(quests) == 1
         assert quests[0]['title'] == "The Missing Merchant"
 
+        progress = await data['db'].get_quest_progress(data['quest_id'], data['character_id'])
+        assert progress['current_node_id'] == 0
+        assert progress['last_advanced_at'] is not None
+
     async def test_accept_quest_already_accepted(self, db_with_full_setup):
         """Test accepting a quest that's already accepted"""
         data = db_with_full_setup
@@ -643,6 +647,22 @@ class TestQuests:
         
         assert 0 in result['completed_objectives']
         assert result['quest_complete'] is False
+
+        progress = await data['db'].get_quest_progress(data['quest_id'], data['character_id'])
+        assert progress['last_advanced_at'] is not None
+
+    async def test_abandon_quest_records_failure_details(self, db_with_full_setup):
+        """Test abandoning a quest records failure metadata."""
+        data = db_with_full_setup
+
+        await data['db'].accept_quest(data['quest_id'], data['character_id'])
+        result = await data['db'].abandon_quest(data['quest_id'], data['character_id'])
+
+        assert result['success'] is True
+        progress = await data['db'].get_quest_progress(data['quest_id'], data['character_id'])
+        assert progress['status'] == 'failed'
+        assert progress['failed_at'] is not None
+        assert progress['failure_reason'] == 'abandoned by player'
 
     async def test_complete_quest(self, db_with_full_setup):
         """Test completing a quest and receiving rewards"""
@@ -676,6 +696,7 @@ class TestQuests:
 
         assert first['success'] is True
         assert second['error'] == 'Quest already completed'
+        assert second['already_completed'] is True
 
         char = await data['db'].get_character(data['character_id'])
         assert char['gold'] == 100

@@ -97,6 +97,13 @@ class RPGBot(commands.Bot):
         from src.tools import ToolExecutor
         self.tools = ToolExecutor(self.db)
         logger.info("Tool executor initialized")
+
+        for schema in self.tool_schemas.get_all_schemas():
+            name = schema.get('function', {}).get('name')
+            if not name:
+                continue
+            if not hasattr(self.tools, f'_{name}') and name not in {'award_experience', 'update_weather', 'generate_npc_dialogue'}:
+                logger.error(f"Tool schema '{name}' has no handler in tools.py")
         
         # Load cogs
         cogs = [
@@ -153,10 +160,10 @@ class RPGBot(commands.Bot):
         # Check if bot was mentioned
         if self.user in message.mentions:
             # Handle mention in chat cog
-            chat_cog = self.get_cog('Chat')
+            chat_cog = self.get_cog('DMChat')
             if chat_cog:
                 async with self._channel_locks[message.channel.id]:
-                    await chat_cog.handle_mention(message)
+                    await chat_cog.queue_player_message(message, message.content.replace(f'<@{self.user.id}>', '').replace(f'<@!{self.user.id}>', '').strip() or 'Hello!')
             return
         
         # Process commands

@@ -7,6 +7,7 @@ for styled display in Discord messages.
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from enum import Enum
+from contextvars import ContextVar
 import json
 
 
@@ -504,27 +505,28 @@ class MechanicsTracker:
         ]
 
 
-# Global tracker instance (will be reset per message processing)
-_current_tracker: Optional[MechanicsTracker] = None
+# Tracker instance is request-local to avoid async cross-talk.
+_current_tracker: ContextVar[Optional[MechanicsTracker]] = ContextVar("mechanics_tracker", default=None)
 
 
 def get_tracker() -> MechanicsTracker:
     """Get the current mechanics tracker"""
-    global _current_tracker
-    if _current_tracker is None:
-        _current_tracker = MechanicsTracker()
-    return _current_tracker
+    tracker = _current_tracker.get()
+    if tracker is None:
+        tracker = MechanicsTracker()
+        _current_tracker.set(tracker)
+    return tracker
 
 
 def new_tracker() -> MechanicsTracker:
     """Create a new mechanics tracker and set it as current"""
-    global _current_tracker
-    _current_tracker = MechanicsTracker()
-    return _current_tracker
+    tracker = MechanicsTracker()
+    _current_tracker.set(tracker)
+    return tracker
 
 
 def clear_tracker():
     """Clear the current tracker"""
-    global _current_tracker
-    if _current_tracker:
-        _current_tracker.clear()
+    tracker = _current_tracker.get()
+    if tracker:
+        tracker.clear()

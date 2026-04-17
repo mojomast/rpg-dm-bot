@@ -5,7 +5,7 @@ Handles AI Dungeon Master interactions with tool execution
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import ui
 import logging
 import json
@@ -366,7 +366,7 @@ class DMChat(commands.Cog):
         self.bot = bot
         # Channel conversation histories with session tracking
         # Format: {channel_id: {'session_id': int, 'messages': []}}
-        self.histories: Dict[int, Dict] = {}
+        self.histories: Dict[tuple[int, int], Dict] = {}
         # Max history length per channel
         self.max_history = 50
         # Track last activity per channel for proactive prompting
@@ -395,41 +395,58 @@ class DMChat(commands.Cog):
             self.queue_locks[channel_id] = asyncio.Lock()
         return self.queue_locks[channel_id]
     
-    def get_history(self, channel_id: int, session_id: int = None) -> list:
+    async def cog_load(self):
+        self.proactive_dm_check.start()
+
+    async def cog_unload(self):
+        self.proactive_dm_check.cancel()
+
+    def _history_key(self, guild_id: int, channel_id: int) -> tuple[int, int]:
+        return (guild_id, channel_id)
+
+    def get_history(self, guild_id: int, channel_id: int, session_id: int = None) -> list:
         """Get conversation history for a channel, checking session match"""
-        if channel_id not in self.histories:
-            self.histories[channel_id] = {'session_id': session_id, 'messages': []}
+        key = self._history_key(guild_id, channel_id)
+        if key not in self.histories:
+            self.histories[key] = {'session_id': session_id, 'messages': []}
         
         # If session changed, clear old history
-        if session_id and self.histories[channel_id].get('session_id') != session_id:
+        if session_id and self.histories[key].get('session_id') != session_id:
             logger.info(f"Session changed for channel {channel_id}, clearing history")
-            self.histories[channel_id] = {'session_id': session_id, 'messages': []}
+            self.histories[key] = {'session_id': session_id, 'messages': []}
         
-        return self.histories[channel_id]['messages']
+        return self.histories[key]['messages']
     
-    def add_to_history(self, channel_id: int, message: dict, session_id: int = None):
+    def add_to_history(self, guild_id: int, channel_id: int, message: dict, session_id: int = None):
         """Add a message to channel history"""
-        history = self.get_history(channel_id, session_id)
+        history = self.get_history(guild_id, channel_id, session_id)
         history.append(message)
         
         # Trim if too long
         if len(history) > self.max_history:
-            self.histories[channel_id]['messages'] = history[-self.max_history:]
+            key = self._history_key(guild_id, channel_id)
+            self.histories[key]['messages'] = history[-self.max_history:]
     
-    def clear_history(self, channel_id: int):
+    def clear_history(self, guild_id: int, channel_id: int):
         """Clear channel history"""
-        self.histories[channel_id] = {'session_id': None, 'messages': []}
+        self.histories[self._history_key(guild_id, channel_id)] = {'session_id': None, 'messages': []}
     
     def clear_all_guild_histories(self, guild_id: int = None):
         """Clear all histories (or for a specific guild's channels)"""
         if guild_id is None:
             self.histories = {}
-        # Note: We can't easily filter by guild without channel info
-        # This is called when starting a new game to reset context
+            return
+
+        self.histories = {
+            key: value for key, value in self.histories.items() if key[0] != guild_id
+        }
     
-    def start_new_session(self, channel_id: int, session_id: int):
+    def start_new_session(self, channel_id: int, session_id: int, guild_id: int = None):
         """Mark a new session as started for a channel - clears old history"""
-        self.histories[channel_id] = {'session_id': session_id, 'messages': []}
+        if guild_id is None:
+            matching_keys = [key for key in self.histories if key[1] == channel_id]
+            guild_id = matching_keys[0][0] if matching_keys else 0
+        self.histories[self._history_key(guild_id, channel_id)] = {'session_id': session_id, 'messages': []}
         logger.info(f"Started new session {session_id} for channel {channel_id}, cleared history")
 
     async def resolve_session(self, guild_id: int, user_id: int = None, channel_id: int = None):
@@ -611,10 +628,11 @@ CURRENT STAGE: {current_stage['title']}
         
         return "\n".join(context_parts) if context_parts else "No active game context."
     
-    def get_channel_session_id(self, channel_id: int) -> Optional[int]:
+    def get_channel_session_id(self, guild_id: int, channel_id: int) -> Optional[int]:
         """Get the session ID stored for a channel (from when game started in this channel)"""
-        if channel_id in self.histories:
-            return self.histories[channel_id].get('session_id')
+        key = self._history_key(guild_id, channel_id)
+        if key in self.histories:
+            return self.histories[key].get('session_id')
         return None
     
     async def get_active_session_id(self, guild_id: int, user_id: int = None, channel_id: int = None) -> Optional[int]:
@@ -627,7 +645,7 @@ CURRENT STAGE: {current_stage['title']}
         """
         # FIRST: Check if this channel has a session set (most reliable for new games)
         if channel_id:
-            channel_session = self.get_channel_session_id(channel_id)
+            channel_session = self.get_channel_session_id(guild_id, channel_id)
             if channel_session:
                 logger.debug(f"Using channel's stored session {channel_session} for channel {channel_id}")
                 return channel_session
@@ -726,12 +744,12 @@ CRITICAL:
 """
         
         # Get conversation history (with session checking)
-        history = self.get_history(channel_id, session_id)
+        history = self.get_history(guild_id, channel_id, session_id)
         
         # Add batched player messages as a single user turn
         batched_content = f"[PLAYER ACTIONS THIS TURN]\n{player_actions}"
         user_msg = {"role": "user", "content": batched_content}
-        self.add_to_history(channel_id, user_msg, session_id)
+        self.add_to_history(guild_id, channel_id, user_msg, session_id)
         
         # Build messages for LLM
         messages_for_llm = [
@@ -805,7 +823,7 @@ CRITICAL:
         
         # Add response to history
         if response_text:
-            self.add_to_history(channel_id, {"role": "assistant", "content": response_text}, session_id)
+            self.add_to_history(guild_id, channel_id, {"role": "assistant", "content": response_text}, session_id)
         
         # Get formatted mechanics
         mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""
@@ -863,7 +881,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
 """
         
         # Get conversation history (with session tracking)
-        history = self.get_history(channel_id, session_id)
+        history = self.get_history(guild_id, channel_id, session_id)
         
         # Get character name for this player
         char = await self.db.get_active_character(user_id, guild_id)
@@ -871,7 +889,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         
         # Add user message to history with character name
         user_msg = {"role": "user", "content": f"[{author.display_name}] ({char_name}): {user_message}"}
-        self.add_to_history(channel_id, user_msg, session_id)
+        self.add_to_history(guild_id, channel_id, user_msg, session_id)
         
         # Build messages for LLM
         messages = [
@@ -945,7 +963,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         
         # Add response to history
         if response_text:
-            self.add_to_history(channel_id, {"role": "assistant", "content": response_text}, session_id)
+            self.add_to_history(guild_id, channel_id, {"role": "assistant", "content": response_text}, session_id)
         
         # Get formatted mechanics
         mechanics_text = tracker.format_all() if tracker.has_mechanics() else ""
@@ -1281,7 +1299,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
     @app_commands.guild_only()
     async def clear_dm_history(self, interaction: discord.Interaction):
         """Clear conversation history"""
-        self.clear_history(interaction.channel.id)
+        self.clear_history(interaction.guild.id, interaction.channel.id)
         
         await interaction.response.send_message(
             "🧹 The Dungeon Master's memory has been cleared for this channel.",
@@ -1322,7 +1340,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         """Clear the conversation history for this channel"""
         channel_id = interaction.channel.id
         
-        self.clear_history(channel_id)
+        self.clear_history(interaction.guild.id, channel_id)
         
         # Also clear message queue if any
         if channel_id in self.message_queue:
@@ -1344,6 +1362,62 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         )
         
         await interaction.response.send_message(embed=embed)
+
+    async def _generate_proactive_nudge(self, channel: discord.TextChannel) -> Optional[str]:
+        """Generate a proactive DM response after channel inactivity."""
+        if not self.llm:
+            return None
+
+        session = await self.resolve_session(channel.guild.id, channel_id=channel.id)
+        session_id = session['id'] if session else None
+        history = self.get_history(channel.guild.id, channel.id, session_id)
+        game_context = await self.get_game_context(channel.guild.id, 0, channel.id, session_id)
+
+        messages = [
+            {
+                'role': 'system',
+                'content': f"{self.bot.prompts.get_dm_system_prompt()}\n\n{PROACTIVE_DM_GUIDELINES}\n\nCURRENT GAME STATE:\n{game_context}",
+            },
+            *history,
+            {
+                'role': 'user',
+                'content': 'The party has been quiet for a while. Give a proactive, in-world nudge and end with a clear prompt for action.',
+            },
+        ]
+
+        response = await self.llm.chat_with_tools(messages=messages, tools=self.bot.tool_schemas.get_all_schemas())
+        return response.get('content') if response else None
+
+    @tasks.loop(minutes=1)
+    async def proactive_dm_check(self):
+        """Prompt inactive channels with a gentle DM nudge."""
+        now = datetime.utcnow()
+        for channel_id, last_time in list(self.last_activity.items()):
+            elapsed = (now - last_time).total_seconds()
+            if elapsed <= 1800 or elapsed >= 7200:
+                continue
+
+            queue = self.message_queue.get(channel_id)
+            if queue and queue.get('messages'):
+                continue
+
+            channel = self.bot.get_channel(channel_id)
+            if not channel:
+                continue
+
+            try:
+                response = await self._generate_proactive_nudge(channel)
+                if not response:
+                    continue
+                view = GameActionsView(self, options=self.extract_response_options(response))
+                await send_chunked(channel, response, view=view)
+                self.last_activity[channel_id] = now
+            except Exception as exc:
+                logger.warning(f"Failed proactive DM nudge for channel {channel_id}: {exc}")
+
+    @proactive_dm_check.before_loop
+    async def before_proactive_dm_check(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot):

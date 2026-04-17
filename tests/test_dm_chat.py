@@ -25,6 +25,16 @@ class TestDMChatHelpers:
 
         assert options == ["Open the door", "Search the room", "Talk to the guard"]
 
+    def test_clear_all_guild_histories_filters_by_guild(self):
+        cog = DMChat(SimpleNamespace(db=None, llm=None, tools=None))
+        cog.start_new_session(channel_id=10, session_id=1, guild_id=100)
+        cog.start_new_session(channel_id=20, session_id=2, guild_id=200)
+
+        cog.clear_all_guild_histories(100)
+
+        assert (100, 10) not in cog.histories
+        assert (200, 20) in cog.histories
+
     @pytest.mark.asyncio
     async def test_send_chunked_attaches_view_to_last_message(self):
         from src.utils import send_chunked

@@ -18,8 +18,8 @@ Use the gap spec for planned schema additions and phased migration work.
 
 These are important current mismatches between declared schema and runtime/helper usage:
 
-1. Discord runtime consumers are not yet uniformly content-pack aware; inventory/item and skill reads still need session-scoped pack resolution.
-2. Larger planned tables from the worldbuilding gap spec (factions, storyline graphs, maps/discovery, etc.) are still intentionally unimplemented.
+1. Larger planned tables and runtime systems from the worldbuilding gap spec (factions, storyline graphs, maps/discovery, etc.) are still intentionally unimplemented.
+2. Cross-pack persistence semantics for stored item/skill/spell IDs remain a future design concern if sessions ever switch packs after creation.
 
 ---
 

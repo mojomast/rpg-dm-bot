@@ -11,6 +11,7 @@ import logging
 
 from src.cogs.inventory import get_item_data
 from src.tools import DiceRoller
+from src.utils import load_runtime_content
 
 logger = logging.getLogger('rpg.combat')
 
@@ -58,6 +59,16 @@ class CombatView(discord.ui.View):
         self.bot = bot
         self.encounter_id = encounter_id
         self.user_id = user_id
+
+    async def _get_item_content(self, interaction: discord.Interaction, character: dict) -> dict:
+        return await load_runtime_content(
+            self.bot.db,
+            'items.json',
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=character,
+        )
     
     @discord.ui.button(label="Attack", emoji="⚔️", style=discord.ButtonStyle.danger)
     async def attack_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -115,11 +126,12 @@ class CombatView(discord.ui.View):
             return
 
         inventory = await self.bot.db.get_inventory(char['id'])
+        item_content = await self._get_item_content(interaction, char)
         usable_items = []
         for item in inventory:
             if item['item_type'] != 'consumable':
                 continue
-            item_data = get_item_data(item['item_id'])
+            item_data = get_item_data(item_content, item['item_id'])
             effect = (item_data or {}).get('effect', {})
             if effect.get('type') in {'heal', 'restore_mana'}:
                 usable_items.append(item)
@@ -130,7 +142,7 @@ class CombatView(discord.ui.View):
 
         await interaction.response.send_message(
             "Choose an item to use:",
-            view=CombatItemView(self.bot, self.encounter_id, char, usable_items),
+            view=CombatItemView(self.bot, self.encounter_id, char, usable_items, item_content),
             ephemeral=True,
         )
     
@@ -224,11 +236,12 @@ class TargetSelectView(discord.ui.View):
 class CombatItemView(discord.ui.View):
     """View for selecting and using simple combat consumables."""
 
-    def __init__(self, bot, encounter_id: int, character: dict, items: list):
+    def __init__(self, bot, encounter_id: int, character: dict, items: list, item_content: dict):
         super().__init__(timeout=60)
         self.bot = bot
         self.encounter_id = encounter_id
         self.character = character
+        self.item_content = item_content
 
         options = [
             discord.SelectOption(
@@ -250,7 +263,7 @@ class CombatItemView(discord.ui.View):
             await interaction.response.send_message("Item not found.", ephemeral=True)
             return
 
-        item_data = get_item_data(item['item_id']) or {}
+        item_data = get_item_data(self.item_content, item['item_id']) or {}
         effect = item_data.get('effect', {})
         effect_type = effect.get('type')
         lines = [f"🧪 **{self.character['name']}** uses **{item['item_name']}**!"]

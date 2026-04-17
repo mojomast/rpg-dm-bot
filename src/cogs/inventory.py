@@ -7,28 +7,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-import json
-import os
 import random
 from typing import List, Dict, Any, Optional
 
-from src.utils import ensure_interaction_owner
+from src.utils import ensure_interaction_owner, load_runtime_content
 
 logger = logging.getLogger('rpg.inventory')
-
-# Load items data
-ITEMS_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'items.json')
-ITEMS_DATA = {}
-
-def load_items():
-    global ITEMS_DATA
-    try:
-        with open(ITEMS_FILE, 'r', encoding='utf-8') as f:
-            ITEMS_DATA = json.load(f)
-    except FileNotFoundError:
-        ITEMS_DATA = {}
-
-load_items()
 
 # Equipment slots mapping
 EQUIPMENT_SLOTS = {
@@ -56,20 +40,20 @@ RARITY_COLORS = {
     "quest": discord.Color.gold()
 }
 
-def get_item_data(item_id: str) -> Optional[Dict]:
-    """Get item data from items.json by ID"""
+def get_item_data(item_content: Dict[str, Any], item_id: str) -> Optional[Dict]:
+    """Get item data from pack-loaded items.json by ID."""
     for category in ['weapons', 'armor', 'consumables', 'accessories', 'gear', 'ammunition', 'quest_items', 'materials']:
-        items = ITEMS_DATA.get(category, [])
+        items = item_content.get(category, [])
         for item in items:
             if item.get('id') == item_id:
                 return item
     return None
 
-def get_shop_items() -> List[Dict]:
-    """Get all purchasable items for shop"""
+def get_shop_items(item_content: Dict[str, Any]) -> List[Dict]:
+    """Get all purchasable items for shop from pack-loaded item content."""
     shop_items = []
     for category in ['weapons', 'armor', 'consumables', 'accessories', 'gear', 'ammunition']:
-        for item in ITEMS_DATA.get(category, []):
+        for item in item_content.get(category, []):
             if item.get('price', 0) > 0:
                 shop_items.append(item)
     return sorted(shop_items, key=lambda x: x.get('price', 0))
@@ -78,24 +62,25 @@ def get_shop_items() -> List[Dict]:
 class ShopView(discord.ui.View):
     """View for browsing and purchasing shop items"""
     
-    def __init__(self, bot, character_id: int, owner_user_id: int, category: str = "all"):
+    def __init__(self, bot, character_id: int, owner_user_id: int, item_content: Dict[str, Any], category: str = "all"):
         super().__init__(timeout=300)
         self.bot = bot
         self.character_id = character_id
         self.owner_user_id = owner_user_id
+        self.item_content = item_content
         self.category = category
         self.page = 0
         self.items_per_page = 5
         
         # Add category dropdown
-        self.add_item(ShopCategoryDropdown(bot, character_id))
+        self.add_item(ShopCategoryDropdown(bot, character_id, item_content))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await ensure_interaction_owner(interaction, self.owner_user_id, "this shop")
     
     def get_filtered_items(self) -> List[Dict]:
         """Get items filtered by category"""
-        shop_items = get_shop_items()
+        shop_items = get_shop_items(self.item_content)
         if self.category == "all":
             return shop_items
         return [i for i in shop_items if i.get('type') == self.category or i.get('subtype') == self.category]
@@ -147,7 +132,7 @@ class ShopView(discord.ui.View):
                 self.remove_item(child)
         
         if items:
-            self.add_item(ShopBuyDropdown(self.bot, self.character_id, items))
+            self.add_item(ShopBuyDropdown(self.bot, self.character_id, items, self.item_content))
         
         await interaction.response.edit_message(embed=embed, view=self)
     
@@ -169,9 +154,10 @@ class ShopView(discord.ui.View):
 class ShopCategoryDropdown(discord.ui.Select):
     """Dropdown to filter shop by category"""
     
-    def __init__(self, bot, character_id: int):
+    def __init__(self, bot, character_id: int, item_content: Dict[str, Any]):
         self.bot = bot
         self.character_id = character_id
+        self.item_content = item_content
         
         options = [
             discord.SelectOption(label="All Items", value="all", emoji="📦"),
@@ -194,9 +180,10 @@ class ShopCategoryDropdown(discord.ui.Select):
 class ShopBuyDropdown(discord.ui.Select):
     """Dropdown to select item to buy"""
     
-    def __init__(self, bot, character_id: int, items: List[Dict]):
+    def __init__(self, bot, character_id: int, items: List[Dict], item_content: Dict[str, Any]):
         self.bot = bot
         self.character_id = character_id
+        self.item_content = item_content
         self.item_map = {i['id']: i for i in items}
         
         options = []
@@ -262,17 +249,18 @@ class ShopBuyDropdown(discord.ui.Select):
 class InventoryView(discord.ui.View):
     """Interactive inventory view with item management"""
     
-    def __init__(self, bot, character: Dict, items: List[Dict], owner_user_id: int):
+    def __init__(self, bot, character: Dict, items: List[Dict], owner_user_id: int, item_content: Dict[str, Any]):
         super().__init__(timeout=180)
         self.bot = bot
         self.character = character
         self.items = items
         self.owner_user_id = owner_user_id
+        self.item_content = item_content
         self.filter_type = "all"
         
         if items:
             self.add_item(InventoryFilterDropdown())
-            self.add_item(InventoryActionDropdown(bot, character, items))
+            self.add_item(InventoryActionDropdown(bot, character, items, item_content))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await ensure_interaction_owner(interaction, self.owner_user_id, "this inventory")
@@ -301,7 +289,7 @@ class InventoryView(discord.ui.View):
         for slot_id, slot_name in EQUIPMENT_SLOTS.items():
             item = by_slot.get(slot_id)
             if item:
-                item_data = get_item_data(item['item_id'])
+                item_data = get_item_data(self.item_content, item['item_id'])
                 rarity = item_data.get('rarity', 'common') if item_data else 'common'
                 rarity_icon = {"common": "⬜", "uncommon": "🟢", "rare": "🔵", "very_rare": "🟣", "legendary": "🟠"}.get(rarity, "⬜")
                 embed.add_field(name=slot_name, value=f"{rarity_icon} {item['item_name']}", inline=True)
@@ -319,7 +307,7 @@ class InventoryView(discord.ui.View):
             await interaction.response.send_message("❌ No consumable items!", ephemeral=True)
             return
         
-        view = UseItemView(self.bot, self.character, consumables, self.owner_user_id)
+        view = UseItemView(self.bot, self.character, consumables, self.owner_user_id, self.item_content)
         await interaction.response.send_message(
             "🧪 Select an item to use:",
             view=view,
@@ -366,7 +354,7 @@ class InventoryFilterDropdown(discord.ui.Select):
             for item_type, type_items in by_type.items():
                 lines = []
                 for item in type_items[:10]:
-                    item_data = get_item_data(item['item_id'])
+                    item_data = get_item_data(self.view.item_content, item['item_id'])
                     rarity = item_data.get('rarity', 'common') if item_data else 'common'
                     rarity_icon = {"common": "⬜", "uncommon": "🟢", "rare": "🔵", "very_rare": "🟣", "legendary": "🟠"}.get(rarity, "⬜")
                     
@@ -389,9 +377,10 @@ class InventoryFilterDropdown(discord.ui.Select):
 class InventoryActionDropdown(discord.ui.Select):
     """Select an item to perform actions on"""
     
-    def __init__(self, bot, character: Dict, items: List[Dict]):
+    def __init__(self, bot, character: Dict, items: List[Dict], item_content: Dict[str, Any]):
         self.bot = bot
         self.character = character
+        self.item_content = item_content
         self.item_map = {i['id']: i for i in items}
         
         options = []
@@ -420,7 +409,7 @@ class InventoryActionDropdown(discord.ui.Select):
             await interaction.response.send_message("Item not found!", ephemeral=True)
             return
         
-        item_data = get_item_data(item['item_id'])
+        item_data = get_item_data(self.item_content, item['item_id'])
         rarity = item_data.get('rarity', 'common') if item_data else 'common'
         color = RARITY_COLORS.get(rarity, discord.Color.light_grey())
         
@@ -451,25 +440,26 @@ class InventoryActionDropdown(discord.ui.Select):
             if item_data.get('price'):
                 embed.add_field(name="Value", value=f"{item_data['price']} gold", inline=True)
         
-        view = ItemActionView(self.bot, self.character, item, interaction.user.id)
+        view = ItemActionView(self.bot, self.character, item, interaction.user.id, self.item_content)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class ItemActionView(discord.ui.View):
     """Actions for a specific item"""
     
-    def __init__(self, bot, character: Dict, item: Dict, owner_user_id: int):
+    def __init__(self, bot, character: Dict, item: Dict, owner_user_id: int, item_content: Dict[str, Any]):
         super().__init__(timeout=60)
         self.bot = bot
         self.character = character
         self.item = item
         self.owner_user_id = owner_user_id
+        self.item_content = item_content
         
         # Add appropriate buttons based on item type
-        item_data = get_item_data(item['item_id'])
+        item_data = get_item_data(self.item_content, item['item_id'])
         
         if item['item_type'] == 'consumable':
-            self.add_item(UseItemButton(bot, character, item))
+            self.add_item(UseItemButton(bot, character, item, self.item_content))
         elif item['item_type'] in ['weapon', 'armor', 'accessory']:
             if item.get('is_equipped'):
                 self.add_item(UnequipItemButton(bot, character, item))
@@ -493,14 +483,15 @@ class ItemActionView(discord.ui.View):
 class UseItemButton(discord.ui.Button):
     """Button to use a consumable item"""
     
-    def __init__(self, bot, character: Dict, item: Dict):
+    def __init__(self, bot, character: Dict, item: Dict, item_content: Dict[str, Any]):
         super().__init__(label="🧪 Use", style=discord.ButtonStyle.success)
         self.bot = bot
         self.character = character
         self.item = item
+        self.item_content = item_content
     
     async def callback(self, interaction: discord.Interaction):
-        item_data = get_item_data(self.item['item_id'])
+        item_data = get_item_data(self.item_content, self.item['item_id'])
         
         if not item_data:
             await interaction.response.send_message("❌ Item data not found!", ephemeral=True)
@@ -600,14 +591,15 @@ class UnequipItemButton(discord.ui.Button):
 class UseItemView(discord.ui.View):
     """View for selecting and using consumable items"""
     
-    def __init__(self, bot, character: Dict, consumables: List[Dict], owner_user_id: int):
+    def __init__(self, bot, character: Dict, consumables: List[Dict], owner_user_id: int, item_content: Dict[str, Any]):
         super().__init__(timeout=60)
         self.bot = bot
         self.character = character
         self.owner_user_id = owner_user_id
+        self.item_content = item_content
         
         if consumables:
-            self.add_item(UseItemDropdown(bot, character, consumables))
+            self.add_item(UseItemDropdown(bot, character, consumables, item_content))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await ensure_interaction_owner(interaction, self.owner_user_id, "this item menu")
@@ -616,14 +608,15 @@ class UseItemView(discord.ui.View):
 class UseItemDropdown(discord.ui.Select):
     """Dropdown to select consumable to use"""
     
-    def __init__(self, bot, character: Dict, consumables: List[Dict]):
+    def __init__(self, bot, character: Dict, consumables: List[Dict], item_content: Dict[str, Any]):
         self.bot = bot
         self.character = character
+        self.item_content = item_content
         self.item_map = {i['id']: i for i in consumables}
         
         options = []
         for item in consumables[:25]:
-            item_data = get_item_data(item['item_id'])
+            item_data = get_item_data(self.item_content, item['item_id'])
             desc = item_data.get('description', '')[:50] if item_data else ''
             qty = f" x{item['quantity']}" if item['quantity'] > 1 else ""
             
@@ -644,7 +637,7 @@ class UseItemDropdown(discord.ui.Select):
             return
         
         # Create a button to trigger the use
-        button = UseItemButton(self.bot, self.character, item)
+        button = UseItemButton(self.bot, self.character, item, self.item_content)
         # Manually call the callback
         await button.callback(interaction)
 
@@ -684,6 +677,71 @@ class Inventory(commands.Cog):
     @property
     def db(self):
         return self.bot.db
+
+    async def _get_item_content(
+        self,
+        *,
+        guild_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        session_id: Optional[int] = None,
+        character: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Load items.json for the resolved runtime session/content pack."""
+        return await load_runtime_content(
+            self.db,
+            'items.json',
+            guild_id=guild_id,
+            user_id=user_id,
+            channel_id=channel_id,
+            session_id=session_id,
+            character=character,
+        )
+
+    async def apply_item_effects(self, character: Dict, item: Dict, item_content: Dict[str, Any]) -> List[str]:
+        """Apply consumable item effects with pack lookup first and DB properties fallback."""
+        item_data = get_item_data(item_content, item['item_id']) or {}
+        effect = item_data.get('effect') or (item.get('properties') or {}).get('effect') or {}
+        effects = []
+
+        char = await self.db.get_character(character['id'])
+
+        if effect.get('type') == 'heal':
+            value = effect.get('value', (item.get('properties') or {}).get('heal', 0))
+            healed = roll_dice(value) if isinstance(value, str) else int(value or 0)
+            new_hp = min(char['max_hp'], char['hp'] + healed)
+            actual_healed = new_hp - char['hp']
+            await self.db.update_character(character['id'], hp=new_hp)
+            effects.append(f"❤️ Restored **{actual_healed}** HP")
+        elif effect.get('type') == 'restore_mana':
+            value = effect.get('value', (item.get('properties') or {}).get('mana', 0))
+            restored_value = roll_dice(value) if isinstance(value, str) else int(value or 0)
+            new_mana = min(char['max_mana'], char['mana'] + restored_value)
+            actual_restored = new_mana - char['mana']
+            await self.db.update_character(character['id'], mana=new_mana)
+            effects.append(f"✨ Restored **{actual_restored}** Mana")
+        elif effect.get('type') == 'buff':
+            stat = effect.get('stat', 'strength')
+            value = effect.get('value', 1)
+            duration = effect.get('duration', 60)
+            effects.append(f"⬆️ +{value} {stat} for {duration} seconds")
+        elif effect.get('type') == 'cure':
+            status = effect.get('status', 'poisoned')
+            effects.append(f"💊 Cured **{status}** condition")
+        else:
+            props = item.get('properties') or {}
+            if 'heal' in props:
+                new_hp = min(char['max_hp'], char['hp'] + props['heal'])
+                healed = new_hp - char['hp']
+                await self.db.update_character(character['id'], hp=new_hp)
+                effects.append(f"❤️ Restored {healed} HP")
+            if 'mana' in props:
+                new_mana = min(char['max_mana'], char['mana'] + props['mana'])
+                restored = new_mana - char['mana']
+                await self.db.update_character(character['id'], mana=new_mana)
+                effects.append(f"✨ Restored {restored} Mana")
+
+        return effects
     
     inventory_group = app_commands.Group(
         name="inventory", 
@@ -702,6 +760,13 @@ class Inventory(commands.Cog):
                 ephemeral=True
             )
             return
+
+        item_content = await self._get_item_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         items = await self.db.get_inventory(char['id'])
         
@@ -725,7 +790,7 @@ class Inventory(commands.Cog):
             for item_type, type_items in by_type.items():
                 lines = []
                 for item in type_items[:10]:
-                    item_data = get_item_data(item['item_id'])
+                    item_data = get_item_data(item_content, item['item_id'])
                     rarity = item_data.get('rarity', 'common') if item_data else 'common'
                     rarity_icon = {"common": "⬜", "uncommon": "🟢", "rare": "🔵", "very_rare": "🟣", "legendary": "🟠"}.get(rarity, "⬜")
                     
@@ -742,7 +807,7 @@ class Inventory(commands.Cog):
                     inline=False
                 )
         
-        view = InventoryView(self.bot, char, items, interaction.user.id) if items else None
+        view = InventoryView(self.bot, char, items, interaction.user.id, item_content) if items else None
         await interaction.response.send_message(embed=embed, view=view)
     
     @inventory_group.command(name="use", description="Use a consumable item")
@@ -757,6 +822,13 @@ class Inventory(commands.Cog):
                 ephemeral=True
             )
             return
+
+        item_content = await self._get_item_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         items = await self.db.get_inventory(char['id'])
         item = next((i for i in items if i['id'] == item_id), None)
@@ -775,21 +847,7 @@ class Inventory(commands.Cog):
             )
             return
         
-        # Apply item effects
-        props = item['properties']
-        effects = []
-        
-        if 'heal' in props:
-            new_hp = min(char['max_hp'], char['hp'] + props['heal'])
-            healed = new_hp - char['hp']
-            await self.db.update_character(char['id'], hp=new_hp)
-            effects.append(f"❤️ Restored {healed} HP")
-        
-        if 'mana' in props:
-            new_mana = min(char['max_mana'], char['mana'] + props['mana'])
-            restored = new_mana - char['mana']
-            await self.db.update_character(char['id'], mana=new_mana)
-            effects.append(f"✨ Restored {restored} Mana")
+        effects = await self.apply_item_effects(char, item, item_content)
         
         # Remove item
         await self.db.remove_item(item_id, 1)
@@ -992,8 +1050,15 @@ class Inventory(commands.Cog):
                 ephemeral=True
             )
             return
+
+        item_content = await self._get_item_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
-        shop_items = get_shop_items()
+        shop_items = get_shop_items(item_content)
         
         embed = discord.Embed(
             title="🛒 General Store",
@@ -1014,7 +1079,7 @@ class Inventory(commands.Cog):
         total_pages = max(1, (len(shop_items) + 4) // 5)
         embed.set_footer(text=f"Page 1/{total_pages} | {len(shop_items)} items available")
         
-        view = ShopView(self.bot, char['id'], interaction.user.id)
+        view = ShopView(self.bot, char['id'], interaction.user.id, item_content)
         await interaction.response.send_message(embed=embed, view=view)
     
     @inventory_group.command(name="quickuse", description="Quickly use an item by name")
@@ -1026,6 +1091,13 @@ class Inventory(commands.Cog):
         if not char:
             await interaction.response.send_message("❌ You don't have a character!", ephemeral=True)
             return
+
+        item_content = await self._get_item_content(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            channel_id=interaction.channel.id,
+            character=char,
+        )
         
         items = await self.db.get_inventory(char['id'])
         
@@ -1044,34 +1116,7 @@ class Inventory(commands.Cog):
             )
             return
         
-        item_data = get_item_data(item['item_id'])
-        
-        if not item_data:
-            await interaction.response.send_message("❌ Item data not found!", ephemeral=True)
-            return
-        
-        # Process effects
-        effects = []
-        effect = item_data.get('effect', {})
-        
-        if effect.get('type') == 'heal':
-            value = effect.get('value', '0')
-            healed = roll_dice(value) if isinstance(value, str) else value
-            new_hp = min(char['max_hp'], char['hp'] + healed)
-            actual_healed = new_hp - char['hp']
-            await self.db.update_character(char['id'], hp=new_hp)
-            effects.append(f"❤️ Restored **{actual_healed}** HP")
-        
-        elif effect.get('type') == 'restore_mana':
-            value = effect.get('value', 0)
-            new_mana = min(char['max_mana'], char['mana'] + value)
-            actual_restored = new_mana - char['mana']
-            await self.db.update_character(char['id'], mana=new_mana)
-            effects.append(f"✨ Restored **{actual_restored}** Mana")
-        
-        elif effect.get('type') == 'cure':
-            status = effect.get('status', 'poisoned')
-            effects.append(f"💊 Cured **{status}** condition")
+        effects = await self.apply_item_effects(char, item, item_content)
         
         # Remove item
         await self.db.remove_item(item['id'], 1)

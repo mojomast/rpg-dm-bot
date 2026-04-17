@@ -30,7 +30,7 @@ Reference spec for the next implementation wave:
 
 The highest-priority architectural gaps are:
 
-1. remaining Discord runtime pack-awareness in inventory/items and skills flows
+1. remaining larger canonicalization and roadmap work beyond the landed Discord runtime parity slices
 2. duplicate lifecycle flows across `/game`, `/session`, and `/resume`
 3. remaining character creation/combat canonicalization beyond the landed slices
 4. incomplete browser/dashboard contracts for campaign editing/admin parity
@@ -71,6 +71,15 @@ This follow-up pass continued the worldbuilding/campaign gap-spec implementation
 **`src/cogs/spells.py`:**
 - Made cast/learn/info/quickcast/autocomplete resolve `spells.json` through the active session content pack instead of legacy flat files
 
+**`src/cogs/skills.py`:**
+- Made skill tree rendering, learn/use/info flows, and skill autocomplete resolve `skills.json` through the active session content pack instead of legacy flat files
+
+**`src/cogs/inventory.py`:**
+- Made inventory views, item details, shop flows, slash-command use, and quick-use resolve `items.json` through the active session content pack instead of legacy flat files
+
+**`src/cogs/combat.py`:**
+- Updated combat consumable item selection to use the same session-scoped pack item metadata as inventory
+
 **Tests:**
 - Added regression coverage for channel-bound session selection, GM interview session/pack binding, batched actor-context tool routing, runtime session helper preference, and pack-aware spell runtime lookups
 
@@ -89,7 +98,7 @@ Results:
 
 #### Remaining Limitation
 
-- Discord runtime pack-awareness is still not end-to-end; inventory/items and skills flows still rely on legacy flat-data assumptions instead of session content-pack resolution.
+- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; remaining work is now broader canonicalization and roadmap-scale features rather than flat-data parity in those core flows.
 
 ### Phase 9 - Browser Chat Hardening and Dashboard Completion
 

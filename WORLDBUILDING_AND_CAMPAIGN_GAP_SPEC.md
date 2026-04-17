@@ -726,7 +726,9 @@ Canonical v1 Discord lifecycle:
 - ✅ COMPLETE: the Discord GM character interview flow now resolves the session/content pack, loads pack-aware race/class/starter-kit/spell data, creates the character bound to that session, auto-joins the session, and provisions gold/spells through the canonical character model in `src/cogs/game_master.py`
 - ✅ COMPLETE: batched multiplayer DM chat now routes tool execution using the acting player's character/user context instead of defaulting all player-scoped tool calls to the first batched actor in `src/chat_handler.py`
 - ✅ COMPLETE: Discord spell runtime reads now resolve `spells.json` through the active session content pack for cast/learn/info/quickcast flows via shared runtime content helpers in `src/cogs/spells.py` and `src/utils.py`
-- ⚠️ PARTIAL: Discord runtime pack-awareness is complete for GM interview creation, spell reads, and core tool/web reads, but remaining Discord command/runtime surfaces still need session-scoped pack-aware lookups, especially inventory/items and skills
+- ✅ COMPLETE: Discord skills runtime reads now resolve `skills.json` through the active session content pack for tree rendering, learn/use/info flows, and autocomplete in `src/cogs/skills.py`
+- ✅ COMPLETE: Discord inventory/item runtime reads now resolve `items.json` through the active session content pack for inventory views, item details, shop flows, quick-use, and combat consumable item selection in `src/cogs/inventory.py` and `src/cogs/combat.py`
+- ✅ COMPLETE: Discord runtime pack-awareness is complete for GM interview creation, spell reads, skill reads, inventory/item flows, and core tool/web reads for the current v1 slice set
 - ⚠️ PARTIAL: `/game` lifecycle compatibility wrappers still exist for backwards compatibility, but begin/pause/resume/status/end now route through canonical session lifecycle handling
 - ✅ COMPLETE: snapshot UI/API contract is backed by working DB methods and v1 restore semantics
 - ✅ COMPLETE: persistent Discord channel/session rebinding is implemented at the v1 lifecycle level via DB-backed bindings and legacy UI path delegation

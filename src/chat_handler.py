@@ -146,7 +146,7 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
                     context_parts.append(f"- {party_char['name']}: Level {party_char['level']} {party_char['race']} {pc_class}")
                     context_parts.append(f"  HP: {party_char['hp']}/{party_char['max_hp']}")
                     if party_char.get("backstory"):
-                        context_parts.append(f"  Backstory: {party_char['backstory'][:200]}...")
+                        context_parts.append(f"  Backstory: {party_char['backstory'][:500]}...")
 
             game_state = await self.db.get_game_state(session["id"])
             current_location = None
@@ -401,6 +401,9 @@ CRITICAL:
                 logger.error("Error in DM chat: %s", exc, exc_info=True)
                 response_text = f"*The Dungeon Master pauses, gathering their thoughts...* (Error: {str(exc)[:100]})"
                 break
+
+        if not response_text:
+            logger.warning("MAX_TOOL_ROUNDS (%d) exhausted without a final text response.", MAX_TOOL_ROUNDS)
 
         return response_text or "*The Dungeon Master remains silent.*", tool_results
 

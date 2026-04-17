@@ -3,28 +3,26 @@ RPG Dungeon Master Bot - Main Entry Point
 An AI-powered Discord bot for running tabletop RPG games
 """
 
+import asyncio
+import logging
 import os
+from collections import defaultdict
+from logging.handlers import RotatingFileHandler
+
 import discord
 from discord import app_commands
 from discord.ext import commands
-import asyncio
-from collections import defaultdict
 from datetime import datetime, timezone
-import logging
-from logging.handlers import RotatingFileHandler
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)
-
-# Generate log filename with timestamp
-log_filename = f"logs/rpg_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_filename, encoding='utf-8'),
+        RotatingFileHandler('logs/rpg.log', maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -36,9 +34,12 @@ logging.getLogger('discord').setLevel(logging.INFO)
 logging.getLogger('rpg.llm').setLevel(logging.DEBUG)
 
 logger = logging.getLogger('rpg')
-logger.info(f"Logging to file: {log_filename}")
+logger.info("Logging to file: logs/rpg.log")
 
 TOKEN = os.getenv('DISCORD_TOKEN')
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN environment variable is not set. Check your .env file.")
+
 LLM_API_KEY = os.getenv('OPENROUTER_API_KEY') or os.getenv('REQUESTY_API_KEY')
 DATABASE_PATH = os.getenv('DATABASE_URL') or os.getenv('DATABASE_PATH', 'data/rpg.db')
 LLM_MODEL = os.getenv('LLM_MODEL', 'openai/gpt-4o-mini')
@@ -216,8 +217,8 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
                     "❌ An error occurred while processing this command.",
                     ephemeral=True
                 )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to send error response to interaction: {e}")
 
 
 # Basic commands

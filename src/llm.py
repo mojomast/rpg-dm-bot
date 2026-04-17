@@ -34,7 +34,6 @@ class LLMClient:
         self.model = model
         self.base_url = (base_url or self.BASE_URL).rstrip("/")
         self.session: Optional[aiohttp.ClientSession] = None
-        self._api_lock = asyncio.Lock()
     
     async def ensure_session(self):
         if self.session is None or self.session.closed:
@@ -83,74 +82,73 @@ class LLMClient:
         
         last_error = None
         for attempt in range(max_retries):
-            async with self._api_lock:
-                try:
-                    async with self.session.post(
-                        f"{self.base_url}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=60)
-                    ) as response:
-                        if response.status == 503 or response.status == 502 or response.status == 429:
-                            # Retryable errors - server overloaded or rate limited
-                            error_text = await response.text()
-                            logger.warning(f"LLM API error {response.status} (attempt {attempt + 1}/{max_retries}): {error_text}")
-                            last_error = Exception(f"LLM API error {response.status}: {error_text}")
-                            if attempt < max_retries - 1:
-                                await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
-                                continue
-                            raise last_error
-                        
-                        if response.status != 200:
-                            error_text = await response.text()
-                            logger.error(f"LLM API error {response.status}: {error_text}")
-                            raise Exception(f"LLM API error {response.status}: {error_text}")
-                        
-                        result = await response.json()
-                        
-                        # Log full response for debugging
-                        logger.info("=" * 60)
-                        logger.info("LLM API RESPONSE")
-                        logger.info(f"Usage: {result.get('usage', {})}")
-                        
-                        choice = result.get('choices', [{}])[0]
-                        message = choice.get('message', {})
-                        content = message.get('content', '')
-                        tool_calls = message.get('tool_calls', [])
-                        finish_reason = choice.get('finish_reason', 'unknown')
-                        
-                        logger.info(f"Finish reason: {finish_reason}")
-                        
-                        if content:
-                            content_preview = content[:1000] + '...' if len(content) > 1000 else content
-                            logger.info(f"Response content: {content_preview}")
-                        else:
-                            logger.warning("Response content is EMPTY - model may have used all tokens for reasoning")
-                        
-                        if tool_calls:
-                            logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
-                        
-                        logger.info("=" * 60)
-                        
-                        return result
-                        
-                except asyncio.TimeoutError:
-                    logger.warning(f"LLM API timeout (attempt {attempt + 1}/{max_retries})")
-                    last_error = Exception("LLM request timed out")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    raise last_error
-                except aiohttp.ClientError as e:
-                    logger.warning(f"LLM API client error (attempt {attempt + 1}/{max_retries}): {e}")
-                    last_error = e
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    raise
-                except Exception as e:
-                    logger.error(f"LLM API error: {e}")
-                    raise
+            try:
+                async with self.session.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as response:
+                    if response.status == 503 or response.status == 502 or response.status == 429:
+                        # Retryable errors - server overloaded or rate limited
+                        error_text = await response.text()
+                        logger.warning(f"LLM API error {response.status} (attempt {attempt + 1}/{max_retries}): {error_text}")
+                        last_error = Exception(f"LLM API error {response.status}: {error_text}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                            continue
+                        raise last_error
+                    
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"LLM API error {response.status}: {error_text}")
+                        raise Exception(f"LLM API error {response.status}: {error_text}")
+                    
+                    result = await response.json()
+                    
+                    # Log full response for debugging
+                    logger.info("=" * 60)
+                    logger.info("LLM API RESPONSE")
+                    logger.info(f"Usage: {result.get('usage', {})}")
+                    
+                    choice = result.get('choices', [{}])[0]
+                    message = choice.get('message', {})
+                    content = message.get('content', '')
+                    tool_calls = message.get('tool_calls', [])
+                    finish_reason = choice.get('finish_reason', 'unknown')
+                    
+                    logger.info(f"Finish reason: {finish_reason}")
+                    
+                    if content:
+                        content_preview = content[:1000] + '...' if len(content) > 1000 else content
+                        logger.info(f"Response content: {content_preview}")
+                    else:
+                        logger.warning("Response content is EMPTY - model may have used all tokens for reasoning")
+                    
+                    if tool_calls:
+                        logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                    
+                    logger.info("=" * 60)
+                    
+                    return result
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"LLM API timeout (attempt {attempt + 1}/{max_retries})")
+                last_error = Exception("LLM request timed out")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise last_error
+            except aiohttp.ClientError as e:
+                logger.warning(f"LLM API client error (attempt {attempt + 1}/{max_retries}): {e}")
+                last_error = e
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
+            except Exception as e:
+                logger.error(f"LLM API error: {e}")
+                raise
         
         # Should not reach here, but just in case
         if last_error:
@@ -611,14 +609,22 @@ class LLMClient:
             loc['id'] = f"loc_{i}"
         results['locations'] = locations
         
-        # Step 3: Generate NPCs
-        logger.info("Generating NPCs...")
+        # Step 3: Generate NPCs and factions
+        logger.info("Generating NPCs and factions...")
         num_npcs = settings.get('num_npcs', 8)
         npcs_prompt = build_npcs_generation_prompt(world_setting, locations, settings, num_npcs)
-        npcs_response = await self.chat([
-            {"role": "system", "content": "You are a master character creator. Always respond with a valid JSON array."},
-            {"role": "user", "content": npcs_prompt}
-        ])
+        num_factions = settings.get('num_factions', 3)
+        factions_prompt = build_factions_generation_prompt(world_setting, settings, num_factions)
+        npcs_response, factions_response = await asyncio.gather(
+            self.chat([
+                {"role": "system", "content": "You are a master character creator. Always respond with a valid JSON array."},
+                {"role": "user", "content": npcs_prompt}
+            ]),
+            self.chat([
+                {"role": "system", "content": "You are a master worldbuilder. Always respond with a valid JSON array."},
+                {"role": "user", "content": factions_prompt}
+            ])
+        )
         npcs = self._extract_json_from_response(npcs_response)
         if not npcs or not isinstance(npcs, list):
             # Fallback
@@ -630,14 +636,7 @@ class LLMClient:
             npc['id'] = f"npc_{i}"
         results['npcs'] = npcs
         
-        # Step 4: Generate factions
-        logger.info("Generating factions...")
-        num_factions = settings.get('num_factions', 3)
-        factions_prompt = build_factions_generation_prompt(world_setting, settings, num_factions)
-        factions_response = await self.chat([
-            {"role": "system", "content": "You are a master worldbuilder. Always respond with a valid JSON array."},
-            {"role": "user", "content": factions_prompt}
-        ])
+        # Step 4: Parse factions
         factions = self._extract_json_from_response(factions_response)
         if not factions or not isinstance(factions, list):
             # Fallback

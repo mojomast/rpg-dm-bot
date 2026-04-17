@@ -50,15 +50,16 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Initialize LLM client for worldbuilding (if API key available)
-REQUESTY_API_KEY = os.getenv('REQUESTY_API_KEY')
+LLM_API_KEY = os.getenv('OPENROUTER_API_KEY') or os.getenv('REQUESTY_API_KEY')
 LLM_MODEL = os.getenv('LLM_MODEL', 'openai/gpt-4o-mini')
+LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'https://router.requesty.ai/v1')
 llm_client: Optional[LLMClient] = None
 
-if REQUESTY_API_KEY:
-    llm_client = LLMClient(REQUESTY_API_KEY, LLM_MODEL)
+if LLM_API_KEY:
+    llm_client = LLMClient(LLM_API_KEY, LLM_MODEL, base_url=LLM_BASE_URL)
     logger.info("LLM client initialized for worldbuilding")
 else:
-    logger.warning("REQUESTY_API_KEY not set - worldbuilding will use placeholder data")
+    logger.warning("No LLM API key set - worldbuilding will use placeholder data")
 
 # CORS for frontend
 app.add_middleware(
@@ -257,7 +258,7 @@ async def startup():
 
 def get_chat_handler() -> ChatHandler:
     if not chat_handler:
-        raise HTTPException(status_code=503, detail="Chat is unavailable until REQUESTY_API_KEY is configured")
+        raise HTTPException(status_code=503, detail="Chat is unavailable until an LLM API key is configured")
     return chat_handler
 
 # ============================================================================
@@ -473,9 +474,9 @@ async def delete_location(location_id: int):
     return {"message": "Location deleted"}
 
 @app.post("/api/locations/{location_id}/connect/{target_id}")
-async def connect_locations(location_id: int, target_id: int):
+async def connect_locations(location_id: int, target_id: int, direction: str = "path", travel_time: int = 1, hidden: bool = False):
     """Connect two locations"""
-    await db.connect_locations(location_id, target_id)
+    await db.connect_locations(location_id, target_id, direction=direction, travel_time=travel_time, hidden=hidden)
     return {"message": "Locations connected"}
 
 # ============================================================================
@@ -604,7 +605,11 @@ async def trigger_story_event(event_id: int):
 @app.post("/api/events/{event_id}/resolve")
 async def resolve_story_event(event_id: int, outcome: str = "success", notes: str = None):
     """Resolve an event"""
-    await db.resolve_event(event_id, outcome, notes)
+    updates = {"resolution_outcome": outcome}
+    if notes:
+        updates["dm_notes"] = notes
+    await db.update_story_event(event_id, **updates)
+    await db.resolve_event(event_id, outcome)
     return {"message": "Event resolved"}
 
 # ============================================================================
@@ -632,7 +637,8 @@ async def create_snapshot(snapshot: SnapshotCreate):
         session_id=snapshot.session_id,
         name=snapshot.name,
         created_by=snapshot.created_by,
-        description=snapshot.description
+        description=snapshot.description,
+        snapshot_type='manual'
     )
     return {"id": snapshot_id, "message": "Save point created"}
 
@@ -1457,6 +1463,25 @@ async def list_combats(session_id: Optional[int] = None, status: Optional[str] =
         combats = [dict(row) for row in await cursor.fetchall()]
     return {"combats": combats}
 
+@app.get("/api/combat/active")
+async def get_active_combat(session_id: int = Query(...)):
+    """Get active combat for a session"""
+    import aiosqlite
+    async with aiosqlite.connect(db.db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM combat_encounters WHERE session_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+            (session_id,)
+        )
+        combat = await cursor.fetchone()
+        if not combat:
+            return {"combat": None}
+        combat = dict(combat)
+        
+        cursor = await conn.execute("SELECT * FROM combat_participants WHERE encounter_id = ?", (combat['id'],))
+        combat['participants'] = [dict(row) for row in await cursor.fetchall()]
+    return {"combat": combat}
+
 @app.get("/api/combat/{combat_id}")
 async def get_combat(combat_id: int):
     """Get combat encounter with participants"""
@@ -1474,25 +1499,6 @@ async def get_combat(combat_id: int):
         participants = [dict(row) for row in await cursor.fetchall()]
         combat['participants'] = participants
     return combat
-
-@app.get("/api/combat/active")
-async def get_active_combat(session_id: int):
-    """Get active combat for a session"""
-    import aiosqlite
-    async with aiosqlite.connect(db.db_path) as conn:
-        conn.row_factory = aiosqlite.Row
-        cursor = await conn.execute(
-            "SELECT * FROM combat_encounters WHERE session_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-            (session_id,)
-        )
-        combat = await cursor.fetchone()
-        if not combat:
-            return {"combat": None}
-        combat = dict(combat)
-        
-        cursor = await conn.execute("SELECT * FROM combat_participants WHERE encounter_id = ?", (combat['id'],))
-        combat['participants'] = [dict(row) for row in await cursor.fetchall()]
-    return {"combat": combat}
 
 # ============================================================================
 # CHARACTER SPELLS & ABILITIES ENDPOINTS
@@ -1555,7 +1561,6 @@ async def create_location_connection(
     to_id: int,
     direction: str = "path",
     travel_time: int = 1,
-    bidirectional: bool = True,
     hidden: bool = False
 ):
     """Create a connection between two locations"""
@@ -1563,7 +1568,6 @@ async def create_location_connection(
         from_id, to_id, 
         direction=direction,
         travel_time=travel_time,
-        bidirectional=bidirectional,
         hidden=hidden
     )
     return {"message": "Locations connected"}
@@ -1787,6 +1791,7 @@ class CampaignFinalize(BaseModel):
     factions: List[Dict[str, Any]]
     quest_hooks: List[Dict[str, Any]]
     starting_scenario: str
+    generation_settings: Dict[str, Any] = {}
 
 
 @app.post("/api/campaign/finalize")
@@ -1800,33 +1805,60 @@ async def finalize_campaign(data: CampaignFinalize):
     
     async with aiosqlite.connect(db.db_path) as conn:
         conn.row_factory = aiosqlite.Row
+        now = datetime.utcnow().isoformat()
+        world_state = {
+            "world_setting": data.world_setting,
+            "factions": data.factions,
+            "generation_settings": data.generation_settings,
+        }
         
         # Create the session (set to 'active' so it's immediately playable)
         cursor = await conn.execute("""
-            INSERT INTO sessions (guild_id, name, description, dm_user_id, status, created_at)
-            VALUES (?, ?, ?, ?, 'active', ?)
-        """, (data.guild_id, data.name, data.description or data.starting_scenario[:200], 
-              data.dm_user_id, datetime.utcnow().isoformat()))
+            INSERT INTO sessions (guild_id, name, description, dm_user_id, status, setting, world_state, created_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+        """, (
+            data.guild_id,
+            data.name,
+            data.description or data.starting_scenario[:200],
+            data.dm_user_id,
+            data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'custom',
+            json.dumps(world_state),
+            now,
+        ))
         session_id = cursor.lastrowid
         
         # Create game state
         await conn.execute("""
             INSERT INTO game_state (session_id, current_scene, dm_notes)
             VALUES (?, ?, ?)
-        """, (session_id, data.starting_scenario, json.dumps(data.world_setting)))
+        """, (session_id, data.starting_scenario, json.dumps({
+            "world_setting": data.world_setting,
+            "factions": data.factions,
+            "generation_settings": data.generation_settings,
+            "campaign_description": data.description,
+        })))
         
         location_id_map = {}  # Map preview IDs to real IDs
-        now = datetime.utcnow().isoformat()
         
         # Create locations
         for loc in data.locations:
             cursor = await conn.execute("""
-                INSERT INTO locations (session_id, guild_id, name, description, location_type, 
-                                       danger_level, created_by, created_at, updated_at)
+                INSERT INTO locations (session_id, guild_id, name, description, location_type, danger_level, hidden_secrets, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, data.guild_id, loc['name'], loc.get('description', ''),
-                  loc.get('type', 'generic'), loc.get('danger_level', 1),
-                  data.dm_user_id, now, now))
+            """, (
+                session_id,
+                data.guild_id,
+                loc['name'],
+                loc.get('description', ''),
+                loc.get('type', 'generic'),
+                loc.get('danger_level', 1),
+                json.dumps({
+                    "points_of_interest": loc.get('points_of_interest', []),
+                    "connections": loc.get('connections', []),
+                }),
+                now,
+                now,
+            ))
             location_id_map[loc['id']] = cursor.lastrowid
         
         npc_id_map = {}  # Map preview IDs to real IDs
@@ -1844,12 +1876,24 @@ async def finalize_campaign(data: CampaignFinalize):
             
             cursor = await conn.execute("""
                 INSERT INTO npcs (session_id, guild_id, name, description, personality, 
-                                  npc_type, location, is_party_member, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, data.guild_id, npc['name'], npc.get('description', ''),
-                  npc.get('personality', ''), npc.get('type', 'neutral'), location_name,
-                  1 if npc.get('is_party_member_candidate') else 0,
-                  data.dm_user_id, now))
+                                  npc_type, location, location_id, created_by, created_at, dialogue_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                data.guild_id,
+                npc['name'],
+                npc.get('description', ''),
+                npc.get('personality', ''),
+                npc.get('type', 'neutral'),
+                location_name,
+                location_id_map.get(npc.get('location_id')),
+                data.dm_user_id,
+                now,
+                json.dumps({
+                    "goals": npc.get('goals'),
+                    "is_party_member_candidate": npc.get('is_party_member_candidate', False),
+                }),
+            ))
             npc_id_map[npc['id']] = cursor.lastrowid
         
         # Create quests
@@ -1873,9 +1917,10 @@ async def finalize_campaign(data: CampaignFinalize):
         "session_id": session_id,
         "message": f"Campaign '{data.name}' created successfully!",
         "stats": {
-            "locations_created": len(data.locations),
-            "npcs_created": len(data.npcs),
-            "quests_created": len(data.quest_hooks)
+            "locations": len(data.locations),
+            "npcs": len(data.npcs),
+            "factions": len(data.factions),
+            "quests": len(data.quest_hooks)
         }
     }
 

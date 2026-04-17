@@ -165,7 +165,9 @@ class InfoButton(ui.Button):
             return
         
         stages = await cog.db.get_quest_stages(quest['id'])
-        current_stage = stages[quest['current_stage']] if quest['current_stage'] < len(stages) else None
+        character = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
+        stage_info = await cog.db.get_quest_current_stage(quest['id'], character['id'] if character else None)
+        current_stage = stage_info.get('stage')
         
         embed = discord.Embed(
             title=f"📜 {quest['title']}",
@@ -179,7 +181,7 @@ class InfoButton(ui.Button):
         )
         embed.add_field(
             name="📊 Progress",
-            value=f"Stage {quest['current_stage'] + 1}/{len(stages)}",
+            value=f"Stage {stage_info['index'] + 1}/{stage_info['total']}",
             inline=True
         )
         

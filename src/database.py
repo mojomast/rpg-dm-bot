@@ -103,9 +103,12 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     quest_id INTEGER NOT NULL,
                     character_id INTEGER NOT NULL,
+                    session_id INTEGER,
+                    current_node_id INTEGER,
                     objectives_completed TEXT DEFAULT '[]',
                     status TEXT DEFAULT 'active',
                     started_at TEXT NOT NULL,
+                    last_advanced_at TEXT,
                     completed_at TEXT,
                     FOREIGN KEY (quest_id) REFERENCES quests(id),
                     FOREIGN KEY (character_id) REFERENCES characters(id),
@@ -209,9 +212,13 @@ class Database:
                     status TEXT DEFAULT 'inactive',
                     max_players INTEGER DEFAULT 6,
                     current_quest_id INTEGER,
+                    world_theme TEXT DEFAULT 'fantasy',
+                    content_pack_id TEXT DEFAULT 'fantasy_core',
                     setting TEXT,
                     world_state TEXT DEFAULT '{}',
                     session_notes TEXT,
+                    primary_channel_id INTEGER,
+                    last_active_channel_id INTEGER,
                     created_at TEXT NOT NULL,
                     last_played TEXT
                 )
@@ -342,11 +349,13 @@ class Database:
                     session_id INTEGER NOT NULL UNIQUE,
                     current_scene TEXT,
                     current_location TEXT,
+                    current_location_id INTEGER,
                     dm_notes TEXT,
                     last_activity TEXT,
                     turn_count INTEGER DEFAULT 0,
                     game_data TEXT DEFAULT '{}',
-                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (current_location_id) REFERENCES locations(id)
                 )
             """)
             
@@ -571,6 +580,7 @@ class Database:
                     session_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     description TEXT,
+                    snapshot_type TEXT DEFAULT 'manual',
                     snapshot_data TEXT NOT NULL,
                     created_by INTEGER,
                     created_at TEXT NOT NULL,
@@ -585,6 +595,62 @@ class Database:
     
     async def _run_migrations(self, db):
         """Run database migrations for schema changes"""
+        # Migration 0: Add v1 lifecycle and state columns
+        try:
+            cursor = await db.execute("PRAGMA table_info(sessions)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'world_theme' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN world_theme TEXT DEFAULT 'fantasy'")
+                await db.commit()
+            if 'content_pack_id' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN content_pack_id TEXT DEFAULT 'fantasy_core'")
+                await db.commit()
+            if 'primary_channel_id' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN primary_channel_id INTEGER")
+                await db.commit()
+            if 'last_active_channel_id' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN last_active_channel_id INTEGER")
+                await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(game_state)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'current_location_id' not in columns:
+                await db.execute("ALTER TABLE game_state ADD COLUMN current_location_id INTEGER")
+                await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(quest_progress)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'session_id' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN session_id INTEGER")
+                await db.commit()
+            if 'current_node_id' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN current_node_id INTEGER")
+                await db.commit()
+            if 'last_advanced_at' not in columns:
+                await db.execute("ALTER TABLE quest_progress ADD COLUMN last_advanced_at TEXT")
+                await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(session_snapshots)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'snapshot_type' not in columns:
+                await db.execute("ALTER TABLE session_snapshots ADD COLUMN snapshot_type TEXT DEFAULT 'manual'")
+                await db.commit()
+        except Exception:
+            pass
+
         # Migration 1: Add priority column to story_events if it doesn't exist
         try:
             cursor = await db.execute("PRAGMA table_info(story_events)")
@@ -653,6 +719,40 @@ class Database:
             if 'session_id' not in columns:
                 await db.execute("ALTER TABLE conversation_history ADD COLUMN session_id INTEGER")
                 await db.commit()
+        except Exception:
+            pass
+
+        # Migration 5: Backfill v1 state columns from existing data
+        try:
+            await db.execute("""
+                UPDATE sessions
+                SET world_theme = COALESCE(NULLIF(world_theme, ''), 'fantasy'),
+                    content_pack_id = COALESCE(NULLIF(content_pack_id, ''), 'fantasy_core')
+            """)
+
+            await db.execute("""
+                UPDATE quest_progress
+                SET session_id = (
+                    SELECT q.session_id FROM quests q WHERE q.id = quest_progress.quest_id
+                )
+                WHERE session_id IS NULL
+            """)
+
+            await db.execute("""
+                UPDATE game_state
+                SET current_location_id = (
+                    SELECT l.id
+                    FROM locations l
+                    WHERE l.session_id = game_state.session_id
+                      AND lower(l.name) = lower(game_state.current_location)
+                    ORDER BY l.id
+                    LIMIT 1
+                )
+                WHERE current_location_id IS NULL
+                  AND current_location IS NOT NULL
+                  AND trim(current_location) <> ''
+            """)
+            await db.commit()
         except Exception:
             pass
     
@@ -1574,13 +1674,16 @@ class Database:
     async def accept_quest(self, quest_id: int, character_id: int) -> Dict[str, Any]:
         """Accept a quest for a character"""
         now = datetime.utcnow().isoformat()
+        quest = await self.get_quest(quest_id)
+        if not quest:
+            return {"error": "Quest not found"}
         
         async with aiosqlite.connect(self.db_path) as db:
             try:
                 await db.execute("""
-                    INSERT INTO quest_progress (quest_id, character_id, started_at)
-                    VALUES (?, ?, ?)
-                """, (quest_id, character_id, now))
+                    INSERT INTO quest_progress (quest_id, character_id, session_id, current_node_id, started_at, last_advanced_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (quest_id, character_id, quest.get('session_id'), 0, now, now))
                 await db.commit()
                 return {"success": True}
             except aiosqlite.IntegrityError:
@@ -1593,6 +1696,7 @@ class Database:
             if status:
                 cursor = await db.execute("""
                     SELECT q.*, qp.objectives_completed, qp.status as progress_status, qp.started_at
+                        , qp.current_node_id, qp.last_advanced_at
                     FROM quests q
                     JOIN quest_progress qp ON q.id = qp.quest_id
                     WHERE qp.character_id = ? AND qp.status = ?
@@ -1601,6 +1705,7 @@ class Database:
             else:
                 cursor = await db.execute("""
                     SELECT q.*, qp.objectives_completed, qp.status as progress_status, qp.started_at
+                        , qp.current_node_id, qp.last_advanced_at
                     FROM quests q
                     JOIN quest_progress qp ON q.id = qp.quest_id
                     WHERE qp.character_id = ?
@@ -1613,6 +1718,7 @@ class Database:
                 quest['objectives'] = json.loads(quest['objectives'])
                 quest['rewards'] = json.loads(quest['rewards'])
                 quest['objectives_completed'] = json.loads(quest['objectives_completed'])
+                quest['current_stage'] = quest.get('current_node_id') or 0
                 quests.append(quest)
             return quests
     
@@ -1636,9 +1742,9 @@ class Database:
                 completed.append(objective_index)
             
             await db.execute("""
-                UPDATE quest_progress SET objectives_completed = ?
+                UPDATE quest_progress SET objectives_completed = ?, current_node_id = ?, last_advanced_at = ?
                 WHERE quest_id = ? AND character_id = ?
-            """, (json.dumps(completed), quest_id, character_id))
+            """, (json.dumps(completed), len(completed), datetime.utcnow().isoformat(), quest_id, character_id))
             await db.commit()
             
             # Check if all objectives complete
@@ -1657,9 +1763,9 @@ class Database:
         
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
-                UPDATE quest_progress SET status = 'completed', completed_at = ?
+                UPDATE quest_progress SET status = 'completed', completed_at = ?, last_advanced_at = ?
                 WHERE quest_id = ? AND character_id = ?
-            """, (now, quest_id, character_id))
+            """, (now, now, quest_id, character_id))
             await db.commit()
         
         # Distribute rewards
@@ -1773,6 +1879,27 @@ class Database:
                 npc['stats'] = json.loads(npc['stats'])
                 npcs.append(npc)
             return npcs
+
+    async def get_npcs_by_session(self, session_id: int) -> List[Dict[str, Any]]:
+        """Compatibility helper for API: list NPCs by session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM npcs WHERE session_id = ? AND is_alive = 1 ORDER BY created_at DESC",
+                (session_id,)
+            )
+            rows = await cursor.fetchall()
+            npcs = []
+            for row in rows:
+                npc = dict(row)
+                npc['merchant_inventory'] = json.loads(npc['merchant_inventory']) if npc.get('merchant_inventory') else []
+                npc['stats'] = json.loads(npc['stats']) if npc.get('stats') else {}
+                npcs.append(npc)
+            return npcs
+
+    async def get_npcs_by_guild(self, guild_id: int) -> List[Dict[str, Any]]:
+        """Compatibility helper for API: list NPCs by guild."""
+        return await self.get_guild_npcs(guild_id)
     
     async def update_npc_relationship(self, npc_id: int, character_id: int, 
                                       reputation_change: int = 0, notes: str = None) -> int:
@@ -2358,6 +2485,17 @@ class Database:
             """, (session_id,))
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def get_session_characters(self, session_id: int) -> List[Dict[str, Any]]:
+        """List all characters assigned to a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM characters WHERE session_id = ? ORDER BY created_at DESC",
+                (session_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
     
     async def update_world_state(self, session_id: int, updates: Dict[str, Any]) -> bool:
         """Update the world state for a session"""
@@ -2768,6 +2906,31 @@ class Database:
             })
 
         return stages
+
+    async def get_quest_current_stage(self, quest_id: int, character_id: int = None) -> Dict[str, Any]:
+        """Resolve the current quest stage from quest progress using a forward-compatible node pointer."""
+        stages = await self.get_quest_stages(quest_id)
+        if not stages:
+            return {'index': 0, 'total': 0, 'stage': None}
+
+        current_index = 0
+        if character_id is not None:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(
+                    "SELECT current_node_id, objectives_completed FROM quest_progress WHERE quest_id = ? AND character_id = ?",
+                    (quest_id, character_id)
+                )
+                row = await cursor.fetchone()
+                if row:
+                    if row['current_node_id'] is not None:
+                        current_index = row['current_node_id']
+                    else:
+                        completed = json.loads(row['objectives_completed']) if row['objectives_completed'] else []
+                        current_index = len(completed)
+
+        current_index = max(0, min(current_index, len(stages) - 1))
+        return {'index': current_index, 'total': len(stages), 'stage': stages[current_index]}
     
     async def update_quest(self, quest_id: int, **kwargs) -> bool:
         """Update quest fields"""
@@ -2881,6 +3044,79 @@ class Database:
                 state['game_data'] = json.loads(state['game_data']) if state.get('game_data') else {}
                 return state
             return None
+
+    async def save_session_snapshot(
+        self,
+        session_id: int,
+        name: str,
+        created_by: int = None,
+        description: str = None,
+        snapshot_type: str = 'manual'
+    ) -> int:
+        """Save a session snapshot using the comprehensive session state."""
+        now = datetime.utcnow().isoformat()
+        snapshot_data = await self.get_comprehensive_session_state(session_id)
+        if snapshot_data is None:
+            snapshot_data = {}
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO session_snapshots (session_id, name, description, snapshot_type, snapshot_data, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, name, description, snapshot_type, json.dumps(snapshot_data), created_by, now))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_session_snapshots(self, session_id: int) -> List[Dict[str, Any]]:
+        """List snapshots for a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM session_snapshots WHERE session_id = ? ORDER BY created_at DESC",
+                (session_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_session_snapshot(self, snapshot_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single snapshot."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM session_snapshots WHERE id = ?", (snapshot_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            snapshot = dict(row)
+            snapshot['snapshot_data'] = json.loads(snapshot['snapshot_data']) if snapshot.get('snapshot_data') else {}
+            return snapshot
+
+    async def load_session_snapshot(self, snapshot_id: int) -> Dict[str, Any]:
+        """Load a snapshot. For v1 this restores game_state fields and returns the stored payload."""
+        snapshot = await self.get_session_snapshot(snapshot_id)
+        if not snapshot:
+            return {'success': False, 'error': 'Snapshot not found'}
+
+        data = snapshot.get('snapshot_data') or {}
+        game_state = data.get('game_state') or {}
+        if game_state:
+            await self.save_game_state(
+                snapshot['session_id'],
+                current_scene=game_state.get('current_scene'),
+                current_location=game_state.get('current_location'),
+                current_location_id=game_state.get('current_location_id'),
+                dm_notes=game_state.get('dm_notes'),
+                turn_count=game_state.get('turn_count', 0),
+                game_data=game_state.get('game_data', {})
+            )
+
+        return {'success': True, 'session_id': snapshot['session_id'], 'snapshot': snapshot}
+
+    async def delete_session_snapshot(self, snapshot_id: int) -> bool:
+        """Delete a snapshot by ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM session_snapshots WHERE id = ?", (snapshot_id,))
+            await db.commit()
+            return cursor.rowcount > 0
     
     async def create_game_state(self, session_id: int, **kwargs) -> int:
         """Create a new game state for a session"""
@@ -2891,14 +3127,15 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO game_state (session_id, last_activity, game_data, 
-                    current_scene, current_location, dm_notes, turn_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    current_scene, current_location, current_location_id, dm_notes, turn_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id, 
                 now, 
                 json.dumps(game_data),
                 kwargs.get('current_scene'),
                 kwargs.get('current_location'),
+                kwargs.get('current_location_id'),
                 kwargs.get('dm_notes'),
                 kwargs.get('turn_count', 0)
             ))
@@ -3088,7 +3325,7 @@ class Database:
             cursor = await db.execute("""
                 INSERT INTO locations 
                 (session_id, guild_id, name, description, location_type, danger_level,
-                 current_weather, hidden_secrets, connected_locations, created_at, updated_at)
+                 current_weather, hidden_secrets, points_of_interest, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id,
@@ -3113,7 +3350,7 @@ class Database:
         
         # Map API field names to DB column names
         if 'points_of_interest' in kwargs:
-            kwargs['connected_locations'] = json.dumps(kwargs.pop('points_of_interest') or [])
+            kwargs['points_of_interest'] = json.dumps(kwargs.pop('points_of_interest') or [])
         kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
@@ -3220,9 +3457,9 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO story_items 
-                (session_id, name, description, type, lore, rarity, discovered, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, name, description, item_type, lore, discovery_conditions or "common", 0, now))
+                (session_id, guild_id, name, description, item_type, lore, discovery_conditions, dm_notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, guild_id, name, description, item_type, lore, discovery_conditions, dm_notes, now, now))
             await db.commit()
             return cursor.lastrowid
     
@@ -3233,9 +3470,10 @@ class Database:
         
         # Map API field names to DB column names
         if 'is_discovered' in kwargs:
-            kwargs['discovered'] = int(kwargs.pop('is_discovered'))
+            kwargs['is_discovered'] = int(kwargs.pop('is_discovered'))
         elif 'discovered' in kwargs:
-            kwargs['discovered'] = int(kwargs['discovered'])
+            kwargs['is_discovered'] = int(kwargs.pop('discovered'))
+        kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [item_id]
@@ -3256,7 +3494,7 @@ class Database:
     
     async def reveal_story_item(self, item_id: int) -> bool:
         """Mark a story item as discovered"""
-        return await self.update_story_item(item_id, discovered=True)
+        return await self.update_story_item(item_id, is_discovered=True, discovered_at=datetime.utcnow().isoformat())
 
     async def get_story_items_at_location(self, location_id: int) -> List[Dict]:
         """Get all story items at a specific location"""
@@ -3332,9 +3570,9 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO story_events 
-                (session_id, name, description, type, triggers, status, outcomes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (session_id, name, description, event_type, trigger_conditions, "pending", dm_notes, now))
+                (session_id, guild_id, name, description, event_type, trigger_conditions, status, dm_notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, guild_id, name, description, event_type, trigger_conditions, "pending", dm_notes, now, now))
             await db.commit()
             return cursor.lastrowid
     
@@ -3344,8 +3582,7 @@ class Database:
             return False
         
         # Map API field names to DB column names
-        if 'trigger_conditions' in kwargs:
-            kwargs['triggers'] = kwargs.pop('trigger_conditions')
+        kwargs['updated_at'] = datetime.utcnow().isoformat()
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [event_id]
@@ -3374,7 +3611,7 @@ class Database:
         now = datetime.utcnow().isoformat()
         kwargs = {"status": "resolved", "resolved_at": now}
         if outcome:
-            kwargs["outcomes"] = outcome
+            kwargs["resolution_outcome"] = outcome
         return await self.update_story_event(event_id, **kwargs)
 
     # ========================================================================

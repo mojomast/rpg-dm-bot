@@ -686,6 +686,23 @@ Canonical v1 Discord lifecycle:
 - `last_played` update semantics are inconsistent.
 - Auto story logging can target the wrong active session in multi-session guilds.
 
+### Implementation Status
+
+- ✅ COMPLETE: `sessions.world_theme` implemented in `src/database.py`
+- ✅ COMPLETE: `sessions.content_pack_id` implemented in `src/database.py`
+- ✅ COMPLETE: `sessions.primary_channel_id` implemented in `src/database.py`
+- ✅ COMPLETE: `sessions.last_active_channel_id` implemented in `src/database.py`
+- ✅ COMPLETE: `game_state.current_location_id` implemented in `src/database.py`
+- ✅ COMPLETE: `quest_progress.current_node_id` implemented in `src/database.py`
+- ✅ COMPLETE: `quest_progress.session_id` and `last_advanced_at` implemented in `src/database.py`
+- ✅ COMPLETE: `story_items` helper/schema drift repaired in `src/database.py`
+- ✅ COMPLETE: `story_events` helper/schema drift repaired in `src/database.py`
+- ✅ COMPLETE: snapshot DB methods implemented in `src/database.py`
+- ✅ COMPLETE: broken API routes for session characters, NPC listing, event resolve, and location connect repaired in `web/api.py`
+- ✅ COMPLETE: quest stage consumers switched off direct `quest['current_stage']` reads in `src/chat_handler.py` and `src/cogs/dm_chat.py`
+- ⚠️ PARTIAL: snapshot UI/API contract is now backed by DB methods, but full snapshot restore semantics remain limited to v1 game-state restoration
+- ⚠️ PARTIAL: persistent Discord channel/session rebinding is not fully implemented yet
+
 ## Missing DB Schema and Migrations
 
 ### New tables required

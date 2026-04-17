@@ -208,13 +208,14 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
                 quest = await self.db.get_quest(session["current_quest_id"])
                 if quest:
                     stages = await self.db.get_quest_stages(quest["id"])
-                    current_stage = stages[quest["current_stage"]] if quest["current_stage"] < len(stages) else None
+                    stage_info = await self.db.get_quest_current_stage(quest["id"], character_id)
+                    current_stage = stage_info.get("stage")
                     context_parts.append(
                         f"""
 CURRENT QUEST: {quest['title']}
 Description: {quest['description']}
 Difficulty: {quest['difficulty']}
-Stage: {quest['current_stage'] + 1}/{len(stages)}"""
+Stage: {stage_info['index'] + 1}/{stage_info['total']}"""
                     )
                     if current_stage:
                         context_parts.append(

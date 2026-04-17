@@ -2050,6 +2050,34 @@ class Database:
                 (json.dumps(effects), participant_id))
             await db.commit()
             return True
+
+    async def tick_combat_status_effects(self, participant_id: int) -> List[Dict[str, Any]]:
+        """Reduce combat status effect durations and remove expired entries."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT status_effects FROM combat_participants WHERE id = ?",
+                (participant_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return []
+
+            updated_effects = []
+            for effect in json.loads(row['status_effects'] or '[]'):
+                duration = effect.get('duration', -1)
+                if duration is None or duration < 0:
+                    updated_effects.append(effect)
+                    continue
+                if duration > 1:
+                    updated_effects.append({**effect, 'duration': duration - 1})
+
+            await db.execute(
+                "UPDATE combat_participants SET status_effects = ? WHERE id = ?",
+                (json.dumps(updated_effects), participant_id),
+            )
+            await db.commit()
+            return updated_effects
     
     async def advance_combat_turn(self, encounter_id: int) -> Dict[str, Any]:
         """Advance to the next turn in combat"""
@@ -2076,6 +2104,10 @@ class Database:
             
             if new_turn == 0:
                 new_round += 1
+
+            await self.tick_combat_status_effects(alive_combatants[new_turn]['id'])
+            refreshed_combatants = await self.get_combatants(encounter_id)
+            alive_combatants = [c for c in refreshed_combatants if c['current_hp'] > 0]
             
             await db.execute("""
                 UPDATE combat_encounters SET current_turn = ?, round_number = ?

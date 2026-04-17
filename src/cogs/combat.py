@@ -9,6 +9,9 @@ from discord.ext import commands
 import random
 import logging
 
+from src.cogs.inventory import get_item_data
+from src.tools import DiceRoller
+
 logger = logging.getLogger('rpg.combat')
 
 
@@ -17,7 +20,7 @@ async def resolve_attack(db, attacker_char: dict, target_combatant: dict) -> dic
     str_mod = (attacker_char['strength'] - 10) // 2
     attack_roll = random.randint(1, 20)
     total = attack_roll + str_mod
-    target_ac = 10
+    target_ac = 10 + sum(2 for effect in target_combatant.get('status_effects', []) if effect.get('effect') == 'defending')
 
     is_crit = attack_roll == 20
     is_fumble = attack_roll == 1
@@ -77,6 +80,22 @@ class CombatView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("Not your turn!", ephemeral=True)
             return
+
+        char = await self.bot.db.get_active_character(interaction.user.id, interaction.guild.id)
+        if not char:
+            await interaction.response.send_message("No active character!", ephemeral=True)
+            return
+
+        combatants = await self.bot.db.get_combatants(self.encounter_id)
+        participant = next(
+            (c for c in combatants if c['participant_type'] == 'character' and c['participant_id'] == char['id']),
+            None,
+        )
+        if not participant:
+            await interaction.response.send_message("You are not in this combat!", ephemeral=True)
+            return
+
+        await self.bot.db.add_status_effect(participant['id'], 'defending', duration=1)
         
         await interaction.response.send_message(
             "🛡️ You take a defensive stance! (+2 AC until your next turn)",
@@ -88,10 +107,30 @@ class CombatView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("Not your turn!", ephemeral=True)
             return
-        
+
+        char = await self.bot.db.get_active_character(interaction.user.id, interaction.guild.id)
+        if not char:
+            await interaction.response.send_message("No active character!", ephemeral=True)
+            return
+
+        inventory = await self.bot.db.get_inventory(char['id'])
+        usable_items = []
+        for item in inventory:
+            if item['item_type'] != 'consumable':
+                continue
+            item_data = get_item_data(item['item_id'])
+            effect = (item_data or {}).get('effect', {})
+            if effect.get('type') in {'heal', 'restore_mana'}:
+                usable_items.append(item)
+
+        if not usable_items:
+            await interaction.response.send_message("No usable combat items in your inventory.", ephemeral=True)
+            return
+
         await interaction.response.send_message(
-            "Item usage coming soon! Use `/inventory use` for now.",
-            ephemeral=True
+            "Choose an item to use:",
+            view=CombatItemView(self.bot, self.encounter_id, char, usable_items),
+            ephemeral=True,
         )
     
     @discord.ui.button(label="Flee", emoji="🏃", style=discord.ButtonStyle.secondary)
@@ -178,6 +217,73 @@ class TargetSelectView(discord.ui.View):
             else:
                 lines.append(f"Enemy HP: {result['new_hp']}/{result['max_hp']}")
         
+        await interaction.response.send_message("\n".join(lines))
+
+
+class CombatItemView(discord.ui.View):
+    """View for selecting and using simple combat consumables."""
+
+    def __init__(self, bot, encounter_id: int, character: dict, items: list):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.encounter_id = encounter_id
+        self.character = character
+
+        options = [
+            discord.SelectOption(
+                label=f"{item['item_name']} x{item['quantity']}",
+                value=str(item['id'])
+            )
+            for item in items[:25]
+        ]
+
+        select = discord.ui.Select(placeholder="Choose an item...", options=options)
+        select.callback = self.item_selected
+        self.add_item(select)
+
+    async def item_selected(self, interaction: discord.Interaction):
+        item_id = int(interaction.data['values'][0])
+        inventory = await self.bot.db.get_inventory(self.character['id'])
+        item = next((entry for entry in inventory if entry['id'] == item_id), None)
+        if not item:
+            await interaction.response.send_message("Item not found.", ephemeral=True)
+            return
+
+        item_data = get_item_data(item['item_id']) or {}
+        effect = item_data.get('effect', {})
+        effect_type = effect.get('type')
+        lines = [f"🧪 **{self.character['name']}** uses **{item['item_name']}**!"]
+
+        if effect_type == 'heal':
+            roll = DiceRoller.roll(effect.get('value', '1'))
+            if roll.get('error'):
+                await interaction.response.send_message(f"Error: {roll['error']}", ephemeral=True)
+                return
+
+            combatants = await self.bot.db.get_combatants(self.encounter_id)
+            participant = next(
+                (c for c in combatants if c['participant_type'] == 'character' and c['participant_id'] == self.character['id']),
+                None,
+            )
+            if not participant:
+                await interaction.response.send_message("You are not in this combat!", ephemeral=True)
+                return
+
+            result = await self.bot.db.update_combatant_hp(participant['id'], roll['total'])
+            await self.bot.db.update_character_hp(self.character['id'], roll['total'])
+            lines.append(f"💚 Restored **{roll['total']}** HP")
+            lines.append(f"HP: {result['new_hp']}/{result['max_hp']}")
+        elif effect_type == 'restore_mana':
+            new_mana = min(self.character['max_mana'], self.character['mana'] + int(effect.get('value', 0)))
+            restored = new_mana - self.character['mana']
+            await self.bot.db.update_character(self.character['id'], mana=new_mana)
+            lines.append(f"✨ Restored **{restored}** mana")
+            lines.append(f"Mana: {new_mana}/{self.character['max_mana']}")
+        else:
+            await interaction.response.send_message("That item cannot be used in combat yet.", ephemeral=True)
+            return
+
+        await self.bot.db.remove_item(item_id, 1)
         await interaction.response.send_message("\n".join(lines))
 
 
@@ -353,6 +459,11 @@ class Combat(commands.Cog):
         
         # Sort by initiative (highest first)
         results.sort(key=lambda x: x['roll'], reverse=True)
+
+        for result in results:
+            await self.db.update_combatant_initiative(result['id'], result['roll'])
+        await self.db.set_initiative_order(combat['id'], [result['id'] for result in results])
+        await self.db.set_current_turn(combat['id'], 0)
         
         # Build display
         lines = ["**Initiative Order:**", ""]
@@ -370,6 +481,34 @@ class Combat(commands.Cog):
             color=discord.Color.orange()
         )
         
+        await interaction.response.send_message(embed=embed)
+
+    @combat_group.command(name="next", description="Advance to the next combat turn")
+    async def next_turn(self, interaction: discord.Interaction):
+        """Advance combat to the next turn."""
+        combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
+        if not combat:
+            await interaction.response.send_message(
+                "❌ No active combat!",
+                ephemeral=True,
+            )
+            return
+
+        result = await self.db.advance_combat_turn(combat['id'])
+        if result.get('error'):
+            await interaction.response.send_message(f"❌ {result['error']}", ephemeral=True)
+            return
+
+        current = result['current_combatant']
+        embed = discord.Embed(
+            title="⏭️ Next Turn",
+            description=(
+                f"Round **{result['round']}**\n"
+                f"It is now **{current['name']}**'s turn.\n"
+                f"HP: {current['current_hp']}/{current['max_hp']}"
+            ),
+            color=discord.Color.blurple(),
+        )
         await interaction.response.send_message(embed=embed)
     
     @combat_group.command(name="attack", description="Attack a target in combat")

@@ -609,6 +609,21 @@ class TestCombat:
         assert effects[0]['effect'] == "poisoned"
         assert effects[0]['duration'] == 3
 
+    async def test_tick_combat_status_effects_removes_expired(self, db):
+        """Test combat status effects tick down and expire."""
+        combat_id = await db.create_combat(67890, 11111)
+        participant_id = await db.add_combatant(
+            combat_id, "player", 12345, "Test Hero", 20, 20, 15
+        )
+
+        await db.add_status_effect(participant_id, "defending", duration=1)
+        effects = await db.tick_combat_status_effects(participant_id)
+
+        assert effects == []
+
+        combatants = await db.get_combatants(combat_id)
+        assert combatants[0]['status_effects'] == []
+
     async def test_set_initiative_order_and_current_turn(self, db):
         """Test persisting initiative order and turn index."""
         combat_id = await db.create_combat(67890, 11111)

@@ -454,7 +454,10 @@ class DMChat(commands.Cog):
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
         if not session_id:
             return None
-        return await self.db.get_session(session_id)
+        session = await self.db.get_session(session_id)
+        if not session or session.get('guild_id') != guild_id:
+            return None
+        return session
 
     def build_full_response(self, response_text: str, mechanics_text: str = "") -> str:
         """Combine mechanics and response text for sending."""
@@ -1245,6 +1248,7 @@ CRITICAL: Always end your response with a prompt for player action. Keep the gam
         await interaction.followup.send(embed=embed)
     
     @app_commands.command(name="check", description="Make a skill check")
+    @app_commands.guild_only()
     @app_commands.describe(
         skill="The skill to check",
         difficulty="The difficulty class (DC)"

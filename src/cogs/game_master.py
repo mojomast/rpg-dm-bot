@@ -14,6 +14,8 @@ import json
 import asyncio
 import os
 
+from src.utils import ensure_interaction_owner
+
 logger = logging.getLogger('rpg.game_master')
 
 
@@ -65,6 +67,9 @@ class EquipmentChoiceView(discord.ui.View):
         self.user_id = user_id
         self.guild_id = guild_id
         self.char_class = char_class.lower()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.user_id, "this character creation flow")
         
     @discord.ui.button(label="⚔️ Take Standard Kit", style=discord.ButtonStyle.success, row=0)
     async def use_standard_kit(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -144,6 +149,9 @@ class EquipmentShopView(discord.ui.View):
         self.user_id = user_id
         self.guild_id = guild_id
         self.gold = gold
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.user_id, "this shop")
         
         # Add category select dropdown
         self.add_item(ShopCategorySelect(game_master_cog, user_id, guild_id))
@@ -184,14 +192,8 @@ class EquipmentShopView(discord.ui.View):
         purchased = shopping.get('purchased', [])
         gold = shopping.get('gold', 0)
         
-        # Process cart
-        cart_total = sum(item['price'] * item.get('quantity', 1) for item in cart)
-        if cart_total > gold:
-            await interaction.followup.send("❌ You don't have enough gold for everything in your cart!", ephemeral=True)
-            return
-        
         # Finalize purchase
-        final_gold = gold - cart_total
+        final_gold = gold
         all_items = purchased + cart
         
         # Assign all items and gold to character
@@ -283,6 +285,9 @@ class CategoryItemsView(discord.ui.View):
         self.guild_id = guild_id
         self.category = category
         self.items = items
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.user_id, "this shop")
         
         # Add item select dropdown
         self.add_item(ItemSelect(game_master_cog, user_id, guild_id, category, items))
@@ -366,6 +371,9 @@ class PurchaseConfirmView(discord.ui.View):
         self.item = item
         self.category = category
         self.quantity = 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.user_id, "this purchase prompt")
     
     @discord.ui.button(label="➖", style=discord.ButtonStyle.secondary, row=0)
     async def decrease_qty(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -925,7 +933,7 @@ class SessionManageView(discord.ui.View):
         """Reset the DM's conversation history for this game"""
         dm_chat_cog = self.game_master.bot.get_cog('DMChat')
         if dm_chat_cog:
-            dm_chat_cog.start_new_session(interaction.channel.id, self.session['id'])
+            dm_chat_cog.start_new_session(interaction.channel.id, self.session['id'], interaction.guild.id)
         
         await interaction.response.send_message(
             f"🔄 Conversation history cleared for **{self.session['name']}**!\n"
@@ -992,6 +1000,13 @@ class GameMaster(commands.Cog):
     @property
     def llm(self):
         return self.bot.llm
+
+    async def _get_guild_session(self, guild_id: int, session_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a session only if it belongs to the current guild."""
+        session = await self.db.get_session(session_id)
+        if not session or session.get('guild_id') != guild_id:
+            return None
+        return session
     
     def _generate_fallback_intro(self, session: Dict, party_info: List[Dict]) -> str:
         """Generate a fallback intro when LLM fails or returns empty"""
@@ -1160,7 +1175,7 @@ class GameMaster(commands.Cog):
             )
             return
         
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message("❌ Game not found!", ephemeral=True)
@@ -1255,7 +1270,7 @@ class GameMaster(commands.Cog):
     
     async def begin_game(self, interaction: discord.Interaction, session_id: int):
         """Actually begin the game with DM narration"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message("❌ Game not found!", ephemeral=True)
@@ -1285,7 +1300,7 @@ class GameMaster(commands.Cog):
         # Clear chat history for this channel to start fresh with new game
         dm_chat_cog = self.bot.get_cog('DMChat')
         if dm_chat_cog:
-            dm_chat_cog.start_new_session(interaction.channel.id, session_id)
+            dm_chat_cog.start_new_session(interaction.channel.id, session_id, interaction.guild.id)
         
         # Build detailed party info for the DM including backstories
         party_info = []
@@ -1406,7 +1421,7 @@ class GameMaster(commands.Cog):
             return
         
         if session_id:
-            session = await self.db.get_session(session_id)
+            session = await self._get_guild_session(interaction.guild.id, session_id)
             if not session:
                 await interaction.response.send_message("❌ Game not found!", ephemeral=True)
                 return
@@ -1461,7 +1476,7 @@ class GameMaster(commands.Cog):
     @app_commands.describe(session_id="The session ID to pause")
     async def pause_game(self, interaction: discord.Interaction, session_id: int):
         """Pause a game"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message("❌ Game not found!", ephemeral=True)
@@ -1485,7 +1500,7 @@ class GameMaster(commands.Cog):
     @app_commands.describe(session_id="The session ID to end")
     async def end_game(self, interaction: discord.Interaction, session_id: int):
         """End a game"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message("❌ Game not found!", ephemeral=True)

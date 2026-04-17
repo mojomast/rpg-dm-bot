@@ -1,6 +1,6 @@
 # RPG DM Bot - Database Architecture
 
-**Last Updated:** December 4, 2025  
+**Last Updated:** April 17, 2026  
 **Database Type:** SQLite (async via aiosqlite)  
 **Location:** `data/rpg.db`
 
@@ -648,19 +648,21 @@ Use this checklist to verify all systems are properly connected:
 4. **Soft Deletes**: `is_active`, `is_alive` flags rather than hard deletes
 
 5. **Session Isolation**: Tools use `_get_session_for_context()` helper to ensure operations stay within the correct session:
-   - First checks `context['session_id']` (explicitly passed from dm_chat.py)
-   - Falls back to `get_user_active_session(user_id, guild_id)` for user's specific session
-   - Last resort: `get_active_session(guild_id)` for any active session
-   - This prevents character/data leakage between concurrent sessions
+    - First checks `context['session_id']` (explicitly passed from dm_chat.py)
+    - Falls back to `get_user_active_session(user_id, guild_id)` for user's specific session
+    - Last resort: `get_active_session(guild_id)` for any active session
+    - This prevents character/data leakage between concurrent sessions
 
-6. **Story Logging**: Many wiring methods automatically log to `story_log` when changes occur
+6. **Guild Isolation in Cogs**: Slash-command entry points in `dm_chat.py`, `game_master.py`, `sessions.py`, and `game_persistence.py` now verify that a looked-up session belongs to the active guild before operating on it.
 
-7. **Location Tracking**: Both characters and NPCs now have `location_id` foreign keys to the `locations` table
+7. **Story Logging**: Many wiring methods automatically log to `story_log` when changes occur
 
-8. **Keyword Arguments**: When calling `get_active_combat()`, always use `channel_id=` or `guild_id=` keyword arguments, not positional
+8. **Location Tracking**: Both characters and NPCs now have `location_id` foreign keys to the `locations` table
 
-9. **Database Migrations**: Schema changes are handled via `_run_migrations()` at Database init. See Migration System section above. Queries that depend on migrated columns should have fallback handlers.
+9. **Keyword Arguments**: When calling `get_active_combat()`, always use `channel_id=` or `guild_id=` keyword arguments, not positional
+
+10. **Database Migrations**: Schema changes are handled via `_run_migrations()` at Database init. See Migration System section above. Queries that depend on migrated columns should have fallback handlers.
 
 ---
 
-*Last Updated: December 5, 2025 - Session 8: Session isolation and migration fixes*
+*Last Updated: April 17, 2026 - Session 12: Phase 7 slash-command and guild/session hardening*

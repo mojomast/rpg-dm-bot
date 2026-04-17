@@ -12,6 +12,8 @@ import os
 import random
 from typing import List, Dict, Any, Optional
 
+from src.utils import ensure_interaction_owner
+
 logger = logging.getLogger('rpg.inventory')
 
 # Load items data
@@ -76,16 +78,20 @@ def get_shop_items() -> List[Dict]:
 class ShopView(discord.ui.View):
     """View for browsing and purchasing shop items"""
     
-    def __init__(self, bot, character_id: int, category: str = "all"):
+    def __init__(self, bot, character_id: int, owner_user_id: int, category: str = "all"):
         super().__init__(timeout=300)
         self.bot = bot
         self.character_id = character_id
+        self.owner_user_id = owner_user_id
         self.category = category
         self.page = 0
         self.items_per_page = 5
         
         # Add category dropdown
         self.add_item(ShopCategoryDropdown(bot, character_id))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.owner_user_id, "this shop")
     
     def get_filtered_items(self) -> List[Dict]:
         """Get items filtered by category"""
@@ -256,16 +262,20 @@ class ShopBuyDropdown(discord.ui.Select):
 class InventoryView(discord.ui.View):
     """Interactive inventory view with item management"""
     
-    def __init__(self, bot, character: Dict, items: List[Dict]):
+    def __init__(self, bot, character: Dict, items: List[Dict], owner_user_id: int):
         super().__init__(timeout=180)
         self.bot = bot
         self.character = character
         self.items = items
+        self.owner_user_id = owner_user_id
         self.filter_type = "all"
         
         if items:
             self.add_item(InventoryFilterDropdown())
             self.add_item(InventoryActionDropdown(bot, character, items))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.owner_user_id, "this inventory")
     
     def get_filtered_items(self) -> List[Dict]:
         if self.filter_type == "all":
@@ -309,7 +319,7 @@ class InventoryView(discord.ui.View):
             await interaction.response.send_message("❌ No consumable items!", ephemeral=True)
             return
         
-        view = UseItemView(self.bot, self.character, consumables)
+        view = UseItemView(self.bot, self.character, consumables, self.owner_user_id)
         await interaction.response.send_message(
             "🧪 Select an item to use:",
             view=view,
@@ -441,18 +451,19 @@ class InventoryActionDropdown(discord.ui.Select):
             if item_data.get('price'):
                 embed.add_field(name="Value", value=f"{item_data['price']} gold", inline=True)
         
-        view = ItemActionView(self.bot, self.character, item)
+        view = ItemActionView(self.bot, self.character, item, interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class ItemActionView(discord.ui.View):
     """Actions for a specific item"""
     
-    def __init__(self, bot, character: Dict, item: Dict):
+    def __init__(self, bot, character: Dict, item: Dict, owner_user_id: int):
         super().__init__(timeout=60)
         self.bot = bot
         self.character = character
         self.item = item
+        self.owner_user_id = owner_user_id
         
         # Add appropriate buttons based on item type
         item_data = get_item_data(item['item_id'])
@@ -465,6 +476,9 @@ class ItemActionView(discord.ui.View):
             else:
                 slot = item_data.get('slot', 'main_hand') if item_data else 'main_hand'
                 self.add_item(EquipItemButton(bot, character, item, slot))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.owner_user_id, "this item menu")
     
     @discord.ui.button(label="🗑️ Drop", style=discord.ButtonStyle.danger, row=1)
     async def drop(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -586,13 +600,17 @@ class UnequipItemButton(discord.ui.Button):
 class UseItemView(discord.ui.View):
     """View for selecting and using consumable items"""
     
-    def __init__(self, bot, character: Dict, consumables: List[Dict]):
+    def __init__(self, bot, character: Dict, consumables: List[Dict], owner_user_id: int):
         super().__init__(timeout=60)
         self.bot = bot
         self.character = character
+        self.owner_user_id = owner_user_id
         
         if consumables:
             self.add_item(UseItemDropdown(bot, character, consumables))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_interaction_owner(interaction, self.owner_user_id, "this item menu")
 
 
 class UseItemDropdown(discord.ui.Select):
@@ -724,7 +742,7 @@ class Inventory(commands.Cog):
                     inline=False
                 )
         
-        view = InventoryView(self.bot, char, items) if items else None
+        view = InventoryView(self.bot, char, items, interaction.user.id) if items else None
         await interaction.response.send_message(embed=embed, view=view)
     
     @inventory_group.command(name="use", description="Use a consumable item")
@@ -996,7 +1014,7 @@ class Inventory(commands.Cog):
         total_pages = max(1, (len(shop_items) + 4) // 5)
         embed.set_footer(text=f"Page 1/{total_pages} | {len(shop_items)} items available")
         
-        view = ShopView(self.bot, char['id'])
+        view = ShopView(self.bot, char['id'], interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view)
     
     @inventory_group.command(name="quickuse", description="Quickly use an item by name")

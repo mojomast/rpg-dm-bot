@@ -1,14 +1,75 @@
 # RPG Dungeon Master Bot - Handoff Document
 
-**Date:** December 6, 2025  
+**Date:** April 17, 2026  
 **Project:** RPG Dungeon Master Discord Bot  
-**Status:** Phase 6 Complete - Enhanced UI (Mechanics Display, Discord Buttons, Web Campaign Creator)
+**Status:** Phase 7 Complete - Slash Command and Session Hardening
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
 ---
 
-## Latest Changes (December 6, 2025 - Session 11)
+## Latest Changes (April 17, 2026 - Session 12)
+
+### Phase 7 - Slash Command and Session Hardening
+
+This session completed the Phase 7 runtime hardening pass focused on slash commands, guild/session isolation, and owner-safe interactive UI.
+
+#### Changes Made
+
+**`src/utils.py`:**
+- Added `get_character_class()` helper so cogs can read either `char_class` or legacy `class`
+- Added `ensure_interaction_owner()` helper for owner-locked Discord views
+
+**`src/cogs/skills.py`:**
+- Fixed `/skills` to use normalized class lookup instead of directly reading `character['class']`
+- Added `get_skill_tree_branches()` to normalize `skills.json` branch data when stored as a dict
+- Prevented runtime failures when loading skill trees from current game data
+
+**`src/cogs/dm_chat.py`:**
+- Added guild validation in `resolve_session()` so cross-guild session IDs are ignored
+- Marked `/check` as `@app_commands.guild_only()`
+
+**`src/cogs/game_master.py`:**
+- Added `_get_guild_session()` helper and used it for guild-scoped session commands
+- Updated `DMChat.start_new_session()` call sites to pass `guild_id`
+- Added owner checks to character creation equipment/shop views
+- Fixed starter shopping checkout so remaining gold is not reduced twice
+
+**`src/cogs/sessions.py`:**
+- Added `_get_guild_session()` helper and applied it across session view/join/leave/start/pause/end/delete/set-quest flows
+
+**`src/cogs/game_persistence.py`:**
+- Added `_get_guild_session()` helper and applied it to `/resume`
+
+**`src/cogs/inventory.py`:**
+- Added owner checks to shop, inventory, item action, and consumable views so only the originating player can interact
+
+**Tests:**
+- Added `tests/test_phase7.py` covering:
+  - guild filtering in `DMChat.resolve_session()`
+  - normalized `/skills` class handling
+  - starter shopping remaining-gold behavior
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+python3 -m compileall src tests
+.venv/bin/pytest tests/test_phase7.py tests/test_dm_chat.py -q
+```
+
+Results:
+- compile checks passed
+- 6 focused tests passed
+
+#### Remaining Limitation
+
+- True live Discord slash-command verification is still not possible in this environment without a valid bot token and server.
+
+---
+
+## Previous Changes (December 6, 2025 - Session 11)
 
 ### Session Context Isolation Fix (Critical Bug Fix)
 

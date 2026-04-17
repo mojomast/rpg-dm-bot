@@ -11,6 +11,8 @@ import json
 import os
 import random
 
+from src.utils import get_character_class
+
 # Load skills data
 SKILLS_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'game_data', 'skills.json')
 SKILLS_DATA = {}
@@ -24,6 +26,15 @@ def load_skills():
         SKILLS_DATA = {"skill_trees": {}, "skills": {}, "passive_abilities": {}, "status_effects": {}}
 
 load_skills()
+
+
+def get_skill_tree_branches(char_class: str) -> List[Dict[str, Any]]:
+    """Return skill tree branches in the list shape expected by the UI."""
+    tree = SKILLS_DATA.get('skill_trees', {}).get(char_class.lower(), {})
+    branches = tree.get('branches', [])
+    if isinstance(branches, dict):
+        return [{"id": branch_id, **branch_data} for branch_id, branch_data in branches.items()]
+    return branches
 
 
 # ============================================================================
@@ -41,8 +52,7 @@ class SkillTreeView(discord.ui.View):
         self.current_branch = None
         
         # Get branches for this class
-        tree = SKILLS_DATA.get('skill_trees', {}).get(self.char_class, {})
-        self.branches = tree.get('branches', [])
+        self.branches = get_skill_tree_branches(self.char_class)
         
         if self.branches:
             self.add_item(BranchSelectDropdown(cog, character, self.char_class, self.branches))
@@ -432,7 +442,7 @@ class Skills(commands.Cog):
         )
         
         # Show branches
-        for branch in tree.get('branches', []):
+        for branch in get_skill_tree_branches(char_class):
             branch_skills = []
             for skill_id in branch.get('skills', [])[:5]:
                 skill = SKILLS_DATA.get('skills', {}).get(skill_id, {})
@@ -697,11 +707,12 @@ class Skills(commands.Cog):
             )
             return
         
-        char_class = character['class'].lower()
-        
+        char_class = get_character_class(character).lower()
+        display_class = get_character_class(character)
+
         if char_class not in SKILLS_DATA.get('skill_trees', {}):
             await interaction.response.send_message(
-                f"❌ No skill tree found for class **{character['class']}**!",
+                f"❌ No skill tree found for class **{display_class}**!",
                 ephemeral=True
             )
             return

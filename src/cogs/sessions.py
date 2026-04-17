@@ -165,6 +165,13 @@ class Sessions(commands.Cog):
     @property
     def db(self):
         return self.bot.db
+
+    async def _get_guild_session(self, guild_id: int, session_id: int) -> Optional[dict]:
+        """Fetch a session only if it belongs to the current guild."""
+        session = await self.db.get_session(session_id)
+        if not session or session.get('guild_id') != guild_id:
+            return None
+        return session
     
     session_group = app_commands.Group(
         name="session", 
@@ -235,7 +242,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session")
     async def view_session(self, interaction: discord.Interaction, session_id: int):
         """View session details"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -303,7 +310,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to join")
     async def join_session(self, interaction: discord.Interaction, session_id: int):
         """Join a session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -339,7 +346,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to leave")
     async def leave_session(self, interaction: discord.Interaction, session_id: int):
         """Leave a session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -367,7 +374,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to start")
     async def start_session(self, interaction: discord.Interaction, session_id: int):
         """Start a session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -405,7 +412,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to pause")
     async def pause_session(self, interaction: discord.Interaction, session_id: int):
         """Pause a session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -431,7 +438,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to end")
     async def end_session(self, interaction: discord.Interaction, session_id: int):
         """End a session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -469,7 +476,7 @@ class Sessions(commands.Cog):
         quest_id: int
     ):
         """Set active quest for session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(
@@ -503,7 +510,7 @@ class Sessions(commands.Cog):
     @app_commands.describe(session_id="The ID of the session to delete")
     async def delete_session(self, interaction: discord.Interaction, session_id: int):
         """Delete a session"""
-        session = await self.db.get_session(session_id)
+        session = await self._get_guild_session(interaction.guild.id, session_id)
         
         if not session:
             await interaction.response.send_message(

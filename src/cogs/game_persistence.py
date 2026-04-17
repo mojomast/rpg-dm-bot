@@ -28,6 +28,13 @@ class GamePersistence(commands.Cog):
     @property
     def llm(self):
         return self.bot.llm
+
+    async def _get_guild_session(self, guild_id: int, session_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a session only if it belongs to the current guild."""
+        session = await self.db.get_session(session_id)
+        if not session or session.get('guild_id') != guild_id:
+            return None
+        return session
     
     # =========================================================================
     # STORY LOG COMMANDS
@@ -249,7 +256,7 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
         await interaction.response.defer()
         
         if session_id:
-            session = await self.db.get_session(session_id)
+            session = await self._get_guild_session(interaction.guild.id, session_id)
             if not session:
                 await interaction.followup.send("❌ Game not found!", ephemeral=True)
                 return

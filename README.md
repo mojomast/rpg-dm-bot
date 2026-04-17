@@ -17,6 +17,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Actions**: Attack, defend, cast spells, use items, or flee
 - **Status Effects**: Poison, stun, buff/debuff tracking
 - **Combat Log**: Detailed combat narration by the AI DM
+- **Defend & Item Actions**: Defend now applies a real temporary combat bonus and combat item use supports simple consumables
 
 ### 🎒 Inventory System
 - **Item Management**: Collect, use, and trade items
@@ -62,6 +63,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Party System**: Form adventuring parties
 - **Shared Progress**: All players see the same story progression
 - **Session Isolation**: Multiple games can run simultaneously without context bleed - the AI DM correctly tracks which characters belong to which session
+- **Guild-Scoped Session Commands**: Session/game resume, join, pause, end, and quest actions now reject session IDs from other servers
 - **Interactive Session Menu**: Use `/game list` to browse, select, join, and manage sessions using a comprehensive session UI with per-session controls.
 
 ### 🤖 AI Dungeon Master
@@ -71,6 +73,7 @@ An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games
 - **Combat Descriptions**: Dramatic combat narration
 - **Retry Logic**: Automatic retry with exponential backoff for API reliability
 - **API Tools & Spells Support**: The AI DM can cast spells, call spell/ability tool actions, and manage character resources programmatically.
+- **Slash Command Hardening**: Guild-only DM skill checks, safer session resolution, and normalized class handling for skill trees
 
 ### 🪄 Spells & Abilities
 - **Spellcasting**: Classes that cast spells (Mage, Cleric, Bard, Warlock, Paladin, Ranger, etc.) have cantrips and leveled spells, spell slots, and upcasting support.
@@ -198,6 +201,7 @@ The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api
 | `/inventory unequip` | Unequip an item |
 | `/inventory drop` | Drop an item |
 | `/inventory give` | Give item to player |
+| `/inventory shop` | Open the general store with owner-locked interaction controls |
 
 ### Quest Commands (`/quest`)
 | Command | Description |
@@ -227,6 +231,14 @@ The web dashboard is powered by a full REST API with ~80 endpoints. See `web/api
 | `/session end` | End current session |
 | `/session players` | View party members |
 | `/game list` | Browse and manage available games using an interactive UI |
+
+## Recent Hardening
+
+- `/skills` now works with normalized character rows that use `char_class` and with the current `skills.json` branch structure.
+- `/check` is guild-only, matching the rest of the DM session flow.
+- Session lookup paths in DM chat, game management, session commands, and resume flow now verify that the session belongs to the current guild.
+- Character creation shop flows and inventory/shop views reject clicks from other users, preventing accidental or malicious cross-user purchases.
+- Starter-kit shopping no longer subtracts gold twice at checkout.
 
 ### Dice Commands (`/roll`)
 | Command | Description |

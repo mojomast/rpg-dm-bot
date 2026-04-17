@@ -300,7 +300,7 @@ async function loadPageData(pageId: string): Promise<void> {
                 await loadEvents();
                 break;
             case 'saves':
-                await loadSavesPage();
+                showToast('Save points are temporarily unavailable in the web UI', 'info');
                 break;
             case 'characters':
                 await loadCharacters();
@@ -847,106 +847,30 @@ async function resolveEvent(id: number): Promise<void> {
 // ============================================================================
 
 async function loadSavesPage(): Promise<void> {
-    const select = document.getElementById('save-session-select') as HTMLSelectElement;
-
-    try {
-        const data = await api.getSessions();
-        const sessions = data.sessions || [];
-
-        select.innerHTML = '<option value="">-- Select Session --</option>' +
-            sessions.map((s: any) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    } catch (error) {
-        select.innerHTML = '<option value="">Failed to load sessions</option>';
+    const container = document.getElementById('saves-list');
+    if (container) {
+        container.innerHTML = '<div class="empty-state">Save-point management is currently unavailable in the web UI.</div>';
     }
 }
 
 async function loadSnapshots(): Promise<void> {
-    const select = document.getElementById('save-session-select') as HTMLSelectElement;
     const container = document.getElementById('saves-list')!;
-
-    const sessionId = parseInt(select.value);
-    if (!sessionId) {
-        container.innerHTML = '<div class="empty-state">Select a session to view save points</div>';
-        return;
-    }
-
-    container.innerHTML = '<div class="loading-spinner">Loading save points...</div>';
-
-    try {
-        const data = await api.getSnapshots(sessionId);
-        const snapshots = data.snapshots || [];
-
-        if (snapshots.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    No save points yet.
-                    <button class="btn btn-primary" onclick="createSavepoint(${sessionId})" style="margin-top: 1rem;">
-                        💾 Create Save Point
-                    </button>
-                </div>
-            `;
-            return;
-        }
-
-        container.innerHTML = snapshots.map((snap: any) => `
-            <div class="entity-card" data-id="${snap.id}">
-                <div class="entity-header">
-                    <span class="entity-title">💾 ${escapeHtml(snap.name)}</span>
-                    <span class="entity-badge">${snap.snapshot_type}</span>
-                </div>
-                <p class="entity-desc">${escapeHtml(snap.description || 'No description')}</p>
-                <div class="entity-meta">
-                    <span>📅 ${formatDate(snap.created_at)}</span>
-                </div>
-                <div class="entity-actions">
-                    <button class="btn btn-small btn-primary" onclick="loadSavepoint(${snap.id})">⏪ Load</button>
-                    <button class="btn btn-small btn-danger" onclick="deleteSavepoint(${snap.id})">Delete</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        container.innerHTML = '<div class="empty-state">Failed to load save points</div>';
-    }
+    container.innerHTML = '<div class="empty-state">Save-point management is currently unavailable in the web UI.</div>';
 }
 
 async function createSavepoint(sessionId: number): Promise<void> {
-    const name = prompt('Save point name:') || `Save ${new Date().toLocaleString()}`;
-
-    try {
-        await api.createSnapshot({
-            session_id: sessionId,
-            name: name,
-            created_by: 1,
-            description: 'Manual save point'
-        });
-        showToast('Save point created!', 'success');
-        loadSnapshots();
-    } catch (error) {
-        showToast('Failed to create save point', 'error');
-    }
+    void sessionId;
+    showToast('Save points are temporarily unavailable in the web UI', 'info');
 }
 
 async function loadSavepoint(id: number): Promise<void> {
-    if (!confirm('Load this save point? Current progress will be overwritten.')) return;
-
-    try {
-        await api.loadSnapshot(id);
-        showToast('Save point loaded!', 'success');
-    } catch (error) {
-        showToast('Failed to load save point', 'error');
-    }
+    void id;
+    showToast('Save points are temporarily unavailable in the web UI', 'info');
 }
 
 async function deleteSavepoint(id: number): Promise<void> {
-    if (!confirm('Delete this save point?')) return;
-
-    try {
-        await api.deleteSnapshot(id);
-        showToast('Save point deleted', 'success');
-        loadSnapshots();
-    } catch (error) {
-        showToast('Failed to delete save point', 'error');
-    }
+    void id;
+    showToast('Save points are temporarily unavailable in the web UI', 'info');
 }
 
 // ============================================================================

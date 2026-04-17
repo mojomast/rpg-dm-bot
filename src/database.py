@@ -1759,7 +1759,6 @@ class Database:
                 quest['objectives'] = json.loads(quest['objectives'])
                 quest['rewards'] = json.loads(quest['rewards'])
                 quest['objectives_completed'] = json.loads(quest['objectives_completed'])
-                quest['current_stage'] = quest.get('current_node_id') or 0
                 quests.append(quest)
             return quests
     

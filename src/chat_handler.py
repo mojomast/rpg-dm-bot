@@ -153,10 +153,12 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
             if game_state:
                 if game_state.get("current_scene"):
                     context_parts.append(f"\nCURRENT SCENE: {game_state['current_scene']}")
-                if game_state.get("current_location"):
-                    context_parts.append(f"CURRENT LOCATION (NAME): {game_state['current_location']}")
                 if game_state.get("current_location_id"):
                     current_location = await self.db.get_location(game_state["current_location_id"])
+                if current_location:
+                    context_parts.append(f"CURRENT LOCATION: {current_location['name']}")
+                elif game_state.get("current_location"):
+                    context_parts.append(f"CURRENT LOCATION: {game_state['current_location']}")
                 if game_state.get("dm_notes"):
                     context_parts.append(f"DM NOTES: {game_state['dm_notes']}")
 

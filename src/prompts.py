@@ -746,6 +746,62 @@ def build_scene_prompt(
 - Use second person ("You see...", "Before you...")"""
 
 
+def build_combat_prompt(
+    combatants: List[Dict[str, Any]] = None,
+    current_turn: str = "Unknown",
+    round_number: int = 1,
+    environment: str = None,
+    special_conditions: str = None,
+) -> str:
+    """Build a prompt for running an active combat scene."""
+    combatant_lines = []
+    for combatant in combatants or []:
+        name = combatant.get('name', 'Unknown')
+        hp = combatant.get('current_hp', combatant.get('hp', '?'))
+        max_hp = combatant.get('max_hp', '?')
+        initiative = combatant.get('initiative', '?')
+        combatant_lines.append(f"- {name}: {hp}/{max_hp} HP, initiative {initiative}")
+
+    return f"""Run this combat encounter as the Dungeon Master:
+
+**Round:** {round_number}
+**Current Turn:** {current_turn}
+**Environment:** {environment or 'Standard combat terrain'}
+**Special Conditions:** {special_conditions or 'None'}
+
+**Combatants:**
+{chr(10).join(combatant_lines) if combatant_lines else '- No combatants provided'}
+
+**Instructions:**
+- Keep the action clear and fast-moving
+- Describe attacks and reactions cinematically
+- Track tactical pressure and battlefield changes
+- End with a prompt for the next action"""
+
+
+def build_quest_narrative_prompt(
+    quest_title: str,
+    current_objective: str,
+    event_type: str,
+    party_status: str = None,
+    dm_notes: str = None,
+) -> str:
+    """Build a prompt for quest progress narration."""
+    return f"""Narrate this quest development for the players:
+
+**Quest:** {quest_title}
+**Current Objective:** {current_objective}
+**Event Type:** {event_type}
+**Party Status:** {party_status or 'Unknown'}
+**DM Notes:** {dm_notes or 'None'}
+
+**Instructions:**
+- Keep the quest stakes and momentum clear
+- Reflect how this event changes the situation
+- Reinforce the current objective without repeating it mechanically
+- End with a clear sense of what the party can do next"""
+
+
 # =============================================================================
 # DICE ROLL PROMPT
 # =============================================================================
@@ -838,11 +894,15 @@ class Prompts:
         npcs: List[str] = None
     ) -> str:
         """Get scene description prompt"""
-        return build_scene_description_prompt(
+        npc_payload = []
+        for npc in npcs or []:
+            npc_payload.append(npc if isinstance(npc, dict) else {'name': str(npc)})
+
+        return build_scene_prompt(
             location=location,
             mood=mood,
             details=details,
-            npcs_present=npcs
+            npcs_present=npc_payload
         )
     
     def get_roll_prompt(
@@ -1573,5 +1633,4 @@ This should make players excited to start their adventure!
 **OUTPUT:** Just the narrative text, no JSON formatting."""
 
     return prompt
-
 

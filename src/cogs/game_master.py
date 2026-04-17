@@ -889,6 +889,7 @@ class SessionManageView(discord.ui.View):
             return
         
         await self.game_master.bot.db.add_session_player(self.session['id'], char['id'])
+
         await interaction.response.send_message(
             f"✅ **{char['name']}** has joined **{self.session['name']}**! 🎉"
         )
@@ -1415,16 +1416,21 @@ class GameMaster(commands.Cog):
         }
         if not resume:
             state_updates['current_scene'] = 'Opening Scene'
-            if not existing_game_state or not existing_game_state.get('current_location'):
-                state_updates['current_location'] = 'Starting Location'
         else:
             if existing_game_state:
                 if existing_game_state.get('current_scene'):
                     state_updates['current_scene'] = existing_game_state['current_scene']
-                if existing_game_state.get('current_location'):
-                    state_updates['current_location'] = existing_game_state['current_location']
                 if existing_game_state.get('current_location_id'):
                     state_updates['current_location_id'] = existing_game_state['current_location_id']
+                    if existing_game_state.get('current_location'):
+                        state_updates['current_location'] = existing_game_state['current_location']
+                    get_location = getattr(self.db, 'get_location', None)
+                    if get_location:
+                        location = await get_location(existing_game_state['current_location_id'])
+                        if location:
+                            state_updates['current_location'] = location['name']
+                elif existing_game_state.get('current_location'):
+                    state_updates['current_location'] = existing_game_state['current_location']
 
         await self.db.save_game_state(session_id=session_id, **state_updates)
         

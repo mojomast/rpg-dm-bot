@@ -12,8 +12,6 @@ Before adding any new tool schema here, add and verify:
 TODO(contract-fixes): Do not add new story/world tools until these existing contract drifts are fixed:
 - story_items helper methods still target legacy columns instead of the real schema
 - story_events helper methods still target legacy columns/status semantics
-- quest stage consumers read `current_stage`, but that field is not canonical yet
-- current location handling is split between `current_location` text and `current_location_id`
 - move_party/location travel is not yet authoritative against normalized connections
 
 TODO(next-tool-surface): After the above fixes, add first-class schemas + handlers for:

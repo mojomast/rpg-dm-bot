@@ -213,16 +213,15 @@ class InfoButton(ui.Button):
             return
         
         game_state = await cog.db.get_game_state(session['id'])
-        if not game_state or not game_state.get('current_location_id'):
+        location = None
+        if game_state and game_state.get('current_location_id'):
+            location = await cog.db.get_location(game_state['current_location_id'])
+
+        if not location:
             loc_name = game_state.get('current_location', 'Unknown') if game_state else 'Unknown'
             await interaction.response.send_message(f"🗺️ Current location: **{loc_name}**", ephemeral=True)
             return
-        
-        location = await cog.db.get_location(game_state['current_location_id'])
-        if not location:
-            await interaction.response.send_message("🗺️ Location not found!", ephemeral=True)
-            return
-        
+
         embed = discord.Embed(
             title=f"🗺️ {location['name']}",
             description=location.get('description', '*No description*'),

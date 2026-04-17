@@ -2360,11 +2360,14 @@ Points of Interest: {pois}"""
         party = result.get('characters_full', [])
         game_state = result.get('game_state') or {}
         location = None
-        location_name = game_state.get('current_location')
-        if location_name:
+        current_location_id = game_state.get('current_location_id')
+        if current_location_id:
+            location = await self.db.get_location(current_location_id)
+        location_name = location.get('name') if location else game_state.get('current_location')
+        if not location and location_name:
             locations = await self.db.get_locations(session_id=session_id)
             location = next((loc for loc in locations if loc.get('name') == location_name), None)
-        npcs = await self.db.get_npcs_by_location(session.get('guild_id'), location_name) if location_name else []
+        npcs = await self.db.get_npcs_at_location(location['id']) if location else []
         active_quest = await self.db.get_quest(session.get('current_quest_id')) if session.get('current_quest_id') else None
         events = result.get('story_events', [])
         recent_story = result.get('story_log', [])

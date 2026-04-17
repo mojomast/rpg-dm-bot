@@ -29,6 +29,24 @@ class GamePersistence(commands.Cog):
     def llm(self):
         return self.bot.llm
 
+    async def _resolve_game_state_location(self, session_id: int, game_state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Resolve the authoritative session location, falling back to legacy text when needed."""
+        if not game_state:
+            return None
+
+        location_id = game_state.get('current_location_id')
+        if location_id:
+            location = await self.db.get_location(location_id)
+            if location:
+                return location
+
+        location_name = game_state.get('current_location')
+        if not location_name:
+            return None
+
+        locations = await self.db.get_locations(session_id=session_id)
+        return next((loc for loc in locations if loc.get('name') == location_name), None)
+
     async def _get_guild_session(self, guild_id: int, session_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a session only if it belongs to the current guild."""
         session = await self.db.get_session(session_id)
@@ -338,6 +356,7 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
         
         # Get recent story
         story_entries = await self.db.get_story_log(session['id'], limit=10)
+        current_location = await self._resolve_game_state_location(session['id'], game_state)
         
         # Mark session as active
         await self.db.update_session(session['id'], status='active')
@@ -365,7 +384,7 @@ RECENT EVENTS:
 {story_text}
 
 CURRENT SCENE: {game_state.get('current_scene', 'Unknown') if game_state else 'Unknown'}
-LOCATION: {game_state.get('current_location', 'Unknown') if game_state else 'Unknown'}
+LOCATION: {current_location.get('name', 'Unknown') if current_location else (game_state.get('current_location', 'Unknown') if game_state else 'Unknown')}
 
 Write 2-3 sentences reminding them where they were and what was happening, then ask "What do you do?" """
 
@@ -397,10 +416,10 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
         )
         
         if game_state:
-            if game_state.get('current_location'):
+            if current_location or game_state.get('current_location'):
                 embed.add_field(
                     name="📍 Location",
-                    value=game_state['current_location'],
+                    value=current_location.get('name') if current_location else game_state['current_location'],
                     inline=True
                 )
             if game_state.get('turn_count'):
@@ -468,9 +487,17 @@ Write 2-3 sentences reminding them where they were and what was happening, then 
                 })
         
         # Save state
+        existing_state = await self.db.get_game_state(session['id']) or {}
+        current_location = await self._resolve_game_state_location(session['id'], existing_state)
+        resolved_location = current_location
+        if location:
+            locations = await self.db.get_locations(session_id=session['id'])
+            resolved_location = next((loc for loc in locations if loc.get('name', '').lower() == location.lower()), None)
+
         await self.db.save_game_state(
             session_id=session['id'],
-            current_location=location,
+            current_location=resolved_location.get('name') if resolved_location else (location or existing_state.get('current_location')),
+            current_location_id=resolved_location.get('id') if resolved_location else existing_state.get('current_location_id'),
             dm_notes=note,
             game_data={
                 'party_snapshot': party_data,

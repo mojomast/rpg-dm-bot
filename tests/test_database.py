@@ -202,6 +202,96 @@ class TestSessionChannelBinding:
         assert session['id'] == session_id
 
 
+class TestFactions:
+    async def test_create_faction_and_get_members(self, db):
+        session_id = await db.create_session(guild_id=67890, name="Faction Test", dm_user_id=12345)
+        faction_id = await db.create_faction(
+            guild_id=67890,
+            session_id=session_id,
+            name="Verdant Circle",
+            description="Wardens of the old forest.",
+            created_by=12345,
+        )
+        npc_id = await db.create_npc(
+            guild_id=67890,
+            session_id=session_id,
+            name="Ilyra",
+            description="Forest scout",
+            personality="Quiet",
+            created_by=12345,
+        )
+
+        membership_id = await db.add_faction_member(faction_id=faction_id, actor_id=npc_id, role="scout")
+        members = await db.get_faction_members(faction_id)
+
+        assert membership_id > 0
+        assert len(members) == 1
+        assert members[0]['actor_id'] == npc_id
+        assert members[0]['role'] == 'scout'
+        assert members[0]['actor_name'] == 'Ilyra'
+
+    async def test_update_character_faction_reputation_clamps(self, db, sample_character_stats):
+        session_id = await db.create_session(guild_id=67890, name="Rep Test", dm_user_id=12345)
+        character_id = await db.create_character(
+            user_id=12345,
+            guild_id=67890,
+            name="Kara",
+            race="human",
+            char_class="warrior",
+            stats=sample_character_stats,
+            session_id=session_id,
+        )
+        faction_id = await db.create_faction(guild_id=67890, session_id=session_id, name="Iron Compact", created_by=12345)
+
+        reputation = await db.update_character_faction_reputation(character_id, faction_id, 250)
+        lowered = await db.update_character_faction_reputation(character_id, faction_id, -500)
+
+        assert reputation == 100
+        assert lowered == -100
+
+
+class TestStorylines:
+    async def test_create_storyline_and_advance_node(self, db):
+        session_id = await db.create_session(guild_id=67890, name="Storyline Test", dm_user_id=12345)
+        storyline_id = await db.create_storyline(
+            guild_id=67890,
+            session_id=session_id,
+            title="Ashes of Blackglass",
+            description="Investigate the burning ruins.",
+            created_by=12345,
+        )
+        start_node_id = await db.create_storyline_node(storyline_id, title="Arrival", is_start=True)
+        clue_node_id = await db.create_storyline_node(storyline_id, title="Hidden Vault")
+        await db.create_storyline_edge(storyline_id, start_node_id, clue_node_id)
+
+        result = await db.advance_storyline_node(storyline_id=storyline_id, to_node_id=clue_node_id, session_id=session_id)
+        storyline = await db.get_storyline(storyline_id)
+
+        assert result['success'] is True
+        assert result['current_node_id'] == clue_node_id
+        assert storyline['current_node_id'] == clue_node_id
+
+
+class TestPlotClues:
+    async def test_discover_clue_auto_reveals_plot_point_when_threshold_met(self, db):
+        session_id = await db.create_session(guild_id=67890, name="Clue Test", dm_user_id=12345)
+        plot_point_id = await db.create_plot_point(
+            title="The Duke Is Compromised",
+            session_id=session_id,
+            reveal_threshold=2,
+        )
+        first_clue_id = await db.create_plot_clue(plot_point_id, "A sealed letter", session_id=session_id)
+        second_clue_id = await db.create_plot_clue(plot_point_id, "A witness testimony", session_id=session_id)
+
+        first_result = await db.discover_clue(first_clue_id)
+        second_result = await db.discover_clue(second_clue_id)
+        plot_point = await db.get_plot_point(plot_point_id)
+
+        assert first_result['plot_point_revealed'] is False
+        assert second_result['plot_point_revealed'] is True
+        assert plot_point['is_revealed'] == 1
+
+
 class TestSnapshots:
     async def test_load_session_snapshot_restores_runtime_state(self, db, sample_character_stats):
         session_id = await db.create_session(

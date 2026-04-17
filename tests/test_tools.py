@@ -347,6 +347,42 @@ class TestCombatTools:
         assert "Error" in result
         assert "No active combat" in result
 
+    async def test_spawn_monster_uses_template_stat_block_and_sets_armor_class(self, tool_executor, mock_context):
+        """Template-backed monster spawn should load DB template fields into the combat participant snapshot."""
+        session_id = await tool_executor.db.create_session(67890, "Monster Test", 12345)
+        await tool_executor.db.update_session(session_id, status='active', content_pack_id='fantasy_core')
+        mock_context['session_id'] = session_id
+        await tool_executor.execute_tool("start_combat", {}, mock_context)
+        await tool_executor.db.create_monster_template(
+            template_id="ashen_wolf",
+            content_pack_id="fantasy_core",
+            session_id=session_id,
+            name="Ashen Wolf",
+            max_hp=18,
+            armor_class=14,
+            challenge_rating=2,
+            stats={"strength": 14, "dexterity": 16},
+            actions=[{"name": "Bite", "damage": "1d8+3"}],
+            traits=[{"name": "Pack Hunter", "text": "+2 near allies"}],
+        )
+
+        result = await tool_executor.execute_tool(
+            "spawn_monster",
+            {"template_id": "ashen_wolf", "count": 1},
+            mock_context,
+        )
+
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        combatants = await tool_executor.db.get_combatants(combat['id'])
+        enemy = next(c for c in combatants if c['participant_type'] == 'enemy')
+
+        assert "Spawned 1 monster" in result
+        assert enemy['name'] == 'Ashen Wolf'
+        assert enemy['armor_class'] == 14
+        assert enemy['template_id'] == 'ashen_wolf'
+        assert enemy['combat_stats']['actions'][0]['name'] == 'Bite'
+        assert enemy['combat_stats']['traits'][0]['name'] == 'Pack Hunter'
+
     async def test_roll_initiative(self, tool_executor, mock_context):
         """Test rolling initiative"""
         # Start combat and add enemies
@@ -555,6 +591,23 @@ class TestCombatTools:
 
         assert "vs AC 15" in result
         assert "MISS" in result
+
+    async def test_create_faction_tool(self, tool_executor, mock_context):
+        """Faction tool should create and persist a faction."""
+        session_id = await tool_executor.db.create_session(67890, "Faction Tool Test", 12345)
+        await tool_executor.db.update_session(session_id, status='active')
+        mock_context['session_id'] = session_id
+
+        result = await tool_executor.execute_tool(
+            "create_faction",
+            {"name": "Lantern Accord", "description": "City watch allies"},
+            mock_context,
+        )
+        factions = await tool_executor.db.get_factions(session_id=session_id)
+
+        assert "Created faction" in result
+        assert len(factions) == 1
+        assert factions[0]['name'] == 'Lantern Accord'
 
 
 # =============================================================================

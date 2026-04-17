@@ -28,7 +28,12 @@ from src.llm import LLMClient
 from src.prompts import Prompts
 from src.tool_schemas import ToolSchemas
 from src.tools import ToolExecutor
-from src.content_packs import DEFAULT_CONTENT_PACK_ID, load_content_file
+from src.content_loader import (
+    DEFAULT_CONTENT_PACK_ID,
+    get_content_packs_manifest,
+    get_pack_data,
+    get_themes_manifest,
+)
 
 logger = logging.getLogger('rpg.api')
 
@@ -102,6 +107,12 @@ class LocationCreate(BaseModel):
     session_id: Optional[int] = None
     description: Optional[str] = None
     location_type: str = "generic"
+    slug: Optional[str] = None
+    hierarchy_kind: str = "location"
+    tags: List[str] = []
+    dm_notes: Optional[str] = None
+    is_hidden: bool = False
+    discoverability: str = "visible"
     points_of_interest: List[str] = []
     current_weather: Optional[str] = None
     danger_level: int = 0
@@ -111,6 +122,12 @@ class LocationUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     location_type: Optional[str] = None
+    slug: Optional[str] = None
+    hierarchy_kind: Optional[str] = None
+    tags: Optional[List[str]] = None
+    dm_notes: Optional[str] = None
+    is_hidden: Optional[bool] = None
+    discoverability: Optional[str] = None
     current_weather: Optional[str] = None
     danger_level: Optional[int] = None
     hidden_secrets: Optional[str] = None
@@ -603,6 +620,14 @@ async def get_location(location_id: int):
     if not loc:
         raise HTTPException(status_code=404, detail="Location not found")
     return loc
+
+@app.get("/api/locations/{location_id}/adjacent")
+async def get_adjacent_locations(location_id: int):
+    """Get visible adjacent locations for a specific location."""
+    loc = await db.get_location(location_id)
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"locations": await db.get_nearby_locations(location_id)}
 
 @app.post("/api/locations")
 async def create_location(location: LocationCreate):
@@ -1156,7 +1181,7 @@ async def get_npc_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
 async def get_enemy_templates(content_pack_id: str = DEFAULT_CONTENT_PACK_ID):
     """Get monster templates for combat spawning."""
     try:
-        data = load_content_file("enemies.json", content_pack_id)
+        data = get_pack_data(content_pack_id, "enemies.json")
         templates = []
         for template_id, template in data.get('enemies', {}).items():
             row = dict(template)
@@ -1174,7 +1199,7 @@ def load_game_data(filename: str, content_pack_id: str = DEFAULT_CONTENT_PACK_ID
     """Load game data from JSON file"""
     try:
         if use_content_pack and "/" not in filename:
-            return load_content_file(filename, content_pack_id)
+            return get_pack_data(content_pack_id, filename)
 
         filepath = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
@@ -1189,7 +1214,13 @@ def load_game_data(filename: str, content_pack_id: str = DEFAULT_CONTENT_PACK_ID
 @app.get("/api/content-packs")
 async def get_content_packs():
     """List available content packs."""
-    return load_game_data("manifests/content_packs.json", use_content_pack=False)
+    return get_content_packs_manifest()
+
+
+@app.get("/api/themes")
+async def get_themes():
+    """List available world themes."""
+    return get_themes_manifest()
 
 def save_game_data(filename: str, data: Dict[str, Any]) -> bool:
     """Save game data to JSON file"""
@@ -2104,6 +2135,7 @@ async def finalize_campaign(data: CampaignFinalize):
     async with aiosqlite.connect(db.db_path) as conn:
         conn.row_factory = aiosqlite.Row
         now = datetime.utcnow().isoformat()
+        themes_manifest = get_themes_manifest()
         world_state = {
             "world_setting": data.world_setting,
             "factions": data.factions,
@@ -2111,24 +2143,35 @@ async def finalize_campaign(data: CampaignFinalize):
         }
         
         world_theme = data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'fantasy'
-        content_pack_id = DEFAULT_CONTENT_PACK_ID
+        theme_manifest = themes_manifest.get('themes', {}).get(world_theme) or themes_manifest.get('themes', {}).get(themes_manifest.get('default_theme', 'fantasy')) or {}
+        content_pack_id = theme_manifest.get('default_content_pack_id', DEFAULT_CONTENT_PACK_ID)
+        rules_profile_id = theme_manifest.get('default_rules_profile_id', 'd20_fantasy')
+        genre_family = theme_manifest.get('genre_family', world_theme or 'fantasy')
+        theme_config = {
+            'magic_level': data.generation_settings.get('magic_level'),
+            'technology_level': data.generation_settings.get('technology_level'),
+            'tone': data.generation_settings.get('tone'),
+        }
 
         # Create the session (set to 'active' so it's immediately playable)
         cursor = await conn.execute("""
             INSERT INTO sessions (
                 guild_id, name, description, dm_user_id, status, setting, world_state,
-                world_theme, content_pack_id, created_at
+                world_theme, content_pack_id, genre_family, rules_profile_id, theme_config, created_at
             )
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data.guild_id,
             data.name,
             data.description or data.starting_scenario[:200],
             data.dm_user_id,
-            world_theme,
+            data.world_setting.get('name') or data.name,
             json.dumps(world_state),
             world_theme,
             content_pack_id,
+            genre_family,
+            rules_profile_id,
+            json.dumps(theme_config),
             now,
         ))
         session_id = cursor.lastrowid
@@ -2139,8 +2182,11 @@ async def finalize_campaign(data: CampaignFinalize):
         
         # Create game state
         await conn.execute("""
-            INSERT INTO game_state (session_id, current_scene, current_location, current_location_id, dm_notes)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO game_state (
+                session_id, current_scene, current_location, current_location_id, dm_notes,
+                active_content_pack_id, theme_state, allowed_content_packs
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             session_id,
             data.starting_scenario,
@@ -2152,7 +2198,10 @@ async def finalize_campaign(data: CampaignFinalize):
                 "generation_settings": data.generation_settings,
                 "campaign_description": data.description,
                 "active_content_pack_id": content_pack_id,
-            })
+            }),
+            content_pack_id,
+            json.dumps(theme_config),
+            json.dumps([content_pack_id]),
         ))
         
         location_id_map = {}  # Map preview IDs to real IDs

@@ -7,6 +7,21 @@ Edit these to customize the DM's personality and behavior.
 from typing import Dict, Any, List
 
 
+def _get_theme_label(session_context: Dict[str, Any] | None) -> str:
+    theme = (session_context or {}).get('world_theme') or 'fantasy'
+    return theme.replace('_', ' ').title()
+
+
+def _get_setting_label(session_context: Dict[str, Any] | None) -> str:
+    setting = (session_context or {}).get('setting')
+    if setting:
+        return setting
+    theme = (session_context or {}).get('world_theme') or 'fantasy'
+    if theme == 'fantasy':
+        return 'Fantasy World'
+    return 'Campaign World'
+
+
 # =============================================================================
 # MAIN DM PERSONALITY
 # =============================================================================
@@ -472,7 +487,8 @@ Combatants:
         sections.append(f"""
 **CURRENT SESSION:**
 Campaign: {session_context.get('name', 'Unknown')}
-Setting: {session_context.get('setting', 'Fantasy World')}
+Theme: {_get_theme_label(session_context)}
+Setting: {_get_setting_label(session_context)}
 Session Notes: {session_context.get('session_notes', 'None')}
 """)
     
@@ -1633,4 +1649,3 @@ This should make players excited to start their adventure!
 **OUTPUT:** Just the narrative text, no JSON formatting."""
 
     return prompt
-

@@ -12,6 +12,46 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 
+JSON_SESSION_FIELDS = {'world_state', 'theme_config'}
+JSON_GAME_STATE_FIELDS = {'game_data', 'theme_state', 'allowed_content_packs'}
+
+
+def _loads_json_value(value: Any, default: Any):
+    if value in (None, ''):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return default
+
+
+def _dumps_json_value(value: Any, default: Any) -> str:
+    if value is None:
+        value = default
+    return json.dumps(value)
+
+
+def _normalize_session_record(session: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if session is None:
+        return None
+    normalized = dict(session)
+    for field in JSON_SESSION_FIELDS:
+        normalized[field] = _loads_json_value(normalized.get(field), {} if field != 'theme_config' else {})
+    return normalized
+
+
+def _normalize_game_state_record(state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if state is None:
+        return None
+    normalized = dict(state)
+    normalized['game_data'] = _loads_json_value(normalized.get('game_data'), {})
+    normalized['theme_state'] = _loads_json_value(normalized.get('theme_state'), {})
+    normalized['allowed_content_packs'] = _loads_json_value(normalized.get('allowed_content_packs'), [])
+    return normalized
+
+
 class Database:
     def __init__(self, db_path: str = "data/rpg.db"):
         self.db_path = db_path
@@ -215,8 +255,11 @@ class Database:
                     status TEXT DEFAULT 'inactive',
                     max_players INTEGER DEFAULT 6,
                     current_quest_id INTEGER,
-                    world_theme TEXT DEFAULT 'fantasy',
-                    content_pack_id TEXT DEFAULT 'fantasy_core',
+                    world_theme TEXT NOT NULL DEFAULT 'fantasy',
+                    content_pack_id TEXT NOT NULL DEFAULT 'fantasy_core',
+                    genre_family TEXT NOT NULL DEFAULT 'fantasy',
+                    rules_profile_id TEXT NOT NULL DEFAULT 'd20_fantasy',
+                    theme_config TEXT NOT NULL DEFAULT '{}',
                     setting TEXT,
                     world_state TEXT DEFAULT '{}',
                     session_notes TEXT,
@@ -356,6 +399,9 @@ class Database:
                     dm_notes TEXT,
                     last_activity TEXT,
                     turn_count INTEGER DEFAULT 0,
+                    active_content_pack_id TEXT,
+                    theme_state TEXT NOT NULL DEFAULT '{}',
+                    allowed_content_packs TEXT NOT NULL DEFAULT '[]',
                     game_data TEXT DEFAULT '{}',
                     FOREIGN KEY (session_id) REFERENCES sessions(id),
                     FOREIGN KEY (current_location_id) REFERENCES locations(id)
@@ -609,6 +655,15 @@ class Database:
             if 'content_pack_id' not in columns:
                 await db.execute("ALTER TABLE sessions ADD COLUMN content_pack_id TEXT DEFAULT 'fantasy_core'")
                 await db.commit()
+            if 'genre_family' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN genre_family TEXT DEFAULT 'fantasy'")
+                await db.commit()
+            if 'rules_profile_id' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN rules_profile_id TEXT DEFAULT 'd20_fantasy'")
+                await db.commit()
+            if 'theme_config' not in columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN theme_config TEXT DEFAULT '{}'")
+                await db.commit()
             if 'primary_channel_id' not in columns:
                 await db.execute("ALTER TABLE sessions ADD COLUMN primary_channel_id INTEGER")
                 await db.commit()
@@ -624,6 +679,15 @@ class Database:
 
             if 'current_location_id' not in columns:
                 await db.execute("ALTER TABLE game_state ADD COLUMN current_location_id INTEGER")
+                await db.commit()
+            if 'active_content_pack_id' not in columns:
+                await db.execute("ALTER TABLE game_state ADD COLUMN active_content_pack_id TEXT")
+                await db.commit()
+            if 'theme_state' not in columns:
+                await db.execute("ALTER TABLE game_state ADD COLUMN theme_state TEXT DEFAULT '{}'")
+                await db.commit()
+            if 'allowed_content_packs' not in columns:
+                await db.execute("ALTER TABLE game_state ADD COLUMN allowed_content_packs TEXT DEFAULT '[]'")
                 await db.commit()
         except Exception:
             pass
@@ -749,7 +813,19 @@ class Database:
             await db.execute("""
                 UPDATE sessions
                 SET world_theme = COALESCE(NULLIF(world_theme, ''), 'fantasy'),
-                    content_pack_id = COALESCE(NULLIF(content_pack_id, ''), 'fantasy_core')
+                    content_pack_id = COALESCE(NULLIF(content_pack_id, ''), 'fantasy_core'),
+                    genre_family = COALESCE(NULLIF(genre_family, ''), 'fantasy'),
+                    rules_profile_id = COALESCE(NULLIF(rules_profile_id, ''), 'd20_fantasy'),
+                    theme_config = COALESCE(NULLIF(theme_config, ''), '{}')
+            """)
+
+            await db.execute("""
+                UPDATE game_state
+                SET active_content_pack_id = COALESCE(NULLIF(active_content_pack_id, ''), (
+                        SELECT s.content_pack_id FROM sessions s WHERE s.id = game_state.session_id
+                    ), 'fantasy_core'),
+                    theme_state = COALESCE(NULLIF(theme_state, ''), '{}'),
+                    allowed_content_packs = COALESCE(NULLIF(allowed_content_packs, ''), '[]')
             """)
 
             await db.execute("""
@@ -2461,9 +2537,15 @@ class Database:
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO sessions (guild_id, name, description, dm_user_id, setting, max_players, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (guild_id, name, description, dm_user_id, setting, max_players, now))
+                INSERT INTO sessions (
+                    guild_id, name, description, dm_user_id, setting, max_players,
+                    world_theme, content_pack_id, genre_family, rules_profile_id, theme_config, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                guild_id, name, description, dm_user_id, setting, max_players,
+                'fantasy', 'fantasy_core', 'fantasy', 'd20_fantasy', '{}', now,
+            ))
             await db.commit()
             return cursor.lastrowid
     
@@ -2474,9 +2556,7 @@ class Database:
             cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
             row = await cursor.fetchone()
             if row:
-                session = dict(row)
-                session['world_state'] = json.loads(session['world_state'])
-                return session
+                return _normalize_session_record(dict(row))
             return None
     
     async def get_full_session_state(self, session_id: int) -> Optional[Dict[str, Any]]:
@@ -2542,8 +2622,7 @@ class Database:
             sessions = []
             for row in rows:
                 session = dict(row)
-                session['world_state'] = json.loads(session['world_state'])
-                sessions.append(session)
+                sessions.append(_normalize_session_record(session))
             return sessions
     
     async def get_active_session(self, guild_id: int) -> Optional[Dict[str, Any]]:
@@ -2556,9 +2635,7 @@ class Database:
             """, (guild_id,))
             row = await cursor.fetchone()
             if row:
-                session = dict(row)
-                session['world_state'] = json.loads(session['world_state'])
-                return session
+                return _normalize_session_record(dict(row))
             return None
     
     async def start_session(self, session_id: int) -> bool:
@@ -2614,8 +2691,7 @@ class Database:
             row = await cursor.fetchone()
             if row:
                 session = dict(row)
-                session['world_state'] = json.loads(session['world_state']) if session.get('world_state') else {}
-                return session
+                return _normalize_session_record(session)
             return None
     
     async def end_session(self, session_id: int) -> bool:
@@ -2896,6 +2972,10 @@ class Database:
         """Update session fields"""
         if not kwargs:
             return False
+
+        for field in JSON_SESSION_FIELDS:
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], {})
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [session_id]
@@ -2965,8 +3045,7 @@ class Database:
             row = await cursor.fetchone()
             if row:
                 session = dict(row)
-                session['world_state'] = json.loads(session['world_state']) if session.get('world_state') else {}
-                return session
+                return _normalize_session_record(session)
             return None
     
     async def get_npcs(self, guild_id: int, location: str = None) -> List[Dict[str, Any]]:
@@ -3228,9 +3307,7 @@ class Database:
             )
             row = await cursor.fetchone()
             if row:
-                state = dict(row)
-                state['game_data'] = json.loads(state['game_data']) if state.get('game_data') else {}
-                return state
+                return _normalize_game_state_record(dict(row))
             return None
 
     async def save_session_snapshot(
@@ -3329,6 +3406,9 @@ class Database:
                         'current_quest_id': session.get('current_quest_id'),
                         'world_theme': session.get('world_theme'),
                         'content_pack_id': session.get('content_pack_id'),
+                        'genre_family': session.get('genre_family'),
+                        'rules_profile_id': session.get('rules_profile_id'),
+                        'theme_config': json.dumps(session.get('theme_config') or {}),
                         'setting': session.get('setting'),
                         'world_state': json.dumps(session.get('world_state') or {}),
                         'session_notes': session.get('session_notes'),
@@ -3629,7 +3709,7 @@ class Database:
                     if current_location_id in location_id_map:
                         current_location_id = location_id_map[current_location_id]
                     await db.execute(
-                        "INSERT INTO game_state (session_id, current_scene, current_location, current_location_id, dm_notes, last_activity, turn_count, game_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO game_state (session_id, current_scene, current_location, current_location_id, dm_notes, last_activity, turn_count, active_content_pack_id, theme_state, allowed_content_packs, game_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             session_id,
                             game_state.get('current_scene'),
@@ -3638,6 +3718,9 @@ class Database:
                             game_state.get('dm_notes'),
                             game_state.get('last_activity'),
                             game_state.get('turn_count', 0),
+                            game_state.get('active_content_pack_id'),
+                            json.dumps(game_state.get('theme_state') or {}),
+                            json.dumps(game_state.get('allowed_content_packs') or []),
                             json.dumps(game_state.get('game_data') or {}),
                         ),
                     )

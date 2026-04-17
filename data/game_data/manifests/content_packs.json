@@ -4,6 +4,7 @@
     "fantasy_core": {
       "id": "fantasy_core",
       "theme": "fantasy",
+      "data_path": "packs/fantasy/core",
       "path": "packs/fantasy/core",
       "label": "Fantasy Core",
       "status": "active"

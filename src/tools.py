@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 import json
 import logging
 
-from src.content_packs import load_content_file, load_session_content_file
+from src.content_loader import DEFAULT_CONTENT_PACK_ID, get_pack_data
 from src.tool_schemas import TOOLS_SCHEMA, get_tool_names
 from src.mechanics_tracker import get_tracker, MechanicType
 
@@ -102,7 +102,8 @@ class ToolExecutor:
     async def _load_theme_content(self, context: Dict[str, Any], filename: str) -> Dict[str, Any]:
         """Load static content from the active session's content pack, defaulting to fantasy_core."""
         session = await self._get_session_for_context(context)
-        return load_session_content_file(session, filename)
+        content_pack_id = (session or {}).get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        return get_pack_data(content_pack_id, filename)
 
     async def _get_context_character(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Prefer an explicit character in context before active-character lookup."""
@@ -1542,7 +1543,8 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
                 'guild_id': character.get('guild_id') if character else None,
                 'user_id': character.get('user_id') if character else None,
             })
-            classes_data = load_session_content_file(session, 'classes.json')
+            content_pack_id = (session or {}).get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+            classes_data = get_pack_data(content_pack_id, 'classes.json')
         except FileNotFoundError:
             classes_data = {}
         
@@ -1708,7 +1710,7 @@ Points of Interest: {pois}"""
             lines.append(f"{danger}[{loc['id']}] **{loc['name']}** ({loc['location_type']})")
         
         return "\n".join(lines)
-    
+
     async def _update_location(self, args: Dict) -> str:
         """Update location"""
         location_id = args.get('location_id')

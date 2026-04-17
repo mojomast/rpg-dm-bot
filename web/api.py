@@ -9,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import json
@@ -28,12 +31,23 @@ from src.tools import ToolExecutor
 
 logger = logging.getLogger('rpg.api')
 
+
+def get_client_ip(request: Request) -> str:
+    """Resolve client IP, preferring proxy-forwarded addresses."""
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return get_remote_address(request)
+
 # Initialize FastAPI app
 app = FastAPI(
     title="RPG DM Bot Manager",
     description="Web management interface for the AI Dungeon Master bot",
     version="1.0.0"
 )
+limiter = Limiter(key_func=get_client_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Initialize LLM client for worldbuilding (if API key available)
 REQUESTY_API_KEY = os.getenv('REQUESTY_API_KEY')
@@ -340,19 +354,21 @@ async def update_session(session_id: int, session: SessionUpdate):
     return {"message": "Session updated"}
 
 
-@app.post("/api/chat", response_model=ChatResponse)
 @app.post("/api/chat/identity", response_model=ChatIdentityResponse)
 async def create_chat_identity(http_request: Request):
     """Issue a server-generated browser chat identity."""
-    forwarded_for = http_request.headers.get("x-forwarded-for")
-    client_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else (http_request.client.host if http_request.client else None)
     identity = generate_web_identity_uuid()
-    await db.create_web_identity(identity, hash_ip_address(client_ip))
+    await db.create_web_identity(identity, hash_ip_address(get_client_ip(http_request)))
     return ChatIdentityResponse(user_id=identity)
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_with_dm(request: ChatRequest, x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity")):
+@limiter.limit("10/minute")
+async def chat_with_dm(
+    http_request: Request,
+    request: ChatRequest,
+    x_web_identity: Optional[str] = Header(None, alias="X-Web-Identity"),
+):
     """Send a message to the AI DM and get a response."""
     handler = get_chat_handler()
     session = await db.get_session(request.session_id)

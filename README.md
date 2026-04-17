@@ -2,8 +2,6 @@
 
 An AI-powered Discord bot that serves as a Dungeon Master for tabletop RPG games. Features persistent characters, combat mechanics, inventory management, interactive NPCs, multiplayer sessions, AI-driven storytelling, and a web dashboard for game management.
 
-> **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot. The AI designed the architecture, implemented all features, wrote tests, and created documentation autonomously.
-
 ## Current State
 
 The repo already has substantial working systems for Discord play, browser chat, persistence, combat, quests, NPCs, and dashboard administration. The main runtime path is now session-based across Discord and browser, with shared session state, theme/content-pack persistence, and browser-chat continuity.

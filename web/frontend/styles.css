@@ -490,6 +490,10 @@ body {
     color: white;
 }
 
+.hidden {
+    display: none !important;
+}
+
 .btn-small {
     padding: 0.5rem 0.75rem;
     font-size: 0.75rem;
@@ -813,6 +817,13 @@ form {
     text-align: right;
 }
 
+.detail-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
 .combat-participant {
     display: block;
 }
@@ -956,6 +967,200 @@ form {
     color: var(--text-muted);
     font-style: italic;
     font-size: 0.9rem;
+}
+
+/* ============================================================================
+   CHAT + CAMPAIGN STUDIO
+   ============================================================================ */
+
+.chat-layout,
+.studio-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+    gap: 1.5rem;
+}
+
+.chat-panel,
+.chat-state-panel,
+.studio-shell,
+.studio-overview-panel,
+.studio-span-full {
+    min-width: 0;
+}
+
+.studio-span-full {
+    grid-column: 1 / -1;
+}
+
+.chat-panel,
+.chat-state-panel,
+.studio-shell .detail-panel,
+.studio-overview-panel,
+.studio-card-block,
+.studio-tree-card,
+.tool-result-card,
+.state-block {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+}
+
+.chat-panel,
+.chat-state-panel,
+.studio-overview-panel,
+.studio-shell .detail-panel {
+    padding: 1rem;
+}
+
+.chat-toolbar,
+.studio-toolbar,
+.studio-action-row,
+.studio-inline-actions,
+.studio-stat-row,
+.chat-quick-actions,
+.chat-input-row,
+.studio-section-header,
+.studio-columns {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.chat-toolbar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 150px;
+}
+
+.chat-toolbar-group label,
+.studio-muted,
+.chat-message-meta {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.chat-toolbar select,
+.studio-toolbar select,
+.chat-input-row textarea {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+}
+
+.chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 420px;
+    max-height: 720px;
+    overflow-y: auto;
+    margin: 1rem 0;
+}
+
+.chat-message {
+    padding: 0.9rem 1rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-medium);
+}
+
+.chat-message.user {
+    border-color: rgba(155, 89, 182, 0.45);
+}
+
+.chat-message.assistant {
+    border-color: rgba(243, 156, 18, 0.35);
+}
+
+.chat-message.mechanics {
+    border-color: rgba(46, 204, 113, 0.35);
+}
+
+.chat-typing {
+    margin-bottom: 0.75rem;
+    color: var(--text-muted);
+}
+
+.chat-tool-feedback,
+.chat-session-state,
+.detail-stack,
+.studio-tree-node {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.tool-result-card,
+.state-block,
+.studio-card-block,
+.studio-tree-card {
+    padding: 0.85rem 1rem;
+}
+
+.state-block h4,
+.studio-shell h3,
+.studio-shell h4,
+.studio-shell h5 {
+    color: var(--accent-gold);
+    margin-bottom: 0.4rem;
+}
+
+.chat-input-row {
+    align-items: flex-end;
+}
+
+.chat-input-row textarea {
+    flex: 1;
+    min-height: 88px;
+    padding: 0.75rem 1rem;
+    resize: vertical;
+}
+
+.studio-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.studio-columns > * {
+    flex: 1 1 320px;
+}
+
+.studio-section-header {
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.studio-action-row {
+    margin-top: 1rem;
+}
+
+.studio-copy,
+.studio-text-block {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
+.studio-text-block {
+    padding: 0.85rem 1rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.studio-tree-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.studio-quest-row,
+.studio-cast-row {
+    align-items: center;
 }
 
 /* ============================================================================
@@ -1512,13 +1717,18 @@ form {
         justify-content: flex-end;
     }
 
-    .chat-layout {
+    .chat-layout,
+    .studio-grid {
         grid-template-columns: 1fr;
     }
 
     .chat-toolbar,
-    .chat-input-row {
-        grid-template-columns: 1fr;
+    .chat-input-row,
+    .studio-toolbar,
+    .studio-action-row,
+    .studio-section-header,
+    .studio-columns {
+        flex-direction: column;
     }
 }
 

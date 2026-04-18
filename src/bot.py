@@ -119,6 +119,7 @@ class RPGBot(commands.Bot):
             'src.cogs.dice',
             'src.cogs.sessions',
             'src.cogs.dm_chat',
+            'src.cogs.world',
             'src.cogs.game_master',
             'src.cogs.game_persistence',
             'src.cogs.spells',

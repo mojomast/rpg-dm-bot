@@ -98,12 +98,20 @@ NPC Tools:
 - `generate_npc` - AI-assisted NPC creation with templates
 - `update_npc_relationship` - Change NPC disposition
 - `get_npcs_at_location` - See what NPCs are at a location
+- `reveal_npc` - Mark an NPC as encountered and visible to players
+
+Faction Tools:
+- `get_factions` - List factions in the current campaign
+- `create_faction` - Create a faction in the world
+- `update_faction_reputation` - Change or set a character's reputation with a faction
+- `get_character_faction_reputation` - Review a character's standing with factions
 
 Location & Movement Tools:
 - `create_location` - Create a new location in the world
 - `get_location` - Get details about a location
 - `get_nearby_locations` - Find connected/nearby areas
 - `update_location` - Modify location properties
+- `reveal_location` - Reveal a location to players
 - `move_party_to_location` - Move entire party to a location
 - `move_character_to_location` - Move a single character
 - `get_characters_at_location` - See who's at a location

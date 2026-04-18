@@ -242,6 +242,10 @@ class ToolExecutor:
                 return await self._update_faction_reputation(tool_args)
             elif tool_name == "get_character_faction_reputation":
                 return await self._get_character_faction_reputation(tool_args)
+            elif tool_name == "reveal_location":
+                return await self._reveal_location(context, tool_args)
+            elif tool_name == "reveal_npc":
+                return await self._reveal_npc(context, tool_args)
             elif tool_name == "spawn_monster":
                 return await self._spawn_monster(context, tool_args)
             elif tool_name == "get_stat_block":
@@ -359,7 +363,7 @@ class ToolExecutor:
             elif tool_name == "complete_quest_with_rewards":
                 return await self._complete_quest_with_rewards(context, tool_args)
             elif tool_name == "get_comprehensive_session_state":
-                return await self._get_comprehensive_session_state(tool_args)
+                return await self._get_comprehensive_session_state(context, tool_args)
             
             # Generative AI / Worldbuilding tools
             elif tool_name == "generate_world":
@@ -1312,6 +1316,16 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
 
     async def _update_faction_reputation(self, args: Dict) -> str:
         """Update character faction reputation."""
+        if args.get('reputation') is not None or args.get('tier') is not None:
+            record = await self.db.upsert_character_faction_reputation(
+                character_id=args.get('character_id'),
+                faction_id=args.get('faction_id'),
+                reputation=args.get('reputation', 0),
+                tier=args.get('tier', 'neutral'),
+                notes=args.get('notes'),
+            )
+            return f"Faction reputation set to {record.get('reputation', 0)} ({record.get('tier', 'neutral')})."
+
         reputation = await self.db.update_character_faction_reputation(
             character_id=args.get('character_id'),
             faction_id=args.get('faction_id'),
@@ -1327,10 +1341,36 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
             faction_id=args.get('faction_id'),
         )
         if isinstance(records, dict):
-            return f"Faction reputation: {records.get('reputation', 0)}"
+            return f"Faction reputation: {records.get('reputation', 0)} ({records.get('tier', 'neutral')})"
         if not records:
             return "No faction reputation found."
-        return "\n".join(["**Faction Reputation:**"] + [f"- {row['faction_name']}: {row['reputation']}" for row in records])
+        return "\n".join(["**Faction Reputation:**"] + [f"- {row['faction_name']}: {row['reputation']} ({row.get('tier', 'neutral')})" for row in records])
+
+    async def _reveal_location(self, context: Dict, args: Dict) -> str:
+        """Reveal a location to players."""
+        session = await self._get_session_for_context(context)
+        location = None
+        if args.get('location_id'):
+            location = await self.db.get_location(args.get('location_id'))
+        elif session and args.get('location_name'):
+            location = await self.db.get_location_by_name(session['id'], args.get('location_name'))
+        if not location:
+            return "Error: Location not found"
+        await self.db.reveal_location(location['id'])
+        return f"Location revealed: **{location['name']}**"
+
+    async def _reveal_npc(self, context: Dict, args: Dict) -> str:
+        """Reveal an NPC to players."""
+        session = await self._get_session_for_context(context)
+        npc = None
+        if args.get('npc_id'):
+            npc = await self.db.get_npc(args.get('npc_id'))
+        elif session and args.get('npc_name'):
+            npc = await self.db.get_npc_by_name(session['id'], args.get('npc_name'))
+        if not npc:
+            return "Error: NPC not found"
+        await self.db.reveal_npc(npc['id'])
+        return f"NPC revealed: **{npc['name']}**"
 
     async def _spawn_monster(self, context: Dict, args: Dict) -> str:
         """Spawn one or more template-backed monsters into the active combat."""
@@ -1419,11 +1459,16 @@ Notes: {relationship.get('relationship_notes') or 'No prior interactions'}"""
 
     async def _get_storyline_state(self, context: Dict, args: Dict) -> str:
         """Get storyline graph state for the current session."""
+        storyline_id = args.get('storyline_id')
+        if storyline_id:
+            state = await self.db.get_storyline_state(storyline_id, character_id=args.get('character_id'))
+            return json.dumps(state, indent=2, sort_keys=True)
+
         session = await self._get_session_for_context(context)
         session_id = args.get('session_id') or (session or {}).get('id')
         if not session_id:
             return "Error: No active session."
-        state = await self.db.get_storyline_state(session_id)
+        state = await self.db.get_session_storyline_state(session_id)
         return json.dumps(state, indent=2, sort_keys=True)
 
     async def _advance_storyline_node(self, context: Dict, args: Dict) -> str:
@@ -2630,9 +2675,12 @@ Points of Interest: {pois}"""
         
         return "\n".join(lines)
     
-    async def _get_comprehensive_session_state(self, args: Dict) -> str:
+    async def _get_comprehensive_session_state(self, context: Dict, args: Dict) -> str:
         """Get complete session state for context"""
-        session_id = args.get('session_id')
+        session = await self._get_session_for_context(context)
+        session_id = args.get('session_id') or (session or {}).get('id')
+        if not session_id:
+            return "Error: No active session"
         
         result = await self.db.get_comprehensive_session_state(session_id)
 

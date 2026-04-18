@@ -368,9 +368,11 @@ UPDATE_FACTION_REPUTATION_SCHEMA = {
                 "character_id": {"type": "integer", "description": "Character ID"},
                 "faction_id": {"type": "integer", "description": "Faction ID"},
                 "reputation_change": {"type": "integer", "description": "Signed reputation delta"},
+                "reputation": {"type": "integer", "description": "Optional absolute reputation value (-100 to 100)"},
+                "tier": {"type": "string", "description": "Optional explicit reputation tier"},
                 "notes": {"type": "string", "description": "Optional update notes"}
             },
-            "required": ["character_id", "faction_id", "reputation_change"]
+            "required": ["character_id", "faction_id"]
         }
     }
 }
@@ -428,7 +430,39 @@ GET_STORYLINE_STATE_SCHEMA = {
     "function": {
         "name": "get_storyline_state",
         "description": "Get storyline graph and progress state for the current session.",
-        "parameters": {"type": "object", "properties": {"session_id": {"type": "integer", "description": "Optional session override"}}, "required": []}
+        "parameters": {"type": "object", "properties": {"session_id": {"type": "integer", "description": "Optional session override"}, "storyline_id": {"type": "integer", "description": "Optional storyline ID for a single storyline"}, "character_id": {"type": "integer", "description": "Optional character-specific progress owner"}}, "required": []}
+    }
+}
+
+REVEAL_LOCATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "reveal_location",
+        "description": "Reveal a hidden location to players.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location_id": {"type": "integer", "description": "Location ID"},
+                "location_name": {"type": "string", "description": "Location name in the current session"}
+            },
+            "required": []
+        }
+    }
+}
+
+REVEAL_NPC_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "reveal_npc",
+        "description": "Mark an NPC as encountered and visible to players.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "npc_id": {"type": "integer", "description": "NPC ID"},
+                "npc_name": {"type": "string", "description": "NPC name in the current session"}
+            },
+            "required": []
+        }
     }
 }
 
@@ -462,7 +496,8 @@ CREATE_PLOT_POINT_SCHEMA = {
                 "title": {"type": "string", "description": "Plot point title"},
                 "description": {"type": "string", "description": "Plot point description"},
                 "storyline_id": {"type": "integer", "description": "Optional storyline ID"},
-                "reveal_threshold": {"type": "integer", "description": "Number of discovered clues required to reveal it"}
+                "reveal_threshold": {"type": "integer", "description": "Number of discovered clues required to reveal it"},
+                "metadata_json": {"type": "object", "description": "Optional structured metadata"}
             },
             "required": ["title"]
         }
@@ -2450,6 +2485,7 @@ TOOLS_SCHEMA = [
     CREATE_FACTION_SCHEMA,
     UPDATE_FACTION_REPUTATION_SCHEMA,
     GET_CHARACTER_FACTION_REPUTATION_SCHEMA,
+    REVEAL_NPC_SCHEMA,
     GENERATE_NPC_SCHEMA,
     SET_NPC_SECRET_SCHEMA,
     # NPC Party Members
@@ -2480,6 +2516,7 @@ TOOLS_SCHEMA = [
     GET_NEARBY_LOCATIONS_SCHEMA,
     GET_ADJACENT_LOCATIONS_SCHEMA,
     UPDATE_LOCATION_SCHEMA,
+    REVEAL_LOCATION_SCHEMA,
     MOVE_PARTY_TO_LOCATION_SCHEMA,
     MOVE_CHARACTER_TO_LOCATION_SCHEMA,
     GET_CHARACTERS_AT_LOCATION_SCHEMA,
@@ -2559,6 +2596,7 @@ class ToolSchemas:
             "npc": [GET_NPC_INFO_SCHEMA, CREATE_NPC_SCHEMA, UPDATE_NPC_RELATIONSHIP_SCHEMA,
                     GET_NPCS_SCHEMA, GET_FACTIONS_SCHEMA, CREATE_FACTION_SCHEMA,
                     UPDATE_FACTION_REPUTATION_SCHEMA, GET_CHARACTER_FACTION_REPUTATION_SCHEMA,
+                    REVEAL_NPC_SCHEMA,
                     GENERATE_NPC_SCHEMA, SET_NPC_SECRET_SCHEMA,
                     ADD_NPC_TO_PARTY_SCHEMA, REMOVE_NPC_FROM_PARTY_SCHEMA,
                     GET_PARTY_NPCS_SCHEMA, UPDATE_NPC_LOYALTY_SCHEMA, NPC_PARTY_ACTION_SCHEMA],
@@ -2570,6 +2608,7 @@ class ToolSchemas:
                       LONG_REST_SCHEMA, SHORT_REST_SCHEMA],
             "location": [CREATE_LOCATION_SCHEMA, GET_LOCATION_SCHEMA, 
                         GET_NEARBY_LOCATIONS_SCHEMA, GET_ADJACENT_LOCATIONS_SCHEMA, UPDATE_LOCATION_SCHEMA,
+                        REVEAL_LOCATION_SCHEMA,
                         MOVE_PARTY_TO_LOCATION_SCHEMA, MOVE_CHARACTER_TO_LOCATION_SCHEMA,
                         GET_CHARACTERS_AT_LOCATION_SCHEMA, GET_NPCS_AT_LOCATION_SCHEMA,
                         EXPLORE_LOCATION_SCHEMA],

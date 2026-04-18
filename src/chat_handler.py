@@ -124,6 +124,16 @@ PLAYER CHARACTER:
                 if char_location:
                     context_parts.append(f"- Current Location: {char_location['name']}")
 
+            faction_reputation = await self.db.get_character_faction_reputation(char['id'])
+            if isinstance(faction_reputation, list) and faction_reputation:
+                notable_faction_reputation = [row for row in faction_reputation if row.get('reputation')]
+                if notable_faction_reputation:
+                    context_parts.append("\nFACTION REPUTATION:")
+                    for row in notable_faction_reputation[:5]:
+                        context_parts.append(
+                            f"- {row.get('faction_name', 'Unknown Faction')}: {row.get('reputation', 0)} ({row.get('tier', 'neutral')})"
+                        )
+
         session = await self.resolve_session(guild_id, session_id=session_id, user_id=user_id)
 
         if session:
@@ -182,6 +192,8 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
                 if npcs_at_location:
                     context_parts.append("\nNPCS AT THIS LOCATION:")
                     for npc in npcs_at_location[:5]:
+                        if npc.get('is_revealed') == 0:
+                            continue
                         merchant = " (Merchant)" if npc.get("is_merchant") else ""
                         context_parts.append(f"- {npc['name']}{merchant} ({npc.get('npc_type', 'neutral')})")
                         if npc.get("personality"):
@@ -191,6 +203,8 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
                 if nearby:
                     context_parts.append("\nNEARBY LOCATIONS (EXITS):")
                     for loc in nearby[:5]:
+                        if loc.get('is_hidden'):
+                            continue
                         direction = f" ({loc.get('direction', 'path')})" if loc.get("direction") else ""
                         context_parts.append(f"- {loc.get('to_name', loc.get('name', 'Unknown'))}{direction}")
 

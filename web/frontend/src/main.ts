@@ -42,6 +42,7 @@ interface ChatBootstrapResponse {
     available_characters: any[];
     game_state: any;
     recent_messages: ChatHistoryMessage[];
+    browser_dm: boolean;
     active_combat: any | null;
     location: any | null;
     connections: any[];
@@ -81,6 +82,12 @@ const api = {
     getSession: (id: number) => apiCall<any>(`/sessions/${id}`),
     createSession: (data: any) => apiCall<{ id: number }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
     updateSession: (id: number, data: any) => apiCall<any>(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    setSessionScene: (id: number, scene: string) => apiCall<any>(`/sessions/${id}/scene`, { method: 'POST', body: JSON.stringify({ scene }) }),
+    moveSessionParty: (id: number, data: any) => apiCall<any>(`/sessions/${id}/move-party`, { method: 'POST', body: JSON.stringify(data) }),
+    narrateSession: (id: number, data: any) => apiCall<any>(`/sessions/${id}/narrate`, { method: 'POST', body: JSON.stringify(data) }),
+    generateSessionZero: (id: number, prompt?: string) => apiCall<any>(`/sessions/${id}/session-zero`, { method: 'POST', body: JSON.stringify({ session_id: id, prompt }) }),
+    getSessionLocationTree: (id: number) => apiCall<{ locations: any[] }>(`/sessions/${id}/location-tree`),
+    getSessionStorylineState: (id: number) => apiCall<{ storylines: any[] }>(`/sessions/${id}/storyline-state`),
     createChatIdentity: () => apiCall<{ user_id: string }>('/chat/identity', { method: 'POST' }),
     getChatBootstrap: (sessionId: number, webIdentity: string, characterId?: number) => {
         const params = new URLSearchParams({ session_id: sessionId.toString() });
@@ -112,6 +119,7 @@ const api = {
     createLocation: (data: any) => apiCall<{ id: number }>('/locations', { method: 'POST', body: JSON.stringify(data) }),
     updateLocation: (id: number, data: any) => apiCall<any>(`/locations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteLocation: (id: number) => apiCall<any>(`/locations/${id}`, { method: 'DELETE' }),
+    revealLocation: (id: number) => apiCall<any>(`/locations/${id}/reveal`, { method: 'POST' }),
 
     // NPCs
     getNPCs: () => apiCall<{ npcs: any[] }>('/npcs'),
@@ -119,6 +127,50 @@ const api = {
     createNPC: (data: any) => apiCall<{ id: number }>('/npcs', { method: 'POST', body: JSON.stringify(data) }),
     updateNPC: (id: number, data: any) => apiCall<any>(`/npcs/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteNPC: (id: number) => apiCall<any>(`/npcs/${id}`, { method: 'DELETE' }),
+    revealNPC: (id: number) => apiCall<any>(`/npcs/${id}/reveal`, { method: 'POST' }),
+
+    // Factions
+    getFactions: (sessionId?: number, guildId?: number) => {
+        const params = new URLSearchParams();
+        if (sessionId !== undefined) params.append('session_id', sessionId.toString());
+        if (guildId !== undefined) params.append('guild_id', guildId.toString());
+        return apiCall<{ factions: any[] }>(`/factions${params.toString() ? `?${params.toString()}` : ''}`);
+    },
+    createFaction: (data: any) => apiCall<{ id: number }>('/factions', { method: 'POST', body: JSON.stringify(data) }),
+    updateFaction: (id: number, data: any) => apiCall<any>(`/factions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteFaction: (id: number) => apiCall<any>(`/factions/${id}`, { method: 'DELETE' }),
+    getFactionMembers: (id: number) => apiCall<{ members: any[] }>(`/factions/${id}/members`),
+    addFactionMember: (id: number, data: any) => apiCall<{ id: number }>(`/factions/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
+    updateFactionMembership: (id: number, data: any) => apiCall<any>(`/faction-memberships/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteFactionMembership: (id: number) => apiCall<any>(`/faction-memberships/${id}`, { method: 'DELETE' }),
+    getCharacterFactions: (charId: number) => apiCall<{ factions: any[] }>(`/characters/${charId}/factions`),
+    updateCharacterFactionReputation: (charId: number, factionId: number, data: any) => apiCall<any>(`/characters/${charId}/factions/${factionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+    // Storylines and plot points
+    getStorylines: (sessionId?: number, guildId?: number) => {
+        const params = new URLSearchParams();
+        if (sessionId !== undefined) params.append('session_id', sessionId.toString());
+        if (guildId !== undefined) params.append('guild_id', guildId.toString());
+        return apiCall<{ storylines: any[] }>(`/storylines${params.toString() ? `?${params.toString()}` : ''}`);
+    },
+    createStoryline: (data: any) => apiCall<{ id: number }>('/storylines', { method: 'POST', body: JSON.stringify(data) }),
+    updateStoryline: (id: number, data: any) => apiCall<any>(`/storylines/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteStoryline: (id: number) => apiCall<any>(`/storylines/${id}`, { method: 'DELETE' }),
+    getStoryline: (id: number) => apiCall<any>(`/storylines/${id}`),
+    getStorylineQuests: (id: number) => apiCall<{ quests: any[] }>(`/storylines/${id}/quests`),
+    advanceStoryline: (id: number, data: any) => apiCall<any>(`/storylines/${id}/advance`, { method: 'POST', body: JSON.stringify(data) }),
+    getPlotPoints: (sessionId?: number, storylineId?: number) => {
+        const params = new URLSearchParams();
+        if (sessionId !== undefined) params.append('session_id', sessionId.toString());
+        if (storylineId !== undefined) params.append('storyline_id', storylineId.toString());
+        return apiCall<{ plot_points: any[] }>(`/plot-points${params.toString() ? `?${params.toString()}` : ''}`);
+    },
+    createPlotPoint: (data: any) => apiCall<{ id: number }>('/plot-points', { method: 'POST', body: JSON.stringify(data) }),
+    updatePlotPoint: (id: number, data: any) => apiCall<any>(`/plot-points/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deletePlotPoint: (id: number) => apiCall<any>(`/plot-points/${id}`, { method: 'DELETE' }),
+
+    // Campaign overview
+    getCampaignOverview: (sessionId: number) => apiCall<any>(`/campaign/overview?session_id=${sessionId}`),
 
     // Story Items
     getItems: () => apiCall<{ items: any[] }>('/items'),
@@ -324,6 +376,9 @@ async function loadPageData(pageId: string): Promise<void> {
                 break;
             case 'campaign-creator':
                 await loadCampaignCreator();
+                break;
+            case 'campaign-studio':
+                await loadCampaignStudioPage();
                 break;
         }
     } catch (error) {
@@ -1114,7 +1169,7 @@ function searchItemDb(query: string): void {
     }
     
     results.innerHTML = filtered.map(item => `
-        <div class="item-db-item" onclick="addItemFromDb('${escapeHtml(item.id)}')">
+        <div class="item-db-item" onclick="addItemFromDb('${escapeJsString(item.id)}')">
             <div class="item-db-item-info">
                 <span class="item-db-item-name">${escapeHtml(item.name)}</span>
                 <span class="item-db-item-type">${item.type}</span>
@@ -1327,6 +1382,18 @@ function escapeHtml(text: string): string {
     const div = document.createElement('div');
     div.textContent = text || '';
     return div.innerHTML;
+}
+
+function escapeJsString(text: string): string {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
 }
 
 function formatDate(dateStr: string): string {
@@ -1907,7 +1974,7 @@ async function selectSkillTreeClass(className: string): Promise<void> {
         container.innerHTML = `
             <div class="branch-nav" id="branch-nav">
                 ${branchNames.map((branch, idx) => 
-                    `<button class="branch-btn ${idx === 0 ? 'active' : ''}" onclick="showSkillBranch('${branch}')">${escapeHtml(branches[branch]?.name || branch)}</button>`
+                    `<button class="branch-btn ${idx === 0 ? 'active' : ''}" onclick="showSkillBranch('${escapeJsString(branch)}')">${escapeHtml(branches[branch]?.name || branch)}</button>`
                 ).join('')}
             </div>
             <div id="branch-content"></div>
@@ -2986,7 +3053,7 @@ function renderSpellPanel(spells: any[], spellSlots: Record<string, any>, charac
                     <div class="spell-row-meta">${escapeHtml(spell.school || 'Unknown school')} • Level ${spell.spell_level ?? '?'}${spell.is_cantrip ? ' • Cantrip' : ''} • ${prepareLabel}</div>
                 </div>
                 <div class="spell-row-actions">
-                    ${canCast ? `<button class="btn btn-small btn-primary" onclick="window.chatInterface?.sendQuickAction('Cast ${escapeHtml(spell.spell_name || spell.name || 'this spell')}.')">Cast</button>` : ''}
+                    ${canCast ? `<button class="btn btn-small btn-primary" onclick="window.chatInterface?.sendQuickAction('Cast ${escapeJsString(spell.spell_name || spell.name || 'this spell')}.')">Cast</button>` : ''}
                 </div>
             </div>
         `;
@@ -3032,6 +3099,712 @@ function renderLocationConnectionsPanel(connections: any[]): string {
             </div>
         </div>
     `;
+}
+
+const campaignStudioState: {
+    sessionId: number | null;
+    overview: any | null;
+    plotPoints: any[];
+    storylineState: any[];
+    factionMembers: Record<number, any[]>;
+    characterFactions: Record<number, any[]>;
+    lastNarration: any | null;
+    lastSessionZero: any | null;
+} = {
+    sessionId: null,
+    overview: null,
+    plotPoints: [],
+    storylineState: [],
+    factionMembers: {},
+    characterFactions: {},
+    lastNarration: null,
+    lastSessionZero: null,
+};
+
+function getStudioSessionSelect(): HTMLSelectElement | null {
+    return document.getElementById('studio-session-select') as HTMLSelectElement | null;
+}
+
+function getCurrentStudioSessionId(): number | null {
+    const select = getStudioSessionSelect();
+    if (!select || !select.value) {
+        return null;
+    }
+    return parseInt(select.value);
+}
+
+async function loadCampaignStudioPage(): Promise<void> {
+    const select = getStudioSessionSelect();
+    if (!select) {
+        return;
+    }
+
+    const sessionsData = await api.getSessions();
+    const sessions = sessionsData.sessions || [];
+    const preferredSessionId = campaignStudioState.sessionId;
+    const fallbackSession = sessions.find((session: any) => session.status === 'active') || sessions[0] || null;
+
+    select.innerHTML = '<option value="">Select a session...</option>' +
+        sessions.map((session: any) => `<option value="${session.id}">${escapeHtml(session.name)}</option>`).join('');
+
+    if (!select.dataset.bound) {
+        select.onchange = async () => {
+            campaignStudioState.sessionId = getCurrentStudioSessionId();
+            await loadCampaignStudio();
+        };
+        select.dataset.bound = 'true';
+    }
+
+    const selectedId = preferredSessionId || fallbackSession?.id || null;
+    if (selectedId) {
+        select.value = String(selectedId);
+        campaignStudioState.sessionId = selectedId;
+        await loadCampaignStudio();
+        return;
+    }
+
+    const shell = document.getElementById('campaign-studio-shell');
+    if (shell) {
+        shell.innerHTML = '<div class="empty-state">Create or select a session to open the campaign studio.</div>';
+    }
+}
+
+function summarizeStudioValue(value: any): string {
+    if (value === null || value === undefined || value === '') {
+        return 'Unknown';
+    }
+    if (Array.isArray(value)) {
+        return value.length ? value.map(entry => String(entry)).join(', ') : 'None';
+    }
+    if (typeof value === 'object') {
+        const keys = Object.keys(value);
+        return keys.length ? keys.join(', ') : 'None';
+    }
+    return String(value);
+}
+
+function renderStudioLocationTree(nodes: any[], depth = 0): string {
+    if (!nodes.length) {
+        return '<p class="empty-hint">No locations mapped for this session.</p>';
+    }
+
+    return nodes.map((node: any) => `
+        <div class="studio-tree-node" style="margin-left: ${depth * 16}px;">
+            <div class="studio-tree-card">
+                <div>
+                    <strong>${escapeHtml(node.name || 'Unknown')}</strong>
+                    <div class="studio-muted">${escapeHtml(node.canonical_path || node.location_type || 'location')} • danger ${node.danger_level || 0}${node.is_hidden ? ' • hidden' : ''}</div>
+                </div>
+                <div class="studio-inline-actions">
+                    ${node.is_hidden ? `<button class="btn btn-small btn-secondary" onclick="revealStudioLocation(${node.id})">Reveal</button>` : ''}
+                    <button class="btn btn-small btn-secondary" onclick="showLocationDetails(${node.id})">Inspect</button>
+                </div>
+            </div>
+            ${node.children?.length ? renderStudioLocationTree(node.children, depth + 1) : ''}
+        </div>
+    `).join('');
+}
+
+function renderStudioNarrationPanel(): string {
+    const narration = campaignStudioState.lastNarration;
+    const sessionZero = campaignStudioState.lastSessionZero;
+
+    return `
+        <div class="detail-stack">
+            <div>
+                <h4>Latest Narration</h4>
+                <div class="studio-text-block">${escapeHtml(narration?.text || 'No browser narration generated yet.')}</div>
+            </div>
+            <div>
+                <h4>Session Zero</h4>
+                <div class="studio-text-block">${escapeHtml(sessionZero?.opening_scene || 'No session-zero opener generated yet.')}</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderStudioFactionSection(): string {
+    const overview = campaignStudioState.overview;
+    const factions = overview?.factions || [];
+    const participants = (overview?.session?.participants || overview?.participants || []).filter((participant: any) => participant.character_id);
+
+    if (!factions.length) {
+        return '<div class="empty-state">No factions in this session yet.</div>';
+    }
+
+    return factions.map((faction: any) => {
+        const members = campaignStudioState.factionMembers[faction.id] || [];
+        const reputationRows = participants.map((participant: any) => {
+            const entries = campaignStudioState.characterFactions[participant.character_id] || [];
+            const match = entries.find((entry: any) => entry.faction_id === faction.id);
+            const reputation = match?.reputation ?? 0;
+            const tier = match?.tier || 'neutral';
+            return `
+                <div class="detail-list-item">
+                    <strong>${escapeHtml(participant.character_name || 'Unknown')}</strong>
+                    <span>${reputation} (${escapeHtml(tier)})</span>
+                    <button class="btn btn-small btn-secondary" onclick="updateStudioFactionReputation(${participant.character_id}, ${faction.id}, ${reputation}, '${escapeJsString(tier)}')">Adjust</button>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="detail-panel">
+                <div class="studio-section-header">
+                    <div>
+                        <h4>${escapeHtml(faction.name || 'Faction')}</h4>
+                        <div class="studio-muted">${escapeHtml(faction.faction_type || 'faction')} • influence ${faction.influence || 0}${faction.is_hidden ? ' • hidden' : ''}</div>
+                    </div>
+                    <div class="studio-inline-actions">
+                        <button class="btn btn-small btn-secondary" onclick="createStudioFactionMember(${faction.id})">Add Member</button>
+                    </div>
+                </div>
+                <p class="studio-copy">${escapeHtml(faction.description || 'No description')}</p>
+                <div class="detail-stack">
+                    <div>
+                        <h5>Members</h5>
+                        ${members.length ? `
+                            <div class="detail-list">
+                                ${members.map((member: any) => `
+                                    <div class="detail-list-item">
+                                        <strong>${escapeHtml(member.actor_name || `Actor ${member.actor_id}`)}</strong>
+                                        <span>${escapeHtml(member.role || member.rank || member.actor_type || 'member')}</span>
+                                        <div class="studio-inline-actions">
+                                            <button class="btn btn-small btn-secondary" onclick="editStudioFactionMember(${member.id}, '${escapeJsString(member.role || '')}', '${escapeJsString(member.rank || '')}', '${escapeJsString(member.notes || '')}')">Edit</button>
+                                            <button class="btn btn-small btn-danger" onclick="deleteStudioFactionMember(${member.id})">Remove</button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : '<p class="empty-hint">No members tracked.</p>'}
+                    </div>
+                    <div>
+                        <h5>Party Reputation</h5>
+                        <div class="detail-list">${reputationRows || '<p class="empty-hint">No player characters in this session.</p>'}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderStudioStorySection(): string {
+    const storylines = campaignStudioState.storylineState || [];
+    const plotPoints = campaignStudioState.plotPoints || [];
+    const quests = campaignStudioState.overview?.quests || [];
+
+    return `
+        <div class="studio-columns">
+            <div class="detail-panel">
+                <div class="studio-section-header">
+                    <h4>Storylines</h4>
+                    <button class="btn btn-small btn-secondary" onclick="createStudioStoryline()">New Storyline</button>
+                </div>
+                ${storylines.length ? storylines.map((storyline: any) => {
+                    const linkedQuests = quests.filter((quest: any) => quest.storyline_id === storyline.id);
+                    return `
+                        <div class="studio-card-block">
+                            <div class="studio-section-header">
+                                <div>
+                                    <strong>${escapeHtml(storyline.title || 'Storyline')}</strong>
+                                    <div class="studio-muted">${escapeHtml(storyline.status || 'draft')} • ${escapeHtml(storyline.act_label || 'No act label')}</div>
+                                </div>
+                                <div class="studio-inline-actions">
+                                    <button class="btn btn-small btn-secondary" onclick="editStudioStoryline(${storyline.id}, '${escapeJsString(storyline.title || '')}', '${escapeJsString(storyline.description || '')}', '${escapeJsString(storyline.status || 'draft')}')">Edit</button>
+                                    <button class="btn btn-small btn-secondary" onclick="advanceStudioStoryline(${storyline.id})">Advance</button>
+                                    <button class="btn btn-small btn-danger" onclick="deleteStudioStoryline(${storyline.id})">Delete</button>
+                                </div>
+                            </div>
+                            <p class="studio-copy">${escapeHtml(storyline.description || 'No description')}</p>
+                            <div class="studio-muted">Current node: ${escapeHtml(storyline.progress?.current_node_title || storyline.progress?.current_node_id || 'Not started')}</div>
+                            <div class="studio-muted">Linked quests: ${linkedQuests.length ? linkedQuests.map((quest: any) => quest.title).join(', ') : 'None'}</div>
+                        </div>
+                    `;
+                }).join('') : '<p class="empty-hint">No storylines defined.</p>'}
+            </div>
+            <div class="detail-panel">
+                <div class="studio-section-header">
+                    <h4>Plot Points</h4>
+                    <button class="btn btn-small btn-secondary" onclick="createStudioPlotPoint()">New Plot Point</button>
+                </div>
+                ${plotPoints.length ? plotPoints.map((plotPoint: any) => `
+                    <div class="studio-card-block">
+                        <div class="studio-section-header">
+                            <div>
+                                <strong>${escapeHtml(plotPoint.title || 'Plot Point')}</strong>
+                                <div class="studio-muted">Reveal threshold ${plotPoint.reveal_threshold || 1}</div>
+                            </div>
+                            <div class="studio-inline-actions">
+                                <button class="btn btn-small btn-secondary" onclick="editStudioPlotPoint(${plotPoint.id}, '${escapeJsString(plotPoint.title || '')}', '${escapeJsString(plotPoint.description || '')}', ${plotPoint.reveal_threshold || 1})">Edit</button>
+                                <button class="btn btn-small btn-danger" onclick="deleteStudioPlotPoint(${plotPoint.id})">Delete</button>
+                            </div>
+                        </div>
+                        <p class="studio-copy">${escapeHtml(plotPoint.description || 'No description')}</p>
+                    </div>
+                `).join('') : '<p class="empty-hint">No plot points defined.</p>'}
+            </div>
+        </div>
+    `;
+}
+
+function renderStudioQuestSection(): string {
+    const quests = campaignStudioState.overview?.quests || [];
+    if (!quests.length) {
+        return `
+            <div class="detail-panel">
+                <div class="studio-section-header">
+                    <h4>Quests</h4>
+                    <button class="btn btn-small btn-secondary" onclick="createStudioQuest()">New Quest</button>
+                </div>
+                <p class="empty-hint">No quests in this session.</p>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="detail-panel">
+            <div class="studio-section-header">
+                <h4>Quests</h4>
+                <button class="btn btn-small btn-secondary" onclick="createStudioQuest()">New Quest</button>
+            </div>
+            <div class="detail-list">
+                ${quests.map((quest: any) => `
+                    <div class="detail-list-item studio-quest-row">
+                        <div>
+                            <strong>${escapeHtml(quest.title || 'Quest')}</strong>
+                            <div class="studio-muted">${escapeHtml(quest.status || 'available')} • ${escapeHtml(quest.quest_type || 'main')} • ${escapeHtml(quest.difficulty || 'medium')}</div>
+                        </div>
+                        <div class="studio-inline-actions">
+                            <button class="btn btn-small btn-secondary" onclick="updateStudioQuestStatus(${quest.id}, '${escapeJsString(quest.status || 'available')}')">Status</button>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+async function loadCampaignStudio(): Promise<void> {
+    const shell = document.getElementById('campaign-studio-shell');
+    const sessionId = getCurrentStudioSessionId();
+    campaignStudioState.sessionId = sessionId;
+
+    if (!shell) {
+        return;
+    }
+    if (!sessionId) {
+        shell.innerHTML = '<div class="empty-state">Select a session to open the campaign studio.</div>';
+        return;
+    }
+
+    shell.innerHTML = '<div class="loading-spinner">Loading campaign studio...</div>';
+
+    try {
+        const [overview, storylineStateData, plotPointsData, sessionData] = await Promise.all([
+            api.getCampaignOverview(sessionId),
+            api.getSessionStorylineState(sessionId),
+            api.getPlotPoints(sessionId),
+            api.getSession(sessionId),
+        ]);
+
+        campaignStudioState.overview = {
+            ...overview,
+            participants: sessionData.participants || [],
+            session: {
+                ...overview.session,
+                participants: sessionData.participants || [],
+            },
+        };
+        campaignStudioState.storylineState = storylineStateData.storylines || [];
+        campaignStudioState.plotPoints = plotPointsData.plot_points || [];
+
+        const factions = overview.factions || [];
+        const characters = (sessionData.participants || []).filter((participant: any) => participant.character_id);
+
+        const memberResults = await Promise.all(factions.map((faction: any) => api.getFactionMembers(faction.id)));
+        campaignStudioState.factionMembers = Object.fromEntries(
+            factions.map((faction: any, index: number) => [faction.id, memberResults[index].members || []]),
+        );
+
+        const reputationResults = await Promise.all(characters.map((participant: any) => api.getCharacterFactions(participant.character_id)));
+        campaignStudioState.characterFactions = Object.fromEntries(
+            characters.map((participant: any, index: number) => [participant.character_id, reputationResults[index].factions || []]),
+        );
+
+        const currentLocation = overview.locations?.find((location: any) => location.id === overview.game_state?.current_location_id)
+            || overview.locations?.find((location: any) => location.name === overview.game_state?.current_location)
+            || null;
+        const currentScene = overview.game_state?.current_scene || 'No current scene set.';
+        const npcs = overview.npcs || [];
+
+        shell.innerHTML = `
+            <div class="studio-grid">
+                <section class="detail-panel studio-overview-panel">
+                    <div class="studio-section-header">
+                        <div>
+                            <h3>${escapeHtml(overview.session?.name || 'Session')}</h3>
+                            <div class="studio-muted">${escapeHtml(overview.session?.status || 'unknown')} • ${escapeHtml(overview.session?.world_theme || overview.session?.setting || 'No theme')}</div>
+                        </div>
+                        <div class="studio-stat-row">
+                            <span class="status-chip">${overview.counts?.locations || 0} locations</span>
+                            <span class="status-chip">${overview.counts?.npcs || 0} NPCs</span>
+                            <span class="status-chip">${overview.counts?.quests || 0} quests</span>
+                            <span class="status-chip">${overview.counts?.storylines || 0} storylines</span>
+                        </div>
+                    </div>
+                    <div class="studio-columns">
+                        <div>
+                            <h4>Current Scene</h4>
+                            <div class="studio-text-block">${escapeHtml(currentScene)}</div>
+                        </div>
+                        <div>
+                            <h4>Current Location</h4>
+                            <div class="studio-text-block">${escapeHtml(currentLocation?.name || overview.game_state?.current_location || 'Unknown')}</div>
+                        </div>
+                    </div>
+                    <div class="studio-action-row">
+                        <button class="btn btn-primary" onclick="setStudioScene()">Set Scene</button>
+                        <button class="btn btn-secondary" onclick="moveStudioParty()">Move Party</button>
+                        <button class="btn btn-secondary" onclick="narrateStudioScene()">Generate Narration</button>
+                        <button class="btn btn-secondary" onclick="generateStudioSessionZero()">Session Zero</button>
+                    </div>
+                </section>
+
+                <section class="detail-panel">
+                    <h3>World Tree</h3>
+                    ${renderStudioLocationTree(overview.location_tree || [])}
+                </section>
+
+                <section class="detail-panel">
+                    <h3>Cast</h3>
+                    <div class="detail-list">
+                        ${npcs.length ? npcs.map((npc: any) => `
+                            <div class="detail-list-item studio-cast-row">
+                                <div>
+                                    <strong>${escapeHtml(npc.name || 'NPC')}</strong>
+                                    <div class="studio-muted">${escapeHtml(npc.npc_type || 'neutral')} • ${escapeHtml(npc.location || 'Unplaced')}${npc.is_revealed ? ' • revealed' : ' • hidden'}</div>
+                                </div>
+                                <div class="studio-inline-actions">
+                                    ${!npc.is_revealed ? `<button class="btn btn-small btn-secondary" onclick="revealStudioNPC(${npc.id})">Reveal</button>` : ''}
+                                    <button class="btn btn-small btn-secondary" onclick="editNPC(${npc.id})">Edit</button>
+                                </div>
+                            </div>
+                        `).join('') : '<p class="empty-hint">No NPCs in this session.</p>'}
+                    </div>
+                </section>
+
+                <section class="detail-panel">
+                    <h3>Narration Output</h3>
+                    ${renderStudioNarrationPanel()}
+                </section>
+
+                <section class="detail-panel studio-span-full">
+                    <div class="studio-section-header">
+                        <h3>Factions</h3>
+                        <button class="btn btn-small btn-secondary" onclick="createStudioFaction()">New Faction</button>
+                    </div>
+                    <div class="studio-columns">${renderStudioFactionSection()}</div>
+                </section>
+
+                <section class="studio-span-full">
+                    ${renderStudioStorySection()}
+                </section>
+
+                <section class="studio-span-full">
+                    ${renderStudioQuestSection()}
+                </section>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Failed to load campaign studio', error);
+        shell.innerHTML = '<div class="empty-state">Failed to load campaign studio.</div>';
+        showToast('Failed to load campaign studio', 'error');
+    }
+}
+
+async function setStudioScene(): Promise<void> {
+    const sessionId = campaignStudioState.sessionId;
+    const currentScene = campaignStudioState.overview?.game_state?.current_scene || '';
+    if (!sessionId) {
+        return;
+    }
+    const scene = prompt('Set the current scene text:', currentScene)?.trim();
+    if (!scene) {
+        return;
+    }
+    await api.setSessionScene(sessionId, scene);
+    showToast('Scene updated', 'success');
+    await loadCampaignStudio();
+}
+
+async function moveStudioParty(): Promise<void> {
+    const sessionId = campaignStudioState.sessionId;
+    const locations = campaignStudioState.overview?.locations || [];
+    if (!sessionId) {
+        return;
+    }
+    const suggestion = locations.map((location: any) => location.name).slice(0, 8).join(', ');
+    const locationName = prompt(`Move party to which location?${suggestion ? `\nExamples: ${suggestion}` : ''}`)?.trim();
+    if (!locationName) {
+        return;
+    }
+    const travelDescription = prompt('Optional travel description:', '')?.trim() || undefined;
+    await api.moveSessionParty(sessionId, { location_name: locationName, travel_description: travelDescription });
+    showToast('Party moved', 'success');
+    await loadCampaignStudio();
+}
+
+async function narrateStudioScene(): Promise<void> {
+    const sessionId = campaignStudioState.sessionId;
+    if (!sessionId) {
+        return;
+    }
+    const text = prompt('What should the DM narrate to the players?')?.trim();
+    if (!text) {
+        return;
+    }
+    campaignStudioState.lastNarration = await api.narrateSession(sessionId, { text, title: 'Studio Narration' });
+    showToast('Narration generated', 'success');
+    await loadCampaignStudio();
+}
+
+async function generateStudioSessionZero(): Promise<void> {
+    const sessionId = campaignStudioState.sessionId;
+    if (!sessionId) {
+        return;
+    }
+    const promptText = prompt('Optional session-zero prompt override:', '')?.trim() || undefined;
+    campaignStudioState.lastSessionZero = await api.generateSessionZero(sessionId, promptText);
+    showToast('Session-zero package generated', 'success');
+    await loadCampaignStudio();
+}
+
+async function revealStudioLocation(locationId: number): Promise<void> {
+    await api.revealLocation(locationId);
+    showToast('Location revealed', 'success');
+    await loadCampaignStudio();
+}
+
+async function revealStudioNPC(npcId: number): Promise<void> {
+    await api.revealNPC(npcId);
+    showToast('NPC revealed', 'success');
+    await loadCampaignStudio();
+}
+
+async function createStudioFaction(): Promise<void> {
+    const overview = campaignStudioState.overview;
+    if (!overview?.session) {
+        return;
+    }
+    const name = prompt('Faction name?')?.trim();
+    if (!name) {
+        return;
+    }
+    const description = prompt('Faction description?', '')?.trim() || undefined;
+    const factionType = prompt('Faction type?', 'neutral')?.trim() || 'neutral';
+    await api.createFaction({
+        guild_id: overview.session.guild_id,
+        created_by: overview.session.dm_user_id,
+        session_id: overview.session.id,
+        name,
+        description,
+        faction_type: factionType,
+    });
+    showToast('Faction created', 'success');
+    await loadCampaignStudio();
+}
+
+async function createStudioFactionMember(factionId: number): Promise<void> {
+    const actorType = prompt('Member type? (npc or character)', 'npc')?.trim() || 'npc';
+    const actorIdRaw = prompt('Actor ID to add to this faction?')?.trim();
+    if (!actorIdRaw) {
+        return;
+    }
+    const role = prompt('Role?', '')?.trim() || undefined;
+    const rank = prompt('Rank?', '')?.trim() || undefined;
+    const notes = prompt('Notes?', '')?.trim() || undefined;
+    await api.addFactionMember(factionId, {
+        actor_id: parseInt(actorIdRaw),
+        actor_type: actorType,
+        role,
+        rank,
+        notes,
+    });
+    showToast('Faction member added', 'success');
+    await loadCampaignStudio();
+}
+
+async function editStudioFactionMember(membershipId: number, currentRole: string, currentRank: string, currentNotes: string): Promise<void> {
+    const role = prompt('Role?', currentRole)?.trim();
+    const rank = prompt('Rank?', currentRank)?.trim();
+    const notes = prompt('Notes?', currentNotes)?.trim();
+    await api.updateFactionMembership(membershipId, { role, rank, notes });
+    showToast('Faction member updated', 'success');
+    await loadCampaignStudio();
+}
+
+async function deleteStudioFactionMember(membershipId: number): Promise<void> {
+    if (!confirm('Remove this faction member?')) {
+        return;
+    }
+    await api.deleteFactionMembership(membershipId);
+    showToast('Faction member removed', 'success');
+    await loadCampaignStudio();
+}
+
+async function updateStudioFactionReputation(characterId: number, factionId: number, currentReputation: number, currentTier: string): Promise<void> {
+    const reputationRaw = prompt('Absolute reputation value:', String(currentReputation))?.trim();
+    if (!reputationRaw) {
+        return;
+    }
+    const tier = prompt('Tier:', currentTier)?.trim() || currentTier;
+    const notes = prompt('Notes?', '')?.trim() || undefined;
+    await api.updateCharacterFactionReputation(characterId, factionId, {
+        reputation: parseInt(reputationRaw),
+        tier,
+        notes,
+    });
+    showToast('Faction reputation updated', 'success');
+    await loadCampaignStudio();
+}
+
+async function createStudioStoryline(): Promise<void> {
+    const overview = campaignStudioState.overview;
+    if (!overview?.session) {
+        return;
+    }
+    const title = prompt('Storyline title?')?.trim();
+    if (!title) {
+        return;
+    }
+    const description = prompt('Storyline description?', '')?.trim() || undefined;
+    const status = prompt('Status?', 'draft')?.trim() || 'draft';
+    await api.createStoryline({
+        guild_id: overview.session.guild_id,
+        created_by: overview.session.dm_user_id,
+        session_id: overview.session.id,
+        title,
+        description,
+        status,
+    });
+    showToast('Storyline created', 'success');
+    await loadCampaignStudio();
+}
+
+async function editStudioStoryline(storylineId: number, currentTitle: string, currentDescription: string, currentStatus: string): Promise<void> {
+    const title = prompt('Storyline title?', currentTitle)?.trim();
+    if (!title) {
+        return;
+    }
+    const description = prompt('Storyline description?', currentDescription)?.trim();
+    const status = prompt('Status?', currentStatus)?.trim();
+    await api.updateStoryline(storylineId, { title, description, status });
+    showToast('Storyline updated', 'success');
+    await loadCampaignStudio();
+}
+
+async function advanceStudioStoryline(storylineId: number): Promise<void> {
+    const storyline = campaignStudioState.storylineState.find((entry: any) => entry.id === storylineId);
+    const nodeHint = storyline?.nodes?.map((node: any) => `${node.id}:${node.title}`).join(', ') || 'No nodes available';
+    const nodeIdRaw = prompt(`Advance to which node ID?\n${nodeHint}`)?.trim();
+    if (!nodeIdRaw) {
+        return;
+    }
+    const branchChoice = prompt('Optional branch choice:', '')?.trim() || undefined;
+    await api.advanceStoryline(storylineId, { node_id: parseInt(nodeIdRaw), branch_choice: branchChoice });
+    showToast('Storyline advanced', 'success');
+    await loadCampaignStudio();
+}
+
+async function deleteStudioStoryline(storylineId: number): Promise<void> {
+    if (!confirm('Delete this storyline?')) {
+        return;
+    }
+    await api.deleteStoryline(storylineId);
+    showToast('Storyline deleted', 'success');
+    await loadCampaignStudio();
+}
+
+async function createStudioPlotPoint(): Promise<void> {
+    const sessionId = campaignStudioState.sessionId;
+    if (!sessionId) {
+        return;
+    }
+    const title = prompt('Plot point title?')?.trim();
+    if (!title) {
+        return;
+    }
+    const description = prompt('Plot point description?', '')?.trim() || undefined;
+    const thresholdRaw = prompt('Reveal threshold?', '1')?.trim() || '1';
+    await api.createPlotPoint({
+        session_id: sessionId,
+        title,
+        description,
+        reveal_threshold: parseInt(thresholdRaw),
+    });
+    showToast('Plot point created', 'success');
+    await loadCampaignStudio();
+}
+
+async function editStudioPlotPoint(plotPointId: number, currentTitle: string, currentDescription: string, currentThreshold: number): Promise<void> {
+    const title = prompt('Plot point title?', currentTitle)?.trim();
+    if (!title) {
+        return;
+    }
+    const description = prompt('Plot point description?', currentDescription)?.trim();
+    const thresholdRaw = prompt('Reveal threshold?', String(currentThreshold))?.trim() || String(currentThreshold);
+    await api.updatePlotPoint(plotPointId, {
+        title,
+        description,
+        reveal_threshold: parseInt(thresholdRaw),
+    });
+    showToast('Plot point updated', 'success');
+    await loadCampaignStudio();
+}
+
+async function deleteStudioPlotPoint(plotPointId: number): Promise<void> {
+    if (!confirm('Delete this plot point?')) {
+        return;
+    }
+    await api.deletePlotPoint(plotPointId);
+    showToast('Plot point deleted', 'success');
+    await loadCampaignStudio();
+}
+
+async function createStudioQuest(): Promise<void> {
+    const overview = campaignStudioState.overview;
+    if (!overview?.session) {
+        return;
+    }
+    const title = prompt('Quest title?')?.trim();
+    if (!title) {
+        return;
+    }
+    const description = prompt('Quest description?', '')?.trim() || undefined;
+    const questType = prompt('Quest type?', 'main')?.trim() || 'main';
+    const difficulty = prompt('Difficulty?', 'medium')?.trim() || 'medium';
+    await api.createQuest({
+        guild_id: overview.session.guild_id,
+        created_by: overview.session.dm_user_id,
+        session_id: overview.session.id,
+        title,
+        description,
+        quest_type: questType,
+        difficulty,
+        status: 'available',
+    });
+    showToast('Quest created', 'success');
+    await loadCampaignStudio();
+}
+
+async function updateStudioQuestStatus(questId: number, currentStatus: string): Promise<void> {
+    const status = prompt('Quest status?', currentStatus)?.trim();
+    if (!status) {
+        return;
+    }
+    await api.updateQuest(questId, { status });
+    showToast('Quest updated', 'success');
+    await loadCampaignStudio();
 }
 
 async function openLocationConnectionEditor(locationId: number): Promise<void> {
@@ -3325,6 +4098,8 @@ async function showLocationDetails(locationId: number): Promise<void> {
 class ChatInterface {
     private sessionId: number | null = null;
     private characterId: number | null = null;
+    private browserDmAllowed = false;
+    private mode: 'player' | 'dm' = 'player';
     private userId: string;
     private chatHistory: ChatHistoryMessage[] = [];
     private latestState: any = null;
@@ -3348,8 +4123,9 @@ class ChatInterface {
         this.userId = await this.getOrCreateUserId();
         const sessionsData = await api.getSessions();
         const sessionSelect = document.getElementById('chat-session-select') as HTMLSelectElement | null;
+        const modeSelect = document.getElementById('chat-mode-select') as HTMLSelectElement | null;
         const form = document.getElementById('chat-form') as HTMLFormElement | null;
-        if (!sessionSelect || !form) {
+        if (!sessionSelect || !form || !modeSelect) {
             return;
         }
 
@@ -3361,12 +4137,28 @@ class ChatInterface {
         sessionSelect.onchange = async () => {
             this.sessionId = sessionSelect.value ? parseInt(sessionSelect.value) : null;
             this.characterId = null;
+            this.browserDmAllowed = false;
+            this.mode = 'player';
+            modeSelect.value = 'player';
             this.chatHistory = [];
             this.renderMessages();
             await this.populateCharacterSelect();
             this.latestState = null;
             this.renderSessionState();
             this.renderToolResults([]);
+            await this.loadBootstrap();
+        };
+
+        modeSelect.onchange = async () => {
+            const requestedMode = (modeSelect.value as 'player' | 'dm') || 'player';
+            if (requestedMode === 'dm' && !this.browserDmAllowed) {
+                this.mode = 'player';
+                modeSelect.value = 'player';
+                showToast('This browser identity is not the session DM', 'error');
+                return;
+            }
+            this.mode = requestedMode;
+            this.updateModeUi();
             await this.loadBootstrap();
         };
 
@@ -3388,6 +4180,7 @@ class ChatInterface {
 
         if (!this.sessionId) {
             select.innerHTML = '<option value="">Select a session first...</option>';
+            this.updateModeUi();
             return;
         }
 
@@ -3406,6 +4199,8 @@ class ChatInterface {
         } else {
             this.characterId = null;
         }
+
+        this.updateModeUi();
     }
 
     private async loadBootstrap(): Promise<void> {
@@ -3415,6 +4210,10 @@ class ChatInterface {
 
         try {
             const bootstrap = await api.getChatBootstrap(this.sessionId, this.userId, this.characterId || undefined);
+            this.browserDmAllowed = Boolean(bootstrap.browser_dm);
+            if (!this.browserDmAllowed && this.mode === 'dm') {
+                this.mode = 'player';
+            }
             this.chatHistory = bootstrap.recent_messages || [];
             this.latestState = {
                 ...bootstrap.session,
@@ -3422,12 +4221,13 @@ class ChatInterface {
                 locations: bootstrap.location ? [bootstrap.location] : [],
                 game_state: bootstrap.game_state || {},
             };
+            this.updateModeUi();
             this.renderMessages();
             this.renderSessionState();
             this.renderCombatSidebar(bootstrap.active_combat || null);
             this.renderLocationSidebar(bootstrap.location || null, bootstrap.connections || []);
 
-            if (!this.characterId) {
+            if (this.mode === 'dm' || !this.characterId) {
                 this.renderSpellSidebar(null, null);
                 this.renderStatusSidebar([]);
                 return;
@@ -3505,7 +4305,7 @@ class ChatInterface {
             return;
         }
 
-        if (!this.characterId) {
+        if (this.mode !== 'dm' && !this.characterId) {
             showToast('Select a character first', 'error');
             return;
         }
@@ -3523,8 +4323,9 @@ class ChatInterface {
         try {
             const response = await api.chatWithDM({
                 session_id: this.sessionId,
-                character_id: this.characterId,
+                character_id: this.mode === 'dm' ? undefined : this.characterId,
                 message,
+                dm_mode: this.mode === 'dm',
                 chat_history: priorHistory,
             }, this.userId);
 
@@ -3562,7 +4363,7 @@ class ChatInterface {
 
         if (this.chatHistory.length === 0) {
             container.innerHTML = this.sessionId
-                ? '<div class="empty-state">This session has no chat history yet. Pick a character or create one to start the adventure.</div>'
+                ? `<div class="empty-state">This session has no chat history yet. ${this.mode === 'dm' ? 'Use DM mode to direct the session.' : 'Pick a character or create one to start the adventure.'}</div>`
                 : '<div class="empty-state">Choose a session and character, then start the conversation.</div>';
             return;
         }
@@ -3584,7 +4385,7 @@ class ChatInterface {
         const messageElement = document.createElement('div');
         messageElement.className = `chat-message ${message.role}`;
         messageElement.innerHTML = `
-            <div class="chat-message-meta">${message.role === 'user' ? 'Player' : message.role === 'mechanics' ? 'Mechanics' : 'Dungeon Master'}</div>
+            <div class="chat-message-meta">${message.role === 'user' ? (this.mode === 'dm' ? 'DM Directive' : 'Player') : message.role === 'mechanics' ? 'Mechanics' : 'Dungeon Master'}</div>
             <div>${escapeHtml(message.content)}</div>
         `;
         container.appendChild(messageElement);
@@ -3674,6 +4475,10 @@ class ChatInterface {
         if (!container) {
             return;
         }
+        if (this.mode === 'dm') {
+            container.innerHTML = '<div class="empty-state">DM mode does not bind to a player spell sheet.</div>';
+            return;
+        }
         container.innerHTML = this.characterId
             ? renderSpellPanel(spells || [], spellSlots || {}, this.characterId)
             : '<div class="empty-state">Select or create a character to view spells.</div>';
@@ -3703,9 +4508,61 @@ class ChatInterface {
         if (!container) {
             return;
         }
+        if (this.mode === 'dm') {
+            container.innerHTML = '<div class="empty-state">DM mode does not track a single character status panel.</div>';
+            return;
+        }
         container.innerHTML = this.characterId
             ? renderStatusEffectsPanel(statusEffects || [])
             : '<div class="empty-state">Select or create a character to view buffs and debuffs.</div>';
+    }
+
+    private updateModeUi(): void {
+        const modeSelect = document.getElementById('chat-mode-select') as HTMLSelectElement | null;
+        const characterSelect = document.getElementById('chat-character-select') as HTMLSelectElement | null;
+        const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement | null;
+        const quickActions = document.getElementById('chat-quick-actions');
+        if (modeSelect) {
+            modeSelect.value = this.mode;
+            const dmOption = modeSelect.querySelector('option[value="dm"]') as HTMLOptionElement | null;
+            if (dmOption) {
+                dmOption.disabled = !this.browserDmAllowed;
+            }
+        }
+        if (characterSelect) {
+            characterSelect.disabled = this.mode === 'dm';
+        }
+        if (chatInput) {
+            chatInput.placeholder = this.mode === 'dm'
+                ? 'Enter a DM directive or narration request...'
+                : 'Describe what your character does...';
+        }
+        if (quickActions) {
+            quickActions.classList.toggle('hidden', this.mode === 'dm');
+        }
+    }
+
+    async sendLatestAsNarration(): Promise<void> {
+        if (!this.sessionId) {
+            showToast('Select a session first', 'error');
+            return;
+        }
+        const lastAssistant = [...this.chatHistory].reverse().find((entry) => entry.role === 'assistant');
+        if (!lastAssistant?.content) {
+            showToast('No recent DM response to turn into narration', 'error');
+            return;
+        }
+
+        try {
+            const result = await api.narrateSession(this.sessionId, {
+                text: lastAssistant.content,
+                title: 'Chat Narration',
+            });
+            campaignStudioState.lastNarration = result;
+            showToast('Latest DM response converted to narration', 'success');
+        } catch (error: any) {
+            showToast(error?.message || 'Failed to send narration', 'error');
+        }
     }
 }
 
@@ -3777,6 +4634,27 @@ document.addEventListener('DOMContentLoaded', () => {
 (window as any).showPage = showPage;
 (window as any).openModal = openModal;
 (window as any).closeModal = closeModal;
+(window as any).loadCampaignStudio = loadCampaignStudio;
+(window as any).setStudioScene = setStudioScene;
+(window as any).moveStudioParty = moveStudioParty;
+(window as any).narrateStudioScene = narrateStudioScene;
+(window as any).generateStudioSessionZero = generateStudioSessionZero;
+(window as any).revealStudioLocation = revealStudioLocation;
+(window as any).revealStudioNPC = revealStudioNPC;
+(window as any).createStudioFaction = createStudioFaction;
+(window as any).createStudioFactionMember = createStudioFactionMember;
+(window as any).editStudioFactionMember = editStudioFactionMember;
+(window as any).deleteStudioFactionMember = deleteStudioFactionMember;
+(window as any).updateStudioFactionReputation = updateStudioFactionReputation;
+(window as any).createStudioStoryline = createStudioStoryline;
+(window as any).editStudioStoryline = editStudioStoryline;
+(window as any).advanceStudioStoryline = advanceStudioStoryline;
+(window as any).deleteStudioStoryline = deleteStudioStoryline;
+(window as any).createStudioPlotPoint = createStudioPlotPoint;
+(window as any).editStudioPlotPoint = editStudioPlotPoint;
+(window as any).deleteStudioPlotPoint = deleteStudioPlotPoint;
+(window as any).createStudioQuest = createStudioQuest;
+(window as any).updateStudioQuestStatus = updateStudioQuestStatus;
 (window as any).createSession = createSession;
 (window as any).viewSession = viewSession;
 (window as any).chatInterface = chatInterface;

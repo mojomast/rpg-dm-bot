@@ -7,8 +7,10 @@ It is designed for two modes of play: players can join and play through Discord 
 ## Highlights
 - Persistent characters, sessions, combat, quests, spells, skills, and inventory
 - AI DM narration, NPC dialogue, and tool-driven gameplay flow
-- Browser chat with shared session state and live dashboard panels
+- Browser chat with player mode, DM mode, live dashboard panels, and narration handoff
+- Campaign Studio for session overview, location trees, faction management, plot tracking, and session control
 - Web admin tools for campaigns, locations, NPCs, items, spells, and game data
+- DM-only `/world` slash commands for live scene, travel, reveal, and faction-reputation control
 - Content-pack aware runtime data for themed campaigns
 
 ## Quick Start
@@ -18,6 +20,12 @@ For setup, hosting, and environment configuration, see the [Operator Guide](docs
 - [Player Guide](docs/player-guide.md)
 - [Dungeon Master Guide](docs/dm-guide.md)
 - [Operator / Self-Hosting Guide](docs/operator-guide.md)
+
+## DM Workflow Surfaces
+- Discord: `/session` remains the main session lifecycle command group.
+- Discord: `/world scene-set`, `/world location-move`, `/world location-reveal`, `/world npc-reveal`, and `/world faction-rep` manage live world state for the active session.
+- Web: `Campaign Studio` provides a single DM workspace for overview, world tree, cast, factions, storylines, plot points, quests, narration, and session-zero generation.
+- Web: `Browser Chat` supports normal player play plus DM mode for direct browser-side DM directives.
 
 ## Project Structure
 ```text

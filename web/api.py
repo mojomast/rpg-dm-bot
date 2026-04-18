@@ -123,6 +123,9 @@ class LocationUpdate(BaseModel):
     description: Optional[str] = None
     location_type: Optional[str] = None
     slug: Optional[str] = None
+    parent_location_id: Optional[int] = None
+    depth: Optional[int] = None
+    canonical_path: Optional[str] = None
     hierarchy_kind: Optional[str] = None
     tags: Optional[List[str]] = None
     dm_notes: Optional[str] = None
@@ -152,6 +155,13 @@ class NPCUpdate(BaseModel):
     location: Optional[str] = None
     location_id: Optional[int] = None
     is_merchant: Optional[bool] = None
+    is_revealed: Optional[bool] = None
+    actor_kind: Optional[str] = None
+    faction_id: Optional[int] = None
+    faction_role: Optional[str] = None
+    goals: Optional[List[Dict[str, Any]]] = None
+    secrets: Optional[List[Dict[str, Any]]] = None
+    tags: Optional[List[str]] = None
 
 
 class FactionCreate(BaseModel):
@@ -161,8 +171,11 @@ class FactionCreate(BaseModel):
     session_id: Optional[int] = None
     description: Optional[str] = None
     faction_type: str = "neutral"
+    disposition: Optional[str] = None
     alignment: Optional[str] = None
     influence: int = 0
+    is_hidden: bool = False
+    tags: List[str] = []
     goals: List[Dict[str, Any]] = []
     resources: List[Dict[str, Any]] = []
     allies: List[Any] = []
@@ -173,8 +186,11 @@ class FactionUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     faction_type: Optional[str] = None
+    disposition: Optional[str] = None
     alignment: Optional[str] = None
     influence: Optional[int] = None
+    is_hidden: Optional[bool] = None
+    tags: Optional[List[str]] = None
     goals: Optional[List[Dict[str, Any]]] = None
     resources: Optional[List[Dict[str, Any]]] = None
     allies: Optional[List[Any]] = None
@@ -189,8 +205,17 @@ class FactionMemberCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class FactionMemberUpdate(BaseModel):
+    actor_type: Optional[str] = None
+    role: Optional[str] = None
+    rank: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class CharacterFactionReputationUpdate(BaseModel):
     reputation_change: int = 0
+    reputation: Optional[int] = None
+    tier: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -200,7 +225,17 @@ class StorylineCreate(BaseModel):
     created_by: int
     session_id: Optional[int] = None
     description: Optional[str] = None
-    status: str = "active"
+    status: str = "draft"
+    act_label: Optional[str] = None
+    sort_order: int = 0
+
+
+class StorylineUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    act_label: Optional[str] = None
+    sort_order: Optional[int] = None
 
 
 class StorylineNodeCreate(BaseModel):
@@ -351,9 +386,17 @@ class QuestCreate(BaseModel):
     description: Optional[str] = None
     objectives: List[str] = []
     rewards: Dict[str, Any] = {}
+    status: str = "available"
     difficulty: str = "medium"
     quest_giver_npc_id: Optional[int] = None
     dm_notes: Optional[str] = None
+    dm_plan: Optional[str] = None
+    storyline_id: Optional[int] = None
+    primary_location_id: Optional[int] = None
+    quest_type: str = "main"
+    availability_rules_json: Dict[str, Any] = {}
+    branching_rules_json: Dict[str, Any] = {}
+    failure_rules_json: Dict[str, Any] = {}
 
 class QuestUpdate(BaseModel):
     title: Optional[str] = None
@@ -362,7 +405,15 @@ class QuestUpdate(BaseModel):
     rewards: Optional[Dict[str, Any]] = None
     status: Optional[str] = None
     difficulty: Optional[str] = None
+    quest_giver_npc_id: Optional[int] = None
     dm_notes: Optional[str] = None
+    dm_plan: Optional[str] = None
+    storyline_id: Optional[int] = None
+    primary_location_id: Optional[int] = None
+    quest_type: Optional[str] = None
+    availability_rules_json: Optional[Dict[str, Any]] = None
+    branching_rules_json: Optional[Dict[str, Any]] = None
+    failure_rules_json: Optional[Dict[str, Any]] = None
 
 
 class ChatHistoryMessage(BaseModel):
@@ -374,6 +425,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[int] = None
     message: str
     character_id: Optional[int] = None
+    dm_mode: bool = False
     chat_history: List[ChatHistoryMessage] = []
 
 
@@ -396,9 +448,37 @@ class ChatBootstrapResponse(BaseModel):
     available_characters: List[Dict[str, Any]]
     game_state: Dict[str, Any]
     recent_messages: List[Dict[str, str]]
+    browser_dm: bool = False
     active_combat: Optional[Dict[str, Any]] = None
     location: Optional[Dict[str, Any]] = None
     connections: List[Dict[str, Any]] = []
+
+
+class SessionSceneUpdate(BaseModel):
+    scene: str
+
+
+class SessionNarrateRequest(BaseModel):
+    text: str
+    title: str = "DM Narration"
+
+
+class SessionMovePartyRequest(BaseModel):
+    location_id: Optional[int] = None
+    location_name: Optional[str] = None
+    travel_description: Optional[str] = None
+
+
+class SessionZeroGenerateRequest(BaseModel):
+    session_id: int
+    prompt: Optional[str] = None
+
+
+class PlotPointUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    reveal_threshold: Optional[int] = None
+    metadata_json: Optional[Dict[str, Any]] = None
 
 
 async def _require_active_browser_session(session_id: Optional[int]) -> Dict[str, Any]:
@@ -444,6 +524,11 @@ async def _require_browser_actor(
             raise HTTPException(status_code=403, detail="Browser identity does not control that character")
 
     return x_web_identity, web_user_id, participants, owned_participants, character
+
+
+async def _browser_dm_allowed(session: Dict[str, Any], web_user_id: int) -> bool:
+    """Allow browser DM mode when the browser identity matches the session DM."""
+    return session.get('dm_user_id') == web_user_id
 
 
 def _normalize_preview_connections(locations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -597,6 +682,131 @@ async def update_session(session_id: int, session: SessionUpdate):
     return {"message": "Session updated"}
 
 
+@app.post("/api/sessions/{session_id}/scene")
+async def set_session_scene(session_id: int, payload: SessionSceneUpdate):
+    """Persist the current scene text for a session."""
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await db.save_game_state(
+        session_id,
+        current_scene=payload.scene,
+        active_content_pack_id=session.get('content_pack_id'),
+    )
+    return {"message": "Scene updated"}
+
+
+@app.post("/api/sessions/{session_id}/move-party")
+async def move_session_party(session_id: int, payload: SessionMovePartyRequest):
+    """Move the active party to a location using canonical travel rules."""
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    location = None
+    if payload.location_id is not None:
+        location = await db.get_location(payload.location_id)
+    elif payload.location_name:
+        location = await db.get_location_by_name(session_id, payload.location_name)
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    result = await tools._move_party_to_location(
+        {'guild_id': session['guild_id'], 'session_id': session_id},
+        {
+            'location_id': location['id'],
+            'travel_description': payload.travel_description or '',
+        },
+    )
+    return json.loads(result)
+
+
+@app.post("/api/sessions/{session_id}/narrate")
+async def narrate_session(session_id: int, payload: SessionNarrateRequest):
+    """Generate DM narration text for the session's current scene context."""
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    handler = get_chat_handler()
+    actor = ChatActor(
+        user_id=session['dm_user_id'],
+        display_name=f"DM {session['dm_user_id']}",
+        character_name=None,
+        character_id=None,
+    )
+    synthetic_channel_id = web_user_id_from_uuid(f"api-session-narration:{session_id}")
+    result = await handler.process_single_message(
+        guild_id=session['guild_id'],
+        channel_id=synthetic_channel_id,
+        actor=actor,
+        user_message=f"[DM DIRECTIVE] Narrate this for the players in polished DM prose: {payload.text}",
+        history=[],
+        session_id=session_id,
+    )
+    return {
+        'title': payload.title,
+        'text': result['response'],
+        'mechanics_text': result['mechanics_text'],
+        'tool_results': result['tool_results'],
+    }
+
+
+@app.post("/api/sessions/{session_id}/session-zero")
+async def generate_session_zero(session_id: int, payload: SessionZeroGenerateRequest):
+    """Generate and persist a lightweight session-zero kickoff package."""
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    participants = await db.get_session_participants(session_id)
+    party_lines: List[str] = []
+    for participant in participants:
+        character_id = participant.get('character_id')
+        if not character_id:
+            continue
+        character = await db.get_character(character_id)
+        if character:
+            party_lines.append(f"- {character['name']}: {character.get('backstory') or 'No backstory provided.'}")
+
+    game_state = await db.get_game_state(session_id) or {}
+    location = await db.get_location(game_state['current_location_id']) if game_state.get('current_location_id') else None
+    prompt = payload.prompt or (
+        f"Create a session zero opener for the campaign '{session['name']}'.\n"
+        f"Setting: {session.get('setting') or session.get('world_theme')}.\n"
+        f"Starting location: {(location or {}).get('name') or game_state.get('current_location') or 'Unknown'}.\n"
+        f"Party:\n" + ("\n".join(party_lines) if party_lines else "- No party members yet.") +
+        "\nReturn sections titled Opening Scene, Quest Hooks, NPC Introductions, and DM Notes."
+    )
+
+    if not llm_client:
+        generated = {
+            'opening_scene': f"The party gathers at {(location or {}).get('name') or 'the starting point'}, where the first threads of the campaign begin to tighten.",
+            'quest_hooks': [
+                'A local problem demands immediate attention.',
+                'A mysterious faction is watching the party.',
+            ],
+            'npc_introductions': ['A local guide', 'A worried patron', 'A suspicious rival'],
+            'dm_notes': 'Refine this opening once an LLM key is configured.',
+        }
+    else:
+        generated_text = await llm_client.generate_response(prompt)
+        generated = {
+            'opening_scene': generated_text,
+            'quest_hooks': [],
+            'npc_introductions': [],
+            'dm_notes': generated_text,
+        }
+
+    existing_notes = game_state.get('dm_notes') if isinstance(game_state.get('dm_notes'), dict) else {}
+    existing_notes['session_zero'] = generated
+    await db.save_game_state(
+        session_id,
+        dm_notes=existing_notes,
+        active_content_pack_id=session.get('content_pack_id'),
+    )
+    return generated
+
+
 @app.post("/api/chat/identity", response_model=ChatIdentityResponse)
 async def create_chat_identity(http_request: Request):
     """Issue a server-generated browser chat identity."""
@@ -619,12 +829,14 @@ async def chat_with_dm(
         session['id'],
         x_web_identity,
         request.character_id,
-        require_character=True,
+        require_character=not request.dm_mode,
     )
+    if request.dm_mode and not await _browser_dm_allowed(session, web_user_id):
+        raise HTTPException(status_code=403, detail="Browser identity is not the session DM")
 
     synthetic_channel_id = web_user_id_from_uuid(f"web-session:{session['id']}:user:{x_web_identity}")
 
-    actor_name = character['name'] if character else f"Web Player {x_web_identity[:8]}"
+    actor_name = character['name'] if character else (f"DM {session['dm_user_id']}" if request.dm_mode else f"Web Player {x_web_identity[:8]}")
     actor = ChatActor(
         user_id=web_user_id,
         display_name=actor_name,
@@ -645,7 +857,7 @@ async def chat_with_dm(
         guild_id=session['guild_id'],
         channel_id=synthetic_channel_id,
         actor=actor,
-        user_message=request.message,
+        user_message=(f"[DM DIRECTIVE] {request.message}" if request.dm_mode else request.message),
         history=history,
         session_id=request.session_id,
     )
@@ -717,6 +929,7 @@ async def get_chat_bootstrap(
         available_characters=available_characters,
         game_state=game_state,
         recent_messages=recent_messages,
+        browser_dm=await _browser_dm_allowed(session, web_user_id),
         active_combat=active_combat,
         location=location,
         connections=connections,
@@ -731,6 +944,15 @@ async def list_locations(session_id: Optional[int] = None, guild_id: Optional[in
     """List locations"""
     locations = await db.get_locations(session_id=session_id, guild_id=guild_id)
     return {"locations": locations}
+
+
+@app.get("/api/sessions/{session_id}/location-tree")
+async def get_session_location_tree(session_id: int):
+    """Return the hierarchical location tree for a session."""
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"locations": await db.get_location_tree(session_id)}
 
 @app.get("/api/locations/{location_id}")
 async def get_location(location_id: int):
@@ -762,6 +984,16 @@ async def update_location(location_id: int, location: LocationUpdate):
         await db.update_location(location_id, **updates)
     return {"message": "Location updated"}
 
+
+@app.post("/api/locations/{location_id}/reveal")
+async def reveal_location(location_id: int):
+    """Reveal a location to players."""
+    location = await db.get_location(location_id)
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    await db.reveal_location(location_id)
+    return {"message": "Location revealed"}
+
 @app.delete("/api/locations/{location_id}")
 async def delete_location(location_id: int):
     """Delete a location"""
@@ -790,7 +1022,8 @@ async def list_npcs(session_id: Optional[int] = None, guild_id: Optional[int] = 
         async with aiosqlite.connect(db.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT * FROM npcs ORDER BY created_at DESC")
-            npcs = [dict(row) for row in await cursor.fetchall()]
+            rows = await cursor.fetchall()
+            npcs = [db._normalize_npc_record(dict(row)) for row in rows]
     return {"npcs": npcs}
 
 @app.get("/api/npcs/{npc_id}")
@@ -815,6 +1048,16 @@ async def update_npc(npc_id: int, npc: NPCUpdate):
         await db.update_npc(npc_id, **updates)
     return {"message": "NPC updated"}
 
+
+@app.post("/api/npcs/{npc_id}/reveal")
+async def reveal_npc(npc_id: int):
+    """Reveal an NPC to players."""
+    npc = await db.get_npc(npc_id)
+    if not npc:
+        raise HTTPException(status_code=404, detail="NPC not found")
+    await db.reveal_npc(npc_id)
+    return {"message": "NPC revealed"}
+
 @app.delete("/api/npcs/{npc_id}")
 async def delete_npc(npc_id: int):
     """Delete an NPC"""
@@ -836,7 +1079,20 @@ async def list_factions(session_id: Optional[int] = None, guild_id: Optional[int
 @app.post("/api/factions")
 async def create_faction(faction: FactionCreate):
     """Create a faction."""
-    faction_id = await db.create_faction(**faction.dict())
+    payload = faction.dict()
+    disposition = payload.pop('disposition', None)
+    is_hidden = payload.pop('is_hidden', False)
+    tags = payload.pop('tags', [])
+    faction_id = await db.create_faction(**payload)
+    updates = {}
+    if disposition is not None:
+        updates['disposition'] = disposition
+    if is_hidden is not None:
+        updates['is_hidden'] = int(bool(is_hidden))
+    if tags is not None:
+        updates['tags'] = tags
+    if updates:
+        await db.update_faction(faction_id, **updates)
     return {"id": faction_id, "message": "Faction created"}
 
 
@@ -870,6 +1126,26 @@ async def add_faction_member(faction_id: int, member: FactionMemberCreate):
     return {"id": membership_id, "message": "Faction member added"}
 
 
+@app.patch("/api/faction-memberships/{membership_id}")
+async def update_faction_member(membership_id: int, member: FactionMemberUpdate):
+    """Update a faction member."""
+    updates = {k: v for k, v in member.dict().items() if v is not None}
+    if updates:
+        updated = await db.update_faction_member(membership_id, **updates)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Faction membership not found")
+    return {"message": "Faction member updated"}
+
+
+@app.delete("/api/faction-memberships/{membership_id}")
+async def delete_faction_member(membership_id: int):
+    """Delete a faction member."""
+    deleted = await db.delete_faction_member(membership_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Faction membership not found")
+    return {"message": "Faction member deleted"}
+
+
 @app.get("/api/characters/{char_id}/factions")
 async def get_character_factions(char_id: int):
     """Get character faction reputation entries."""
@@ -880,6 +1156,19 @@ async def get_character_factions(char_id: int):
 @app.patch("/api/characters/{char_id}/factions/{faction_id}")
 async def update_character_faction_reputation(char_id: int, faction_id: int, payload: CharacterFactionReputationUpdate):
     """Update character faction reputation."""
+    if payload.reputation is not None or payload.tier is not None:
+        current = await db.get_character_faction_reputation(char_id, faction_id)
+        if not isinstance(current, dict):
+            current = {'reputation': 0, 'tier': 'neutral', 'notes': None}
+        record = await db.upsert_character_faction_reputation(
+            character_id=char_id,
+            faction_id=faction_id,
+            reputation=payload.reputation if payload.reputation is not None else current.get('reputation', 0),
+            tier=payload.tier or current.get('tier', 'neutral'),
+            notes=payload.notes,
+        )
+        return {"reputation": record, "message": "Faction reputation updated"}
+
     reputation = await db.update_character_faction_reputation(
         character_id=char_id,
         faction_id=faction_id,
@@ -887,6 +1176,15 @@ async def update_character_faction_reputation(char_id: int, faction_id: int, pay
         notes=payload.notes,
     )
     return {"reputation": reputation, "message": "Faction reputation updated"}
+
+
+@app.delete("/api/characters/{char_id}/factions/{faction_id}")
+async def delete_character_faction_reputation(char_id: int, faction_id: int):
+    """Delete a character faction reputation entry."""
+    deleted = await db.delete_character_faction_reputation(char_id, faction_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Faction reputation not found")
+    return {"message": "Faction reputation deleted"}
 
 # ============================================================================
 # STORY ITEM ENDPOINTS
@@ -1214,116 +1512,37 @@ async def delete_inventory_item(inventory_id: int, quantity: int = Query(1)):
 @app.get("/api/quests")
 async def list_quests(session_id: Optional[int] = None, guild_id: Optional[int] = None, status: Optional[str] = None):
     """List quests"""
-    import aiosqlite
-    async with aiosqlite.connect(db.db_path) as conn:
-        conn.row_factory = aiosqlite.Row
-        query = "SELECT * FROM quests WHERE 1=1"
-        params = []
-        
-        if session_id:
-            query += " AND session_id = ?"
-            params.append(session_id)
-        if guild_id:
-            query += " AND guild_id = ?"
-            params.append(guild_id)
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        
-        query += " ORDER BY created_at DESC"
-        cursor = await conn.execute(query, params)
-        quests = []
-        for row in await cursor.fetchall():
-            quest = dict(row)
-            quest['objectives'] = json.loads(quest['objectives']) if quest.get('objectives') else []
-            quest['rewards'] = json.loads(quest['rewards']) if quest.get('rewards') else {}
-            quests.append(quest)
-        return {"quests": quests}
+    quests = await db.get_quests(session_id=session_id, guild_id=guild_id, status=status)
+    return {"quests": quests}
 
 @app.get("/api/quests/{quest_id}")
 async def get_quest(quest_id: int):
     """Get a quest"""
-    import aiosqlite
-    async with aiosqlite.connect(db.db_path) as conn:
-        conn.row_factory = aiosqlite.Row
-        cursor = await conn.execute("SELECT * FROM quests WHERE id = ?", (quest_id,))
-        row = await cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Quest not found")
-        quest = dict(row)
-        quest['objectives'] = json.loads(quest['objectives']) if quest.get('objectives') else []
-        quest['rewards'] = json.loads(quest['rewards']) if quest.get('rewards') else {}
-        return quest
+    quest = await db.get_quest(quest_id)
+    if not quest:
+        raise HTTPException(status_code=404, detail="Quest not found")
+    return quest
 
 @app.post("/api/quests")
 async def create_quest(quest: QuestCreate):
     """Create a quest"""
-    import aiosqlite
-    now = datetime.now().isoformat()
-    
-    async with aiosqlite.connect(db.db_path) as conn:
-        cursor = await conn.execute("""
-            INSERT INTO quests (guild_id, session_id, title, description, objectives, 
-                rewards, status, difficulty, quest_giver_npc_id, dm_notes, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?, ?)
-        """, (
-            quest.guild_id, quest.session_id, quest.title, quest.description,
-            json.dumps(quest.objectives), json.dumps(quest.rewards),
-            quest.difficulty, quest.quest_giver_npc_id, quest.dm_notes,
-            quest.created_by, now
-        ))
-        await conn.commit()
-        return {"id": cursor.lastrowid, "message": "Quest created"}
+    quest_id = await db.create_quest(**quest.dict())
+    if quest.status != 'available':
+        await db.update_quest(quest_id, status=quest.status)
+    return {"id": quest_id, "message": "Quest created"}
 
 @app.patch("/api/quests/{quest_id}")
 async def update_quest(quest_id: int, quest: QuestUpdate):
     """Update a quest"""
-    import aiosqlite
-    
-    async with aiosqlite.connect(db.db_path) as conn:
-        updates = []
-        values = []
-        
-        if quest.title is not None:
-            updates.append("title = ?")
-            values.append(quest.title)
-        if quest.description is not None:
-            updates.append("description = ?")
-            values.append(quest.description)
-        if quest.objectives is not None:
-            updates.append("objectives = ?")
-            values.append(json.dumps(quest.objectives))
-        if quest.rewards is not None:
-            updates.append("rewards = ?")
-            values.append(json.dumps(quest.rewards))
-        if quest.status is not None:
-            updates.append("status = ?")
-            values.append(quest.status)
-        if quest.difficulty is not None:
-            updates.append("difficulty = ?")
-            values.append(quest.difficulty)
-        if quest.dm_notes is not None:
-            updates.append("dm_notes = ?")
-            values.append(quest.dm_notes)
-        
-        if updates:
-            values.append(quest_id)
-            await conn.execute(
-                f"UPDATE quests SET {', '.join(updates)} WHERE id = ?",
-                values
-            )
-            await conn.commit()
-    
+    updates = {k: v for k, v in quest.dict().items() if v is not None}
+    if updates:
+        await db.update_quest(quest_id, **updates)
     return {"message": "Quest updated"}
 
 @app.delete("/api/quests/{quest_id}")
 async def delete_quest(quest_id: int):
     """Delete a quest"""
-    import aiosqlite
-    async with aiosqlite.connect(db.db_path) as conn:
-        await conn.execute("DELETE FROM quest_progress WHERE quest_id = ?", (quest_id,))
-        await conn.execute("DELETE FROM quests WHERE id = ?", (quest_id,))
-        await conn.commit()
+    await db.delete_quest(quest_id)
     return {"message": "Quest deleted"}
 
 # ============================================================================
@@ -2179,16 +2398,43 @@ async def create_storyline(storyline: StorylineCreate):
     return {"id": storyline_id, "message": "Storyline created"}
 
 
+@app.patch("/api/storylines/{storyline_id}")
+async def update_storyline(storyline_id: int, storyline: StorylineUpdate):
+    """Update a storyline."""
+    updates = {k: v for k, v in storyline.dict().items() if v is not None}
+    if updates:
+        updated = await db.update_storyline(storyline_id, **updates)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Storyline not found")
+    return {"message": "Storyline updated"}
+
+
 @app.get("/api/storylines/{storyline_id}")
 async def get_storyline(storyline_id: int):
     """Get a storyline with nodes and edges."""
+    state = await db.get_storyline_state(storyline_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Storyline not found")
+    return state
+
+
+@app.delete("/api/storylines/{storyline_id}")
+async def delete_storyline(storyline_id: int):
+    """Delete a storyline."""
+    deleted = await db.delete_storyline(storyline_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Storyline not found")
+    return {"message": "Storyline deleted"}
+
+
+@app.get("/api/storylines/{storyline_id}/quests")
+async def get_storyline_quests(storyline_id: int):
+    """List quests attached to a storyline."""
     storyline = await db.get_storyline(storyline_id)
     if not storyline:
         raise HTTPException(status_code=404, detail="Storyline not found")
-    nodes = await db.get_storyline_nodes(storyline_id)
-    edges = await db.get_storyline_edges(storyline_id)
-    progress = await db.get_storyline_progress(storyline_id)
-    return {"storyline": storyline, "nodes": nodes, "edges": edges, "progress": progress}
+    quests = await db.get_storyline_quests(storyline_id)
+    return {"quests": quests}
 
 
 @app.post("/api/storylines/{storyline_id}/nodes")
@@ -2223,7 +2469,19 @@ async def advance_storyline(storyline_id: int, payload: StorylineAdvanceRequest)
 @app.get("/api/sessions/{session_id}/storyline-state")
 async def get_session_storyline_state(session_id: int):
     """Get storyline state for a session."""
-    return await db.get_storyline_state(session_id)
+    storylines = await db.get_storylines(session_id=session_id)
+    return {
+        "storylines": [await db.get_storyline_state(storyline['id']) for storyline in storylines]
+    }
+
+
+@app.get("/api/campaign/overview")
+async def get_campaign_overview(session_id: int):
+    """Get a session campaign overview for studio/admin surfaces."""
+    overview = await db.get_campaign_overview(session_id)
+    if not overview:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return overview
 
 
 @app.get("/api/plot-points")
@@ -2238,6 +2496,26 @@ async def create_plot_point(plot_point: PlotPointCreate):
     """Create a plot point."""
     plot_point_id = await db.create_plot_point(**plot_point.dict())
     return {"id": plot_point_id, "message": "Plot point created"}
+
+
+@app.patch("/api/plot-points/{plot_point_id}")
+async def update_plot_point(plot_point_id: int, plot_point: PlotPointUpdate):
+    """Update a plot point."""
+    updates = {k: v for k, v in plot_point.dict().items() if v is not None}
+    if updates:
+        updated = await db.update_plot_point(plot_point_id, **updates)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Plot point not found")
+    return {"message": "Plot point updated"}
+
+
+@app.delete("/api/plot-points/{plot_point_id}")
+async def delete_plot_point(plot_point_id: int):
+    """Delete a plot point."""
+    deleted = await db.delete_plot_point(plot_point_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Plot point not found")
+    return {"message": "Plot point deleted"}
 
 
 @app.post("/api/plot-clues/{clue_id}/discover")
@@ -2459,219 +2737,7 @@ async def finalize_campaign(data: CampaignFinalize):
     
     Creates the session, locations, NPCs, and quests.
     """
-    import aiosqlite
-    from datetime import datetime
-    
-    async with aiosqlite.connect(db.db_path) as conn:
-        conn.row_factory = aiosqlite.Row
-        now = datetime.utcnow().isoformat()
-        themes_manifest = get_themes_manifest()
-        world_state = {
-            "world_setting": data.world_setting,
-            "factions": data.factions,
-            "generation_settings": data.generation_settings,
-        }
-        
-        world_theme = data.world_setting.get('theme') or data.generation_settings.get('world_theme') or 'fantasy'
-        theme_manifest = themes_manifest.get('themes', {}).get(world_theme) or themes_manifest.get('themes', {}).get(themes_manifest.get('default_theme', 'fantasy')) or {}
-        content_pack_id = (
-            data.content_pack_id
-            or data.world_setting.get('content_pack_id')
-            or data.generation_settings.get('content_pack_id')
-            or theme_manifest.get('default_content_pack_id', DEFAULT_CONTENT_PACK_ID)
-        )
-        rules_profile_id = theme_manifest.get('default_rules_profile_id', 'd20_fantasy')
-        genre_family = theme_manifest.get('genre_family', world_theme or 'fantasy')
-        theme_config = {
-            'magic_level': data.generation_settings.get('magic_level'),
-            'technology_level': data.generation_settings.get('technology_level'),
-            'tone': data.generation_settings.get('tone'),
-        }
-
-        # Create the session (set to 'active' so it's immediately playable)
-        cursor = await conn.execute("""
-            INSERT INTO sessions (
-                guild_id, name, description, dm_user_id, status, setting, world_state,
-                world_theme, content_pack_id, genre_family, rules_profile_id, theme_config, created_at
-            )
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.guild_id,
-            data.name,
-            data.description or data.starting_scenario[:200],
-            data.dm_user_id,
-            data.world_setting.get('name') or data.name,
-            json.dumps(world_state),
-            world_theme,
-            content_pack_id,
-            genre_family,
-            rules_profile_id,
-            json.dumps(theme_config),
-            now,
-        ))
-        session_id = cursor.lastrowid
-
-        preview_connections = _normalize_preview_connections(data.locations)
-        starting_location_id = None
-        first_location_id = None
-        
-        # Create game state
-        await conn.execute("""
-            INSERT INTO game_state (
-                session_id, current_scene, current_location, current_location_id, dm_notes,
-                active_content_pack_id, theme_state, allowed_content_packs
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            session_id,
-            data.starting_scenario,
-            data.locations[0]['name'] if data.locations else None,
-            None,
-            json.dumps({
-                "world_setting": data.world_setting,
-                "factions": data.factions,
-                "generation_settings": data.generation_settings,
-                "campaign_description": data.description,
-                "active_content_pack_id": content_pack_id,
-            }),
-            content_pack_id,
-            json.dumps(theme_config),
-            json.dumps([content_pack_id]),
-        ))
-        
-        location_id_map = {}  # Map preview IDs to real IDs
-        
-        # Create locations
-        for index, loc in enumerate(data.locations):
-            preview_location_id = loc.get('id') or f"loc_{len(location_id_map) + 1}"
-            cursor = await conn.execute("""
-                INSERT INTO locations (
-                    session_id, guild_id, name, slug, description, location_type, hierarchy_kind,
-                    tags, dm_notes, is_hidden, discoverability, danger_level,
-                    hidden_secrets, points_of_interest, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                data.guild_id,
-                loc['name'],
-                loc.get('slug'),
-                loc.get('description', ''),
-                loc.get('type', 'generic'),
-                loc.get('hierarchy_kind', 'location'),
-                json.dumps(loc.get('tags', [])),
-                loc.get('dm_notes'),
-                int(bool(loc.get('is_hidden', False))),
-                loc.get('discoverability', 'visible'),
-                loc.get('danger_level', 1),
-                json.dumps({}),
-                json.dumps(loc.get('points_of_interest', [])),
-                now,
-                    now,
-                ))
-            location_id_map[preview_location_id] = cursor.lastrowid
-            if first_location_id is None:
-                first_location_id = cursor.lastrowid
-            if index == 0:
-                starting_location_id = cursor.lastrowid
-
-        if starting_location_id is None:
-            starting_location_id = first_location_id
-
-        if starting_location_id is not None:
-            await conn.execute(
-                "UPDATE game_state SET current_location_id = ? WHERE session_id = ?",
-                (starting_location_id, session_id),
-            )
-
-        for connection in preview_connections:
-            from_location_id = location_id_map.get(connection['from_preview_id'])
-            to_location_id = location_id_map.get(connection['to_preview_id'])
-            if not from_location_id or not to_location_id:
-                continue
-
-            await conn.execute("""
-                INSERT OR IGNORE INTO location_connections (
-                    from_location_id, to_location_id, direction, connection_type, distance_text,
-                    travel_time, travel_mode, lock_state, hidden, bidirectional
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                from_location_id,
-                to_location_id,
-                connection['direction'],
-                connection.get('connection_type', 'path'),
-                connection.get('distance_text'),
-                connection['travel_time'],
-                connection.get('travel_mode', 'walk'),
-                connection.get('lock_state', 'open'),
-                int(connection['hidden']),
-                int(connection['bidirectional']),
-            ))
-        
-        npc_id_map = {}  # Map preview IDs to real IDs
-        
-        # Create NPCs
-        for npc in data.npcs:
-            preview_npc_id = npc.get('id') or f"npc_{len(npc_id_map) + 1}"
-            # Find location name if assigned (npcs uses 'location' TEXT, not location_id)
-            location_name = None
-            if npc.get('location_id') and npc['location_id'] in location_id_map:
-                # Get the location name from the data
-                for loc in data.locations:
-                    if loc['id'] == npc.get('location_id'):
-                        location_name = loc['name']
-                        break
-            
-            cursor = await conn.execute("""
-                INSERT INTO npcs (session_id, guild_id, name, description, personality, 
-                                  npc_type, location, location_id, created_by, created_at, dialogue_context)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                data.guild_id,
-                npc['name'],
-                npc.get('description', ''),
-                npc.get('personality', ''),
-                npc.get('type', 'neutral'),
-                location_name,
-                location_id_map.get(npc.get('location_id')),
-                data.dm_user_id,
-                now,
-                json.dumps({
-                    "goals": npc.get('goals'),
-                    "is_party_member_candidate": npc.get('is_party_member_candidate', False),
-                }),
-            ))
-            npc_id_map[preview_npc_id] = cursor.lastrowid
-        
-        # Create quests
-        for quest in data.quest_hooks:
-            quest_giver_id = None
-            if quest.get('quest_giver_id') and quest['quest_giver_id'] in npc_id_map:
-                quest_giver_id = npc_id_map[quest['quest_giver_id']]
-            
-            await conn.execute("""
-                INSERT INTO quests (session_id, guild_id, title, description, objectives, 
-                                    rewards, status, difficulty, quest_giver_npc_id, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?)
-            """, (session_id, data.guild_id, quest.get('title') or quest.get('name') or 'Untitled Quest', quest.get('description', ''),
-                  json.dumps(quest.get('objectives', [])), json.dumps(quest.get('rewards', {})),
-                  quest.get('difficulty', 'medium'), quest_giver_id, data.dm_user_id, now))
-        
-        await conn.commit()
-    
-    return {
-        "success": True,
-        "session_id": session_id,
-        "message": f"Campaign '{data.name}' created successfully!",
-        "stats": {
-            "locations": len(data.locations),
-            "npcs": len(data.npcs),
-            "factions": len(data.factions),
-            "quests": len(data.quest_hooks)
-        }
-    }
+    return await db.create_campaign_from_preview(**data.dict())
 
 
 @app.get("/api/campaign/templates")

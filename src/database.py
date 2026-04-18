@@ -29,6 +29,8 @@ JSON_NPC_FIELDS = {
 JSON_QUEST_FIELDS = {
     'objectives': [],
     'rewards': {},
+    'availability_rules_json': {},
+    'branching_rules_json': {},
     'failure_rules_json': {},
 }
 JSON_QUEST_PROGRESS_FIELDS = {
@@ -37,6 +39,7 @@ JSON_QUEST_PROGRESS_FIELDS = {
     'variables_json': {},
 }
 JSON_FACTION_FIELDS = {
+    'tags': [],
     'goals': [],
     'resources': [],
     'allies': [],
@@ -67,6 +70,12 @@ JSON_PLOT_POINT_FIELDS = {
 }
 JSON_PLOT_CLUE_FIELDS = {
     'metadata_json': {},
+}
+JSON_LOCATION_FIELDS = {
+    'connected_locations': [],
+    'npcs_present': [],
+    'tags': [],
+    'points_of_interest': [],
 }
 
 
@@ -206,9 +215,19 @@ class Database:
                     quest_giver_npc_id INTEGER,
                     dm_notes TEXT,
                     dm_plan TEXT,
+                    storyline_id INTEGER,
+                    primary_location_id INTEGER,
+                    quest_type TEXT DEFAULT 'main',
+                    availability_rules_json TEXT DEFAULT '{}',
+                    branching_rules_json TEXT DEFAULT '{}',
+                    failure_rules_json TEXT DEFAULT '{}',
                     created_by INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
-                    completed_at TEXT
+                    completed_at TEXT,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id),
+                    FOREIGN KEY (quest_giver_npc_id) REFERENCES npcs(id),
+                    FOREIGN KEY (storyline_id) REFERENCES storylines(id),
+                    FOREIGN KEY (primary_location_id) REFERENCES locations(id)
                 )
             """)
             
@@ -251,11 +270,22 @@ class Database:
                     merchant_inventory TEXT DEFAULT '[]',
                     dialogue_context TEXT,
                     stats TEXT DEFAULT '{}',
+                    actor_kind TEXT DEFAULT 'npc',
+                    faction_id INTEGER,
+                    faction_role TEXT,
+                    goals TEXT DEFAULT '[]',
+                    secrets TEXT DEFAULT '[]',
+                    tags TEXT DEFAULT '[]',
+                    challenge_rating REAL DEFAULT 0,
+                    actions TEXT DEFAULT '[]',
+                    traits TEXT DEFAULT '[]',
+                    is_revealed INTEGER DEFAULT 0,
                     is_alive INTEGER DEFAULT 1,
                     created_by INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(id),
-                    FOREIGN KEY (location_id) REFERENCES locations(id)
+                    FOREIGN KEY (location_id) REFERENCES locations(id),
+                    FOREIGN KEY (faction_id) REFERENCES factions(id)
                 )
             """)
             
@@ -287,8 +317,11 @@ class Database:
                     name TEXT NOT NULL,
                     description TEXT,
                     faction_type TEXT DEFAULT 'neutral',
+                    disposition TEXT DEFAULT 'neutral',
                     alignment TEXT,
                     influence INTEGER DEFAULT 0,
+                    is_hidden INTEGER DEFAULT 0,
+                    tags TEXT DEFAULT '[]',
                     goals TEXT DEFAULT '[]',
                     resources TEXT DEFAULT '[]',
                     allies TEXT DEFAULT '[]',
@@ -321,6 +354,7 @@ class Database:
                     character_id INTEGER NOT NULL,
                     faction_id INTEGER NOT NULL,
                     reputation INTEGER DEFAULT 0,
+                    tier TEXT DEFAULT 'neutral',
                     notes TEXT,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY (character_id) REFERENCES characters(id),
@@ -701,12 +735,21 @@ class Database:
                     name TEXT NOT NULL,
                     description TEXT,
                     location_type TEXT DEFAULT 'area',
+                    slug TEXT,
+                    hierarchy_kind TEXT DEFAULT 'location',
                     parent_location_id INTEGER,
+                    depth INTEGER DEFAULT 0,
+                    canonical_path TEXT,
                     danger_level INTEGER DEFAULT 0,
                     current_weather TEXT,
                     hidden_secrets TEXT,
                     connected_locations TEXT DEFAULT '[]',
                     npcs_present TEXT DEFAULT '[]',
+                    tags TEXT DEFAULT '[]',
+                    dm_notes TEXT,
+                    is_hidden INTEGER DEFAULT 0,
+                    discoverability TEXT DEFAULT 'visible',
+                    points_of_interest TEXT DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(id),
@@ -724,6 +767,10 @@ class Database:
                     to_location_id INTEGER NOT NULL,
                     direction TEXT,
                     travel_time INTEGER DEFAULT 1,
+                    connection_type TEXT DEFAULT 'path',
+                    distance_text TEXT,
+                    travel_mode TEXT DEFAULT 'walk',
+                    lock_state TEXT DEFAULT 'open',
                     requirements TEXT,
                     hidden INTEGER DEFAULT 0,
                     bidirectional INTEGER DEFAULT 1,
@@ -802,7 +849,9 @@ class Database:
                     session_id INTEGER,
                     title TEXT NOT NULL,
                     description TEXT,
-                    status TEXT DEFAULT 'active',
+                    status TEXT DEFAULT 'draft',
+                    act_label TEXT,
+                    sort_order INTEGER DEFAULT 0,
                     current_node_id INTEGER,
                     created_by INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
@@ -1214,6 +1263,9 @@ class Database:
             if 'traits' not in columns:
                 await db.execute("ALTER TABLE npcs ADD COLUMN traits TEXT DEFAULT '[]'")
                 await db.commit()
+            if 'is_revealed' not in columns:
+                await db.execute("ALTER TABLE npcs ADD COLUMN is_revealed INTEGER DEFAULT 0")
+                await db.commit()
 
             await db.execute("UPDATE npcs SET actor_kind = COALESCE(NULLIF(actor_kind, ''), 'npc')")
             await db.execute("UPDATE npcs SET goals = COALESCE(NULLIF(goals, ''), '[]')")
@@ -1221,6 +1273,7 @@ class Database:
             await db.execute("UPDATE npcs SET tags = COALESCE(NULLIF(tags, ''), '[]')")
             await db.execute("UPDATE npcs SET actions = COALESCE(NULLIF(actions, ''), '[]')")
             await db.execute("UPDATE npcs SET traits = COALESCE(NULLIF(traits, ''), '[]')")
+            await db.execute("UPDATE npcs SET is_revealed = COALESCE(is_revealed, 0)")
             await db.commit()
         except Exception:
             pass
@@ -1303,6 +1356,110 @@ class Database:
         # Migration 10: Seed content-pack monster templates into relational table
         try:
             await self._seed_default_monster_templates(db)
+        except Exception:
+            pass
+
+        # Migration 11: V2 worldbuilding and campaign studio fields
+        try:
+            cursor = await db.execute("PRAGMA table_info(factions)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'disposition' not in columns:
+                await db.execute("ALTER TABLE factions ADD COLUMN disposition TEXT DEFAULT 'neutral'")
+                await db.commit()
+            if 'is_hidden' not in columns:
+                await db.execute("ALTER TABLE factions ADD COLUMN is_hidden INTEGER DEFAULT 0")
+                await db.commit()
+            if 'tags' not in columns:
+                await db.execute("ALTER TABLE factions ADD COLUMN tags TEXT DEFAULT '[]'")
+                await db.commit()
+
+            await db.execute("UPDATE factions SET disposition = COALESCE(NULLIF(disposition, ''), COALESCE(NULLIF(faction_type, ''), 'neutral'))")
+            await db.execute("UPDATE factions SET tags = COALESCE(NULLIF(tags, ''), '[]')")
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(character_faction_reputation)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'tier' not in columns:
+                await db.execute("ALTER TABLE character_faction_reputation ADD COLUMN tier TEXT DEFAULT 'neutral'")
+                await db.commit()
+
+            await db.execute("UPDATE character_faction_reputation SET tier = COALESCE(NULLIF(tier, ''), 'neutral')")
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(storylines)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'act_label' not in columns:
+                await db.execute("ALTER TABLE storylines ADD COLUMN act_label TEXT")
+                await db.commit()
+            if 'sort_order' not in columns:
+                await db.execute("ALTER TABLE storylines ADD COLUMN sort_order INTEGER DEFAULT 0")
+                await db.commit()
+
+            await db.execute("UPDATE storylines SET status = CASE WHEN status = 'active' THEN 'draft' ELSE COALESCE(NULLIF(status, ''), 'draft') END")
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(locations)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'depth' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN depth INTEGER DEFAULT 0")
+                await db.commit()
+            if 'canonical_path' not in columns:
+                await db.execute("ALTER TABLE locations ADD COLUMN canonical_path TEXT")
+                await db.commit()
+
+            await db.execute("UPDATE locations SET hierarchy_kind = COALESCE(NULLIF(hierarchy_kind, ''), 'location')")
+            await db.execute("UPDATE locations SET depth = COALESCE(depth, 0)")
+            await db.execute("UPDATE locations SET tags = COALESCE(NULLIF(tags, ''), '[]')")
+            await db.execute("UPDATE locations SET is_hidden = COALESCE(is_hidden, 0)")
+            await db.execute(
+                """
+                UPDATE locations
+                SET canonical_path = COALESCE(
+                    NULLIF(canonical_path, ''),
+                    CASE
+                        WHEN parent_location_id IS NULL THEN name
+                        ELSE (
+                            COALESCE((SELECT canonical_path FROM locations parent WHERE parent.id = locations.parent_location_id), '') ||
+                            CASE WHEN (SELECT canonical_path FROM locations parent WHERE parent.id = locations.parent_location_id) IS NOT NULL THEN ' / ' ELSE '' END ||
+                            name
+                        )
+                    END
+                )
+                """
+            )
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            cursor = await db.execute("PRAGMA table_info(quests)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'availability_rules_json' not in columns:
+                await db.execute("ALTER TABLE quests ADD COLUMN availability_rules_json TEXT DEFAULT '{}'")
+                await db.commit()
+            if 'branching_rules_json' not in columns:
+                await db.execute("ALTER TABLE quests ADD COLUMN branching_rules_json TEXT DEFAULT '{}'")
+                await db.commit()
+
+            await db.execute("UPDATE quests SET quest_type = CASE WHEN quest_type = 'quest' THEN 'main' ELSE COALESCE(NULLIF(quest_type, ''), 'main') END")
+            await db.execute("UPDATE quests SET availability_rules_json = COALESCE(NULLIF(availability_rules_json, ''), '{}')")
+            await db.execute("UPDATE quests SET branching_rules_json = COALESCE(NULLIF(branching_rules_json, ''), '{}')")
+            await db.execute("UPDATE quests SET failure_rules_json = COALESCE(NULLIF(failure_rules_json, ''), '{}')")
+            await db.commit()
         except Exception:
             pass
     
@@ -2169,9 +2326,12 @@ class Database:
     async def create_quest(self, guild_id: int, title: str, description: str,
                            objectives: List[Dict], rewards: Dict, created_by: int,
                            session_id: int = None, difficulty: str = "medium",
+                           status: str = 'available',
                            quest_giver_npc_id: int = None, dm_notes: str = None,
                            dm_plan: str = None, storyline_id: int = None,
-                           primary_location_id: int = None, quest_type: str = 'quest',
+                           primary_location_id: int = None, quest_type: str = 'main',
+                           availability_rules_json: Dict[str, Any] = None,
+                           branching_rules_json: Dict[str, Any] = None,
                            failure_rules_json: Dict[str, Any] = None) -> int:
         """Create a new quest"""
         now = datetime.utcnow().isoformat()
@@ -2179,12 +2339,14 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO quests (guild_id, session_id, title, description, objectives,
-                    rewards, difficulty, quest_giver_npc_id, dm_notes, dm_plan, created_by, created_at,
-                    storyline_id, primary_location_id, quest_type, failure_rules_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rewards, status, difficulty, quest_giver_npc_id, dm_notes, dm_plan, created_by, created_at,
+                    storyline_id, primary_location_id, quest_type, availability_rules_json,
+                    branching_rules_json, failure_rules_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (guild_id, session_id, title, description, json.dumps(objectives),
-                  json.dumps(rewards), difficulty, quest_giver_npc_id, dm_notes, dm_plan,
+                  json.dumps(rewards), status, difficulty, quest_giver_npc_id, dm_notes, dm_plan,
                   created_by, now, storyline_id, primary_location_id, quest_type,
+                  json.dumps(availability_rules_json or {}), json.dumps(branching_rules_json or {}),
                   json.dumps(failure_rules_json or {})))
             await db.commit()
             return cursor.lastrowid
@@ -2719,6 +2881,9 @@ class Database:
     def _normalize_quest_record(self, quest: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _normalize_json_fields(quest, JSON_QUEST_FIELDS)
 
+    def _normalize_location_record(self, location: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _normalize_json_fields(location, JSON_LOCATION_FIELDS)
+
     def _normalize_quest_progress_record(self, progress: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _normalize_json_fields(progress, JSON_QUEST_PROGRESS_FIELDS)
 
@@ -3065,50 +3230,315 @@ class Database:
         if not session:
             return None
         
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            
-            # Get participants with character info
-            cursor = await db.execute("""
-                SELECT sp.*, c.name as character_name, c.class as character_class, 
-                       c.race as character_race, c.level as character_level
-                FROM session_participants sp
-                LEFT JOIN characters c ON sp.character_id = c.id
-                WHERE sp.session_id = ?
-            """, (session_id,))
-            participants = [dict(row) for row in await cursor.fetchall()]
-            
-            # Get session locations
-            cursor = await db.execute("""
-                SELECT * FROM locations WHERE session_id = ?
-            """, (session_id,))
-            locations = [dict(row) for row in await cursor.fetchall()]
-            
-            # Get session NPCs
-            cursor = await db.execute("""
-                SELECT * FROM npcs WHERE session_id = ?
-            """, (session_id,))
-            npcs = [dict(row) for row in await cursor.fetchall()]
-            
-            # Get session quests
-            cursor = await db.execute("""
-                SELECT * FROM quests WHERE session_id = ?
-            """, (session_id,))
-            quests = []
-            for row in await cursor.fetchall():
-                quest = dict(row)
-                if quest.get('objectives'):
-                    quest['objectives'] = json.loads(quest['objectives'])
-                if quest.get('rewards'):
-                    quest['rewards'] = json.loads(quest['rewards'])
-                quests.append(quest)
+        participants = await self.get_session_participants(session_id)
+        locations = await self.get_locations(session_id=session_id)
+        npcs = await self.get_session_npcs(session_id=session_id, include_dead=True)
+        quests = await self.get_quests(session_id=session_id)
+        factions = await self.get_factions(session_id=session_id)
+        game_state = await self.get_game_state(session_id)
+        storylines = await self.get_storylines(session_id=session_id)
+        plot_points = await self.get_plot_points(session_id=session_id)
+        snapshots = await self.get_session_snapshots(session_id)
         
         return {
             **session,
             "participants": participants,
             "locations": locations,
             "npcs": npcs,
-            "quests": quests
+            "quests": quests,
+            "factions": factions,
+            "game_state": game_state,
+            "storylines": storylines,
+            "plot_points": plot_points,
+            "snapshots": snapshots,
+        }
+
+    async def create_campaign_from_preview(
+        self,
+        guild_id: int,
+        dm_user_id: int,
+        name: str,
+        description: Optional[str],
+        world_setting: Dict[str, Any],
+        locations: List[Dict[str, Any]],
+        npcs: List[Dict[str, Any]],
+        factions: List[Dict[str, Any]],
+        quest_hooks: List[Dict[str, Any]],
+        starting_scenario: str,
+        generation_settings: Optional[Dict[str, Any]] = None,
+        content_pack_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist a generated campaign preview using canonical DB helpers."""
+        generation_settings = generation_settings or {}
+        world_theme = world_setting.get('theme') or generation_settings.get('world_theme') or 'fantasy'
+        resolved_content_pack_id = content_pack_id or world_setting.get('content_pack_id') or generation_settings.get('content_pack_id') or DEFAULT_CONTENT_PACK_ID
+        genre_family = world_theme or 'fantasy'
+        rules_profile_id = generation_settings.get('rules_profile_id') or 'd20_fantasy'
+        theme_config = {
+            'magic_level': generation_settings.get('magic_level'),
+            'technology_level': generation_settings.get('technology_level'),
+            'tone': generation_settings.get('tone'),
+        }
+        world_state = {
+            'world_setting': world_setting,
+            'factions': factions,
+            'generation_settings': generation_settings,
+        }
+
+        session_id = await self.create_session(
+            guild_id=guild_id,
+            name=name,
+            description=description or starting_scenario[:200],
+            dm_user_id=dm_user_id,
+            setting=world_setting.get('name') or name,
+            max_players=int(generation_settings.get('max_players') or 6),
+        )
+        await self.update_session(
+            session_id,
+            status='active',
+            setting=world_setting.get('name') or name,
+            world_state=world_state,
+            world_theme=world_theme,
+            content_pack_id=resolved_content_pack_id,
+            genre_family=genre_family,
+            rules_profile_id=rules_profile_id,
+            theme_config=theme_config,
+        )
+
+        location_id_map: Dict[str, int] = {}
+        locations_by_preview_id: Dict[str, Dict[str, Any]] = {}
+        first_location_id: Optional[int] = None
+        starting_location_id: Optional[int] = None
+
+        for index, location in enumerate(locations):
+            preview_location_id = str(location.get('id') or f"loc_{index + 1}")
+            locations_by_preview_id[preview_location_id] = location
+
+            location_id = await self.create_location(
+                guild_id=guild_id,
+                name=location['name'],
+                created_by=dm_user_id,
+                session_id=session_id,
+                description=location.get('description', ''),
+                location_type=location.get('type') or location.get('location_type', 'generic'),
+                slug=location.get('slug'),
+                hierarchy_kind=location.get('hierarchy_kind', 'location'),
+                tags=location.get('tags', []),
+                dm_notes=location.get('dm_notes'),
+                is_hidden=bool(location.get('is_hidden', False)),
+                discoverability=location.get('discoverability', 'visible'),
+                points_of_interest=location.get('points_of_interest', []),
+                current_weather=location.get('current_weather'),
+                danger_level=location.get('danger_level', 1),
+                hidden_secrets=location.get('hidden_secrets'),
+            )
+            location_id_map[preview_location_id] = location_id
+            if first_location_id is None:
+                first_location_id = location_id
+            if index == 0:
+                starting_location_id = location_id
+
+        for preview_location_id, location in locations_by_preview_id.items():
+            real_location_id = location_id_map[preview_location_id]
+            parent_preview_id = location.get('parent_location_id')
+            parent_location_id = location_id_map.get(str(parent_preview_id)) if parent_preview_id is not None else None
+
+            if parent_location_id:
+                parent_location = await self.get_location(parent_location_id)
+                parent_path = (parent_location or {}).get('canonical_path') or (parent_location or {}).get('name')
+                canonical_path = f"{parent_path} / {location['name']}" if parent_path else location['name']
+                depth = int((parent_location or {}).get('depth') or 0) + 1
+            else:
+                canonical_path = location.get('canonical_path') or location['name']
+                depth = int(location.get('depth') or 0)
+
+            await self.update_location(
+                real_location_id,
+                parent_location_id=parent_location_id,
+                canonical_path=canonical_path,
+                depth=depth,
+            )
+
+        if starting_location_id is None:
+            starting_location_id = first_location_id
+
+        await self.save_game_state(
+            session_id,
+            current_scene=starting_scenario,
+            current_location=locations[0]['name'] if locations else None,
+            current_location_id=starting_location_id,
+            dm_notes={
+                'active_content_pack_id': resolved_content_pack_id,
+                'world_setting': world_setting,
+                'factions': factions,
+                'generation_settings': generation_settings,
+                'campaign_description': description,
+            },
+            active_content_pack_id=resolved_content_pack_id,
+            theme_state=theme_config,
+            allowed_content_packs=[resolved_content_pack_id],
+        )
+
+        for location in locations:
+            source_preview_id = str(location.get('id') or '')
+            source_location_id = location_id_map.get(source_preview_id)
+            if not source_location_id:
+                continue
+            for raw_connection in location.get('connections', []) or []:
+                if isinstance(raw_connection, str):
+                    target_preview_id = raw_connection
+                    direction = 'path'
+                    travel_time = 1
+                    hidden = False
+                    bidirectional = True
+                    connection_type = 'path'
+                    distance_text = None
+                    travel_mode = 'walk'
+                    lock_state = 'open'
+                    requirements = None
+                else:
+                    target_preview_id = raw_connection.get('target_id') or raw_connection.get('to_location_id') or raw_connection.get('id')
+                    direction = raw_connection.get('direction') or raw_connection.get('type') or 'path'
+                    travel_time = raw_connection.get('travel_time') or 1
+                    hidden = bool(raw_connection.get('hidden', False))
+                    bidirectional = bool(raw_connection.get('bidirectional', True))
+                    connection_type = raw_connection.get('connection_type', 'path')
+                    distance_text = raw_connection.get('distance_text')
+                    travel_mode = raw_connection.get('travel_mode', 'walk')
+                    lock_state = raw_connection.get('lock_state', 'open')
+                    requirements = raw_connection.get('requirements')
+
+                target_location_id = location_id_map.get(str(target_preview_id))
+                if not target_location_id:
+                    continue
+                try:
+                    connection_id = await self.create_location_connection(
+                        from_location_id=source_location_id,
+                        to_location_id=target_location_id,
+                        direction=direction,
+                        travel_time=int(travel_time),
+                        requirements=requirements,
+                        hidden=hidden,
+                        bidirectional=bidirectional,
+                    )
+                    await self.update_location_connection(
+                        connection_id,
+                        connection_type=connection_type,
+                        distance_text=distance_text,
+                        travel_mode=travel_mode,
+                        lock_state=lock_state,
+                    )
+                except ValueError:
+                    continue
+
+        faction_id_map: Dict[str, int] = {}
+        for index, faction in enumerate(factions):
+            preview_faction_id = str(faction.get('id') or f"faction_{index + 1}")
+            faction_id = await self.create_faction(
+                guild_id=guild_id,
+                name=faction['name'],
+                created_by=dm_user_id,
+                session_id=session_id,
+                description=faction.get('description'),
+                faction_type=faction.get('type', faction.get('faction_type', 'neutral')),
+                alignment=faction.get('alignment'),
+                influence=int(faction.get('influence') or 0),
+                goals=faction.get('goals') if isinstance(faction.get('goals'), list) else [],
+                resources=faction.get('resources'),
+                allies=faction.get('allies'),
+                enemies=faction.get('enemies'),
+            )
+            faction_id_map[preview_faction_id] = faction_id
+            await self.update_faction(
+                faction_id,
+                disposition=faction.get('disposition', faction.get('alignment', faction.get('type', 'neutral'))),
+                is_hidden=int(bool(faction.get('is_hidden', False))),
+                tags=faction.get('tags', []),
+            )
+
+        npc_id_map: Dict[str, int] = {}
+        for index, npc in enumerate(npcs):
+            preview_npc_id = str(npc.get('id') or f"npc_{index + 1}")
+            location_id = location_id_map.get(str(npc.get('location_id'))) if npc.get('location_id') is not None else None
+            faction_id = faction_id_map.get(str(npc.get('faction_id'))) if npc.get('faction_id') is not None else None
+            npc_id = await self.create_npc(
+                guild_id=guild_id,
+                name=npc['name'],
+                description=npc.get('description', ''),
+                personality=npc.get('personality', ''),
+                created_by=dm_user_id,
+                npc_type=npc.get('type', npc.get('npc_type', 'neutral')),
+                location_id=location_id,
+                is_merchant=bool(npc.get('is_merchant', False)),
+                merchant_inventory=npc.get('merchant_inventory'),
+                stats=npc.get('stats'),
+                session_id=session_id,
+                actor_kind=npc.get('actor_kind', 'npc'),
+                faction_id=faction_id,
+                faction_role=npc.get('role', npc.get('faction_role')),
+                goals=npc.get('goals') if isinstance(npc.get('goals'), list) else ([npc['goals']] if npc.get('goals') else []),
+                secrets=npc.get('secrets') if isinstance(npc.get('secrets'), list) else ([npc['secret']] if npc.get('secret') else []),
+                tags=npc.get('tags', []),
+                challenge_rating=float(npc.get('challenge_rating') or 0),
+                actions=npc.get('actions'),
+                traits=npc.get('traits'),
+            )
+            npc_id_map[preview_npc_id] = npc_id
+
+        for faction in factions:
+            preview_faction_id = str(faction.get('id') or '')
+            faction_id = faction_id_map.get(preview_faction_id)
+            if not faction_id:
+                continue
+            for member in faction.get('members', []) or []:
+                preview_npc_id = member.get('npc_id') or member.get('id')
+                npc_id = npc_id_map.get(str(preview_npc_id))
+                if not npc_id:
+                    continue
+                await self.add_faction_member(
+                    faction_id=faction_id,
+                    actor_id=npc_id,
+                    actor_type='npc',
+                    role=member.get('role'),
+                    rank=member.get('rank'),
+                    notes=member.get('notes'),
+                )
+
+        for quest in quest_hooks:
+            quest_giver_id = npc_id_map.get(str(quest.get('quest_giver_id'))) if quest.get('quest_giver_id') is not None else None
+            primary_location_id = location_id_map.get(str(quest.get('primary_location_id') or quest.get('location_id'))) if (quest.get('primary_location_id') is not None or quest.get('location_id') is not None) else None
+            storyline_id = None
+            objectives = quest.get('objectives', [])
+            if objectives and objectives and isinstance(objectives[0], str):
+                objectives = [{'description': objective, 'completed': False, 'optional': False} for objective in objectives]
+            await self.create_quest(
+                guild_id=guild_id,
+                title=quest.get('title') or quest.get('name') or 'Untitled Quest',
+                description=quest.get('description', ''),
+                objectives=objectives or [],
+                rewards=quest.get('rewards', {}),
+                created_by=dm_user_id,
+                session_id=session_id,
+                difficulty=quest.get('difficulty', 'medium'),
+                quest_giver_npc_id=quest_giver_id,
+                dm_notes=quest.get('dm_notes'),
+                dm_plan=quest.get('dm_plan'),
+                storyline_id=storyline_id,
+                primary_location_id=primary_location_id,
+                quest_type=quest.get('type', quest.get('quest_type', 'main')),
+                failure_rules_json=quest.get('failure_rules_json'),
+            )
+
+        return {
+            'success': True,
+            'session_id': session_id,
+            'message': f"Campaign '{name}' created successfully!",
+            'stats': {
+                'locations': len(locations),
+                'npcs': len(npcs),
+                'factions': len(factions),
+                'quests': len(quest_hooks),
+            },
         }
     
     async def get_guild_sessions(self, guild_id: int) -> List[Dict[str, Any]]:
@@ -3563,7 +3993,20 @@ class Database:
                     ORDER BY name
                 """, (guild_id,))
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [self._normalize_npc_record(dict(row)) for row in rows]
+
+    async def get_session_npcs(self, session_id: int, include_dead: bool = False) -> List[Dict[str, Any]]:
+        """Get NPCs for a specific session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            query = "SELECT * FROM npcs WHERE session_id = ?"
+            params: List[Any] = [session_id]
+            if not include_dead:
+                query += " AND is_alive = 1"
+            query += " ORDER BY name"
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            return [self._normalize_npc_record(dict(row)) for row in rows]
     
     async def update_npc(self, npc_id: int, **kwargs) -> bool:
         """Update NPC fields"""
@@ -3583,6 +4026,8 @@ class Database:
         for field, default in JSON_NPC_FIELDS.items():
             if field in kwargs:
                 kwargs[field] = _dumps_json_value(kwargs[field], default)
+        if 'is_revealed' in kwargs:
+            kwargs['is_revealed'] = int(bool(kwargs['is_revealed']))
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [npc_id]
@@ -3633,6 +4078,17 @@ class Database:
             for row in rows:
                 quests.append(self._normalize_quest_record(dict(row)))
             return quests
+
+    async def get_storyline_quests(self, storyline_id: int) -> List[Dict[str, Any]]:
+        """List quests attached to a storyline."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM quests WHERE storyline_id = ? ORDER BY created_at DESC, id DESC",
+                (storyline_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_quest_record(dict(row)) for row in rows]
     
     async def get_quest(self, quest_id: int) -> Optional[Dict[str, Any]]:
         """Get a quest by ID"""
@@ -3893,6 +4349,13 @@ class Database:
         session = data or {}
         game_state = data.get('game_state') or {}
 
+        def _serialize_row_json(row: Dict[str, Any], field_defaults: Dict[str, Any]) -> Dict[str, Any]:
+            serialized = dict(row)
+            for field, default in field_defaults.items():
+                if field in serialized and serialized[field] is not None and not isinstance(serialized[field], str):
+                    serialized[field] = _dumps_json_value(serialized[field], default)
+            return serialized
+
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA foreign_keys = OFF")
@@ -3955,7 +4418,7 @@ class Database:
 
                 location_id_map: Dict[int, int] = {}
                 for location in data.get('locations', []):
-                    location_row = dict(location)
+                    location_row = _serialize_row_json(dict(location), JSON_LOCATION_FIELDS)
                     original_id = location_row.pop('id', None)
                     columns = list(location_row.keys())
                     values = [location_row[column] for column in columns]
@@ -4065,14 +4528,10 @@ class Database:
 
                 npc_id_map: Dict[int, int] = {}
                 for npc in data.get('npcs', []):
-                    npc_row = dict(npc)
+                    npc_row = _serialize_row_json(dict(npc), JSON_NPC_FIELDS)
                     original_id = npc_row.pop('id', None)
                     if npc_row.get('location_id') in location_id_map:
                         npc_row['location_id'] = location_id_map[npc_row['location_id']]
-                    if npc_row.get('merchant_inventory') is not None and not isinstance(npc_row['merchant_inventory'], str):
-                        npc_row['merchant_inventory'] = json.dumps(npc_row['merchant_inventory'])
-                    if npc_row.get('stats') is not None and not isinstance(npc_row['stats'], str):
-                        npc_row['stats'] = json.dumps(npc_row['stats'])
                     columns = list(npc_row.keys())
                     values = [npc_row[column] for column in columns]
                     placeholders = ', '.join('?' for _ in values)
@@ -4097,12 +4556,8 @@ class Database:
 
                 quest_id_map: Dict[int, int] = {}
                 for quest in data.get('quests', []):
-                    quest_row = dict(quest)
+                    quest_row = _serialize_row_json(dict(quest), JSON_QUEST_FIELDS)
                     original_id = quest_row.pop('id', None)
-                    if isinstance(quest_row.get('objectives'), list):
-                        quest_row['objectives'] = json.dumps(quest_row['objectives'])
-                    if isinstance(quest_row.get('rewards'), dict):
-                        quest_row['rewards'] = json.dumps(quest_row['rewards'])
                     columns = list(quest_row.keys())
                     values = [quest_row[column] for column in columns]
                     placeholders = ', '.join('?' for _ in values)
@@ -4132,7 +4587,7 @@ class Database:
                     await db.execute(f"INSERT INTO session_participants ({', '.join(columns)}) VALUES ({placeholders})", values)
 
                 for progress in data.get('quest_progress', []):
-                    row = dict(progress)
+                    row = _serialize_row_json(dict(progress), JSON_QUEST_PROGRESS_FIELDS)
                     row.pop('id', None)
                     if row.get('quest_id') in quest_id_map:
                         row['quest_id'] = quest_id_map[row['quest_id']]
@@ -4289,14 +4744,21 @@ class Database:
     async def create_game_state(self, session_id: int, **kwargs) -> int:
         """Create a new game state for a session"""
         now = datetime.utcnow().isoformat()
-        
         game_data = kwargs.pop('game_data', {})
+        theme_state = kwargs.pop('theme_state', {})
+        allowed_content_packs = kwargs.pop('allowed_content_packs', [])
+        dm_notes = kwargs.get('dm_notes')
+        if dm_notes is not None and not isinstance(dm_notes, str):
+            dm_notes = json.dumps(dm_notes)
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO game_state (session_id, last_activity, game_data, 
-                    current_scene, current_location, current_location_id, dm_notes, turn_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO game_state (
+                    session_id, last_activity, game_data, current_scene, current_location,
+                    current_location_id, dm_notes, turn_count, active_content_pack_id,
+                    theme_state, allowed_content_packs
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id, 
                 now, 
@@ -4304,8 +4766,11 @@ class Database:
                 kwargs.get('current_scene'),
                 kwargs.get('current_location'),
                 kwargs.get('current_location_id'),
-                kwargs.get('dm_notes'),
-                kwargs.get('turn_count', 0)
+                dm_notes,
+                kwargs.get('turn_count', 0),
+                kwargs.get('active_content_pack_id'),
+                json.dumps(theme_state or {}),
+                json.dumps(allowed_content_packs or []),
             ))
             await db.commit()
             return cursor.lastrowid
@@ -4318,9 +4783,11 @@ class Database:
         now = datetime.utcnow().isoformat()
         kwargs['last_activity'] = now
         
-        # Handle game_data specially
-        if 'game_data' in kwargs:
-            kwargs['game_data'] = json.dumps(kwargs['game_data'])
+        for field in JSON_GAME_STATE_FIELDS:
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], {} if field != 'allowed_content_packs' else [])
+        if 'dm_notes' in kwargs and kwargs['dm_notes'] is not None and not isinstance(kwargs['dm_notes'], str):
+            kwargs['dm_notes'] = json.dumps(kwargs['dm_notes'])
         
         fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [session_id]
@@ -4458,7 +4925,7 @@ class Database:
                 """)
             
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [self._normalize_location_record(dict(row)) for row in rows]
     
     async def get_location(self, location_id: int) -> Optional[Dict]:
         """Get a specific location by ID"""
@@ -4468,7 +4935,45 @@ class Database:
                 SELECT * FROM locations WHERE id = ?
             """, (location_id,))
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            return self._normalize_location_record(dict(row)) if row else None
+
+    async def get_location_children(self, parent_location_id: int) -> List[Dict[str, Any]]:
+        """List direct child locations for a parent location."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM locations WHERE parent_location_id = ? ORDER BY name ASC, id ASC",
+                (parent_location_id,),
+            )
+            rows = await cursor.fetchall()
+            return [self._normalize_location_record(dict(row)) for row in rows]
+
+    async def get_location_tree(self, session_id: int) -> List[Dict[str, Any]]:
+        """Build the session location hierarchy as nested nodes."""
+        locations = await self.get_locations(session_id=session_id)
+        by_id: Dict[int, Dict[str, Any]] = {}
+        roots: List[Dict[str, Any]] = []
+
+        for location in locations:
+            node = dict(location)
+            node['children'] = []
+            by_id[node['id']] = node
+
+        for node in by_id.values():
+            parent_id = node.get('parent_location_id')
+            parent = by_id.get(parent_id)
+            if parent:
+                parent['children'].append(node)
+            else:
+                roots.append(node)
+
+        def _sort_tree(nodes: List[Dict[str, Any]]) -> None:
+            nodes.sort(key=lambda entry: ((entry.get('canonical_path') or entry.get('name') or '').lower(), entry.get('id') or 0))
+            for child in nodes:
+                _sort_tree(child['children'])
+
+        _sort_tree(roots)
+        return roots
     
     async def create_location(
         self,
@@ -4736,6 +5241,40 @@ class Database:
             """, (location_id,))
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def get_campaign_overview(self, session_id: int) -> Dict[str, Any]:
+        """Return a compact worldbuilding overview for a session."""
+        session = await self.get_session(session_id)
+        if not session:
+            return {}
+
+        locations = await self.get_locations(session_id=session_id)
+        connections = await self.list_location_connections(session_id=session_id)
+        npcs = await self.get_session_npcs(session_id=session_id, include_dead=True)
+        factions = await self.get_factions(session_id=session_id)
+        storylines = await self.get_storylines(session_id=session_id)
+        quests = await self.get_quests(session_id=session_id)
+        game_state = await self.get_game_state(session_id)
+
+        return {
+            'session': session,
+            'game_state': game_state,
+            'location_tree': await self.get_location_tree(session_id),
+            'location_connections': connections,
+            'locations': locations,
+            'npcs': npcs,
+            'factions': factions,
+            'storylines': storylines,
+            'quests': quests,
+            'counts': {
+                'locations': len(locations),
+                'connections': len(connections),
+                'npcs': len(npcs),
+                'factions': len(factions),
+                'storylines': len(storylines),
+                'quests': len(quests),
+            },
+        }
 
     # ==================== STORY ITEMS METHODS ====================
     
@@ -5062,6 +5601,22 @@ class Database:
             row = await cursor.fetchone()
             return row[0]
 
+    async def get_faction_member(self, membership_id: int) -> Optional[Dict[str, Any]]:
+        """Get a faction membership by ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT fm.*, n.name AS actor_name
+                FROM faction_memberships fm
+                LEFT JOIN npcs n ON fm.actor_type = 'npc' AND fm.actor_id = n.id
+                WHERE fm.id = ?
+                """,
+                (membership_id,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_faction_members(self, faction_id: int, actor_type: str = None) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -5082,6 +5637,44 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def update_faction_member(self, membership_id: int, **kwargs) -> bool:
+        """Update a faction membership."""
+        if not kwargs:
+            return False
+
+        existing = await self.get_faction_member(membership_id)
+        if not existing:
+            return False
+
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [membership_id]
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(f"UPDATE faction_memberships SET {fields} WHERE id = ?", values)
+            if existing.get('actor_type') == 'npc' and 'role' in kwargs:
+                await db.execute(
+                    "UPDATE npcs SET faction_role = ? WHERE id = ?",
+                    (kwargs['role'], existing['actor_id']),
+                )
+            await db.commit()
+            return True
+
+    async def delete_faction_member(self, membership_id: int) -> bool:
+        """Delete a faction membership."""
+        existing = await self.get_faction_member(membership_id)
+        if not existing:
+            return False
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM faction_memberships WHERE id = ?", (membership_id,))
+            if existing.get('actor_type') == 'npc':
+                await db.execute(
+                    "UPDATE npcs SET faction_id = NULL, faction_role = NULL WHERE id = ? AND faction_id = ?",
+                    (existing['actor_id'], existing['faction_id']),
+                )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def update_character_faction_reputation(
         self,
@@ -5111,6 +5704,39 @@ class Database:
             await db.commit()
             return new_reputation
 
+    async def upsert_character_faction_reputation(
+        self,
+        character_id: int,
+        faction_id: int,
+        reputation: int = 0,
+        tier: str = 'neutral',
+        notes: str = None,
+    ) -> Dict[str, Any]:
+        """Create or replace the absolute reputation value for a character and faction."""
+        now = datetime.utcnow().isoformat()
+        normalized_reputation = _clamp(reputation, -100, 100)
+        normalized_tier = tier or 'neutral'
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO character_faction_reputation (character_id, faction_id, reputation, tier, notes, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(character_id, faction_id)
+                DO UPDATE SET reputation = excluded.reputation, tier = excluded.tier, notes = excluded.notes, updated_at = excluded.updated_at
+                """,
+                (character_id, faction_id, normalized_reputation, normalized_tier, notes, now),
+            )
+            await db.commit()
+
+        record = await self.get_character_faction_reputation(character_id, faction_id)
+        return record if isinstance(record, dict) else {
+            'character_id': character_id,
+            'faction_id': faction_id,
+            'reputation': normalized_reputation,
+            'tier': normalized_tier,
+            'notes': notes,
+        }
+
     async def get_character_faction_reputation(self, character_id: int, faction_id: int = None) -> List[Dict[str, Any]] | Dict[str, Any]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -5125,7 +5751,7 @@ class Database:
                     (character_id, faction_id),
                 )
                 row = await cursor.fetchone()
-                return dict(row) if row else {'character_id': character_id, 'faction_id': faction_id, 'reputation': 0}
+                return dict(row) if row else {'character_id': character_id, 'faction_id': faction_id, 'reputation': 0, 'tier': 'neutral', 'notes': None}
             cursor = await db.execute(
                 """
                 SELECT cfr.*, f.name AS faction_name
@@ -5138,6 +5764,16 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def delete_character_faction_reputation(self, character_id: int, faction_id: int) -> bool:
+        """Delete a character-faction reputation record."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM character_faction_reputation WHERE character_id = ? AND faction_id = ?",
+                (character_id, faction_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def create_monster_template(
         self,
@@ -5287,16 +5923,21 @@ class Database:
         created_by: int,
         session_id: int = None,
         description: str = None,
-        status: str = 'active',
+        status: str = 'draft',
+        act_label: str = None,
+        sort_order: int = 0,
     ) -> int:
         now = datetime.utcnow().isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 """
-                INSERT INTO storylines (guild_id, session_id, title, description, status, created_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO storylines (
+                    guild_id, session_id, title, description, status, act_label, sort_order,
+                    created_by, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (guild_id, session_id, title, description, status, created_by, now, now),
+                (guild_id, session_id, title, description, status, act_label, sort_order, created_by, now, now),
             )
             await db.commit()
             return cursor.lastrowid
@@ -5307,6 +5948,31 @@ class Database:
             cursor = await db.execute("SELECT * FROM storylines WHERE id = ?", (storyline_id,))
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    async def update_storyline(self, storyline_id: int, **kwargs) -> bool:
+        """Update a storyline."""
+        if not kwargs:
+            return False
+
+        kwargs['updated_at'] = datetime.utcnow().isoformat()
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [storyline_id]
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(f"UPDATE storylines SET {fields} WHERE id = ?", values)
+            await db.commit()
+            return True
+
+    async def delete_storyline(self, storyline_id: int) -> bool:
+        """Delete a storyline and its dependent graph records."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE quests SET storyline_id = NULL WHERE storyline_id = ?", (storyline_id,))
+            await db.execute("DELETE FROM storyline_progress WHERE storyline_id = ?", (storyline_id,))
+            await db.execute("DELETE FROM storyline_edges WHERE storyline_id = ?", (storyline_id,))
+            await db.execute("DELETE FROM storyline_nodes WHERE storyline_id = ?", (storyline_id,))
+            cursor = await db.execute("DELETE FROM storylines WHERE id = ?", (storyline_id,))
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def get_storylines(self, session_id: int = None, guild_id: int = None) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
@@ -5321,11 +5987,33 @@ class Database:
                 params.append(guild_id)
             where_clause = ' AND '.join(conditions) if conditions else '1=1'
             cursor = await db.execute(
-                f"SELECT * FROM storylines WHERE {where_clause} ORDER BY updated_at DESC, id DESC",
+                f"SELECT * FROM storylines WHERE {where_clause} ORDER BY sort_order ASC, updated_at DESC, id DESC",
                 params,
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def get_storyline_state(self, storyline_id: int, character_id: int = None) -> Dict[str, Any]:
+        """Return a storyline with its nodes, edges, linked quests, and progress."""
+        storyline = await self.get_storyline(storyline_id)
+        if not storyline:
+            return {}
+
+        return {
+            'storyline': storyline,
+            'nodes': await self.get_storyline_nodes(storyline_id),
+            'edges': await self.get_storyline_edges(storyline_id),
+            'quests': await self.get_storyline_quests(storyline_id),
+            'progress': await self.get_storyline_progress(storyline_id, character_id=character_id),
+        }
+
+    async def get_session_storyline_state(self, session_id: int) -> Dict[str, Any]:
+        """Return all storyline state for a session."""
+        storylines = await self.get_storylines(session_id=session_id)
+        result = []
+        for storyline in storylines:
+            result.append(await self.get_storyline_state(storyline['id']))
+        return {'storylines': result}
 
     async def create_storyline_node(
         self,
@@ -5526,21 +6214,6 @@ class Database:
             'progress': progress,
         }
 
-    async def get_storyline_state(self, session_id: int) -> Dict[str, Any]:
-        storylines = await self.get_storylines(session_id=session_id)
-        result = []
-        for storyline in storylines:
-            nodes = await self.get_storyline_nodes(storyline['id'])
-            edges = await self.get_storyline_edges(storyline['id'])
-            progress = await self.get_storyline_progress(storyline['id'])
-            result.append({
-                'storyline': storyline,
-                'nodes': nodes,
-                'edges': edges,
-                'progress': progress,
-            })
-        return {'storylines': result}
-
     async def create_plot_point(
         self,
         title: str,
@@ -5589,6 +6262,70 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [self._normalize_plot_point_record(dict(row)) for row in rows]
+
+    async def update_plot_point(self, plot_point_id: int, **kwargs) -> bool:
+        """Update a plot point."""
+        if not kwargs:
+            return False
+        for field, default in JSON_PLOT_POINT_FIELDS.items():
+            if field in kwargs:
+                kwargs[field] = _dumps_json_value(kwargs[field], default)
+        kwargs['updated_at'] = datetime.utcnow().isoformat()
+        fields = ', '.join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [plot_point_id]
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(f"UPDATE plot_points SET {fields} WHERE id = ?", values)
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def delete_plot_point(self, plot_point_id: int) -> bool:
+        """Delete a plot point and its clues."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM plot_clues WHERE plot_point_id = ?", (plot_point_id,))
+            cursor = await db.execute("DELETE FROM plot_points WHERE id = ?", (plot_point_id,))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_npc_by_name(self, session_id: int, name: str) -> Optional[Dict[str, Any]]:
+        """Resolve an NPC by name within a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM npcs WHERE session_id = ? AND lower(name) = lower(?) ORDER BY id DESC LIMIT 1",
+                (session_id, name),
+            )
+            row = await cursor.fetchone()
+            return self._normalize_npc_record(dict(row)) if row else None
+
+    async def get_location_by_name(self, session_id: int, name: str) -> Optional[Dict[str, Any]]:
+        """Resolve a location by name within a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM locations WHERE session_id = ? AND lower(name) = lower(?) ORDER BY id DESC LIMIT 1",
+                (session_id, name),
+            )
+            row = await cursor.fetchone()
+            return self._normalize_location_record(dict(row)) if row else None
+
+    async def get_faction_by_name(self, session_id: int, name: str) -> Optional[Dict[str, Any]]:
+        """Resolve a faction by name within a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM factions WHERE session_id = ? AND lower(name) = lower(?) ORDER BY id DESC LIMIT 1",
+                (session_id, name),
+            )
+            row = await cursor.fetchone()
+            return self._normalize_faction_record(dict(row)) if row else None
+
+    async def reveal_location(self, location_id: int) -> bool:
+        """Mark a location as visible to players."""
+        return await self.update_location(location_id, is_hidden=False, discoverability='visible')
+
+    async def reveal_npc(self, npc_id: int) -> bool:
+        """Mark an NPC as revealed to players."""
+        return await self.update_npc(npc_id, is_revealed=1)
 
     async def create_plot_clue(
         self,

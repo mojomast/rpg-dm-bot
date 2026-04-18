@@ -766,6 +766,215 @@ async def test_create_browser_character_inherits_session_current_location(db):
 
 
 @pytest.mark.asyncio
+async def test_browser_dm_bootstrap_chat_and_narration_endpoints(db):
+    api_module.db = db
+    api_module.chat_handler = SimpleNamespace(
+        process_single_message=AsyncMock(
+            side_effect=[
+                {
+                    "response": "DM directive acknowledged.",
+                    "mechanics_text": "",
+                    "tool_results": [],
+                    "user_message": {"content": "[DM DIRECTIVE] Move the spotlight to the balcony."},
+                    "assistant_message": {"content": "DM directive acknowledged."},
+                },
+                {
+                    "response": "Moonlight spills across the balcony.",
+                    "mechanics_text": "",
+                    "tool_results": [],
+                    "user_message": {"content": "[DM DIRECTIVE] Narrate this for the players in polished DM prose: The balcony doors swing open."},
+                    "assistant_message": {"content": "Moonlight spills across the balcony."},
+                },
+            ]
+        ),
+        extract_response_options=lambda _response: [],
+    )
+
+    identity = "33333333-1111-4111-8111-111111111111"
+    dm_web_user_id = web_user_id_from_uuid(identity)
+    session_id = await db.create_session(guild_id=67890, name="Browser DM Session", dm_user_id=dm_web_user_id)
+    await db.update_session(session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+    await db.create_web_identity(identity, "hashed-ip")
+
+    bootstrap = await api_module.get_chat_bootstrap(session_id=session_id, x_web_identity=identity)
+    assert bootstrap.browser_dm is True
+
+    response = await api_module.chat_with_dm.__wrapped__(
+        http_request=SimpleNamespace(headers={}),
+        request=api_module.ChatRequest(session_id=session_id, message="Move the spotlight to the balcony.", dm_mode=True),
+        x_web_identity=identity,
+    )
+    assert response.response == "DM directive acknowledged."
+    assert response.session_id == session_id
+
+    narration = await api_module.narrate_session(
+        session_id,
+        api_module.SessionNarrateRequest(text="The balcony doors swing open.", title="Opening"),
+    )
+    assert narration["title"] == "Opening"
+    assert narration["text"] == "Moonlight spills across the balcony."
+
+
+@pytest.mark.asyncio
+async def test_browser_dm_chat_rejects_non_dm_identity(db):
+    api_module.db = db
+    api_module.chat_handler = SimpleNamespace(
+        process_single_message=AsyncMock(),
+        extract_response_options=lambda _response: [],
+    )
+
+    session_id = await db.create_session(guild_id=67890, name="Unauthorized DM Session", dm_user_id=12345)
+    await db.update_session(session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+
+    identity = "33333333-2222-4222-8222-222222222222"
+    await db.create_web_identity(identity, "hashed-ip")
+
+    with pytest.raises(api_module.HTTPException) as exc:
+        await api_module.chat_with_dm.__wrapped__(
+            http_request=SimpleNamespace(headers={}),
+            request=api_module.ChatRequest(session_id=session_id, message="Override the scene.", dm_mode=True),
+            x_web_identity=identity,
+        )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_session_control_overview_and_reveal_endpoints(db):
+    api_module.db = db
+    api_module.tools = api_module.ToolExecutor(db)
+
+    session_id = await db.create_session(guild_id=67890, name="Studio Session", dm_user_id=12345)
+    await db.update_session(session_id, status="active", world_theme="fantasy", content_pack_id="fantasy_core")
+
+    town_id = await db.create_location(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Harbor Ward",
+        description="A crowded waterfront district.",
+        location_type="district",
+        is_hidden=True,
+    )
+    room_id = await db.create_location(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Signal Loft",
+        description="A lookout above the harbor.",
+        location_type="building",
+    )
+    await db.update_location(room_id, parent_location_id=town_id, canonical_path="Harbor Ward / Signal Loft", depth=1)
+    await db.create_location_connection(
+        from_location_id=town_id,
+        to_location_id=room_id,
+        direction="up",
+        travel_time=1,
+        hidden=False,
+        bidirectional=True,
+    )
+
+    npc_id = await db.create_npc(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Dockmaster Vey",
+        description="Keeps the harbor books.",
+        personality="Brisk and exacting.",
+        npc_type="neutral",
+        location_id=room_id,
+    )
+
+    faction_id = await db.create_faction(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        name="Harbor Compact",
+        description="Merchants and captains who control the docks.",
+    )
+    await db.add_faction_member(faction_id=faction_id, actor_id=npc_id, actor_type="npc", role="Dockmaster")
+
+    storyline_id = await db.create_storyline(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        title="Lantern Conspiracy",
+        description="Signals flicker across the bay.",
+    )
+    start_node_id = await db.create_storyline_node(storyline_id, title="First Signal", is_start=True)
+    second_node_id = await db.create_storyline_node(storyline_id, title="Second Signal")
+    await db.create_storyline_edge(storyline_id, from_node_id=start_node_id, to_node_id=second_node_id)
+
+    quest_id = await db.create_quest(
+        guild_id=67890,
+        session_id=session_id,
+        created_by=12345,
+        title="Watch the Docks",
+        description="Track the coded lanterns.",
+        objectives=[{"description": "Observe the harbor", "completed": False}],
+        rewards={"xp": 25},
+        storyline_id=storyline_id,
+        primary_location_id=room_id,
+    )
+
+    plot_point_id = await db.create_plot_point(
+        title="Blue Lantern",
+        session_id=session_id,
+        storyline_id=storyline_id,
+        description="A blue lantern marks the safe route.",
+        reveal_threshold=2,
+    )
+
+    await db.save_game_state(
+        session_id,
+        current_scene="Crowds push through the fish market.",
+        current_location="Harbor Ward",
+        current_location_id=town_id,
+        active_content_pack_id="fantasy_core",
+    )
+
+    scene_result = await api_module.set_session_scene(
+        session_id,
+        api_module.SessionSceneUpdate(scene="Fog rolls in across the piers."),
+    )
+    assert scene_result["message"] == "Scene updated"
+
+    move_result = await api_module.move_session_party(
+        session_id,
+        api_module.SessionMovePartyRequest(location_id=room_id, travel_description="The party climbs the watch stairs."),
+    )
+    assert move_result["success"] is True
+
+    location_tree = await api_module.get_session_location_tree(session_id)
+    assert location_tree["locations"][0]["name"] == "Harbor Ward"
+    assert location_tree["locations"][0]["children"][0]["name"] == "Signal Loft"
+
+    overview = await api_module.get_campaign_overview(session_id)
+    assert overview["counts"]["locations"] == 2
+    assert overview["counts"]["npcs"] == 1
+    assert overview["counts"]["factions"] == 1
+    assert overview["counts"]["storylines"] == 1
+    assert overview["counts"]["quests"] == 1
+    assert overview["game_state"]["current_scene"] == "Fog rolls in across the piers."
+
+    storyline_state = await api_module.get_session_storyline_state(session_id)
+    assert storyline_state["storylines"][0]["storyline"]["id"] == storyline_id
+    assert storyline_state["storylines"][0]["quests"][0]["id"] == quest_id
+
+    plot_points = await api_module.list_plot_points(session_id=session_id)
+    assert plot_points["plot_points"][0]["id"] == plot_point_id
+
+    reveal_location = await api_module.reveal_location(town_id)
+    reveal_npc = await api_module.reveal_npc(npc_id)
+    assert reveal_location["message"] == "Location revealed"
+    assert reveal_npc["message"] == "NPC revealed"
+
+    updated_location = await db.get_location(town_id)
+    updated_npc = await db.get_npc(npc_id)
+    assert updated_location["is_hidden"] == 0
+    assert updated_npc["is_revealed"] == 1
+
+
+@pytest.mark.asyncio
 async def test_bulk_game_data_update_routes_exist_and_persist(monkeypatch):
     items_saved = {}
     spells_saved = {}

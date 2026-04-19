@@ -149,7 +149,18 @@ class ToolExecutor:
     async def execute_tool(self, tool_name: str, tool_args: Dict[str, Any], 
                            context: Dict[str, Any]) -> str:
         """Execute a tool by name with arguments"""
-        logger.info(f"Executing tool {tool_name} with args {tool_args}")
+        logger.info(
+            "Executing tool %s with args %s | context=%s",
+            tool_name,
+            tool_args,
+            {
+                'guild_id': context.get('guild_id'),
+                'channel_id': context.get('channel_id'),
+                'session_id': context.get('session_id'),
+                'user_id': context.get('user_id'),
+                'character_id': context.get('character_id'),
+            },
+        )
         
         try:
             if tool_name == "award_experience":
@@ -380,11 +391,14 @@ class ToolExecutor:
                 return await self._initialize_campaign(context, tool_args)
             
             else:
-                return f"Error: Unknown tool '{tool_name}'"
-                
+                return {"success": False, "error": f"Unknown tool '{tool_name}'"}
+                 
         except Exception as e:
-            logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
-            return f"Error executing tool: {str(e)}"
+            logger.error(f"[TOOL ERROR] {tool_name} failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def _log_inventory_mutation(self, tool_name: str, char_id: Any, result: Any) -> None:
+        logger.info("[INVENTORY] character_id=%s action=%s result=%s", char_id, tool_name, result)
     
     # =========================================================================
     # CHARACTER TOOL IMPLEMENTATIONS
@@ -492,6 +506,8 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             })
         
         inv_id = await self.db.add_item(char_id, item_id, item_name, item_type, quantity, properties)
+        result = {"success": True, "inventory_id": inv_id, "item": item_name, "quantity": quantity, "character_id": char_id}
+        self._log_inventory_mutation("give_item", char_id, result)
         return f"Added {quantity}x {item_name} to inventory (ID: {inv_id})"
     
     async def _remove_item(self, args: Dict) -> str:
@@ -527,6 +543,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         reason = args.get('reason', 'reward')
         
         new_gold = await self.db.update_gold(char_id, amount)
+        self._log_inventory_mutation("give_gold", char_id, {"success": True, "amount": amount, "new_gold": new_gold})
         return f"Gained {amount} gold ({reason}). Total: {new_gold} gold"
     
     async def _take_gold(self, args: Dict) -> str:
@@ -540,6 +557,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             return f"Error: Not enough gold. Has {char['gold']}, needs {amount}"
         
         new_gold = await self.db.update_gold(char_id, -amount)
+        self._log_inventory_mutation("take_gold", char_id, {"success": True, "amount": amount, "new_gold": new_gold})
         return f"Spent {amount} gold ({reason}). Remaining: {new_gold} gold"
     
     # =========================================================================

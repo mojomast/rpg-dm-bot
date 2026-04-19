@@ -387,6 +387,8 @@ CRITICAL:
                     logger.info("Executing tool: %s with args: %s", tool_name, tool_args)
                     tool_context = await self._resolve_tool_context(context, tool_args)
                     tool_result = await self.tools.execute_tool(tool_name, tool_args, tool_context)
+                    if isinstance(tool_result, dict) and (tool_result.get("success") is False or tool_result.get("error")):
+                        logger.warning("[TOOL RESULT] name=%s result=%s", tool_name, tool_result)
                     tool_results.append({
                         "tool_name": tool_name,
                         "args": tool_args,

@@ -59,7 +59,8 @@ coverage.xml
 data/rpg.db
 
 # Logs
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 
 # Node.js

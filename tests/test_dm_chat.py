@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import src.cogs.dm_chat as dm_chat_module
 from src.chat_handler import ChatHandler
 from src.cogs.dm_chat import DMChat
 from src.utils import resolve_runtime_session
@@ -82,6 +83,8 @@ class TestDMChatHelpers:
 
     @pytest.mark.asyncio
     async def test_process_dm_input_persists_messages_to_db(self):
+        original_allowed = dm_chat_module.is_allowed_bot_channel
+        dm_chat_module.is_allowed_bot_channel = lambda _channel_id: True
         bot = make_dm_chat_bot_stub()
         bot.db = SimpleNamespace(
             bind_session_channel=AsyncMock(),
@@ -105,7 +108,10 @@ class TestDMChatHelpers:
         channel = SimpleNamespace(id=11111)
         author = SimpleNamespace(id=12345, display_name="Alice")
 
-        response, mechanics = await cog.process_dm_input(channel, guild, author, "hello")
+        try:
+            response, mechanics = await cog.process_dm_input(channel, guild, author, "hello")
+        finally:
+            dm_chat_module.is_allowed_bot_channel = original_allowed
 
         assert response == "The DM responds."
         assert mechanics == ""

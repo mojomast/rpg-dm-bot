@@ -16,6 +16,14 @@ logger = logging.getLogger('rpg.llm')
 logger.setLevel(logging.DEBUG)
 
 
+def _summarize_tool_call(tool_call: Dict[str, Any]) -> str:
+    function = tool_call.get('function', {}) or {}
+    name = function.get('name', 'unknown')
+    arguments = function.get('arguments', '')
+    arguments_preview = arguments[:200] if isinstance(arguments, str) else str(arguments)[:200]
+    return f"{name}({arguments_preview})"
+
+
 @dataclass
 class LLMResponse:
     content: str
@@ -59,6 +67,13 @@ class LLMClient:
                 headers["HTTP-Referer"] = site_url
             headers["X-Title"] = app_name
         
+        logger.debug(
+            "[LLM REQUEST] model=%s messages=%d tools=%d",
+            payload.get('model'),
+            len(payload.get('messages', [])),
+            len(payload.get('tools', [])),
+        )
+
         logger.info("=" * 60)
         logger.info("LLM API REQUEST")
         logger.info(f"Model: {payload.get('model')}")
@@ -104,7 +119,12 @@ class LLMClient:
                         logger.error(f"LLM API error {response.status}: {error_text}")
                         raise Exception(f"LLM API error {response.status}: {error_text}")
                     
-                    result = await response.json()
+                    try:
+                        result = await response.json()
+                    except Exception as exc:
+                        error_text = await response.text()
+                        logger.error("LLM API returned non-JSON response: %s", error_text[:1000], exc_info=True)
+                        raise Exception(f"LLM API invalid JSON response: {exc}") from exc
                     
                     # Log full response for debugging
                     logger.info("=" * 60)
@@ -127,6 +147,8 @@ class LLMClient:
                     
                     if tool_calls:
                         logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2)}")
+                        for tool_call in tool_calls:
+                            logger.info("[TOOL CALL] %s", _summarize_tool_call(tool_call))
                     
                     logger.info("=" * 60)
                     
@@ -147,7 +169,7 @@ class LLMClient:
                     continue
                 raise
             except Exception as e:
-                logger.error(f"LLM API error: {e}")
+                logger.error(f"LLM API error: {e}", exc_info=True)
                 raise
         
         # Should not reach here, but just in case

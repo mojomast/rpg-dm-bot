@@ -3,6 +3,7 @@ Unit tests for src/database.py
 Tests all CRUD operations for characters, inventory, quests, NPCs, combat, and sessions.
 """
 
+import aiosqlite
 import pytest
 from datetime import datetime
 
@@ -530,8 +531,14 @@ class TestInventory:
         
         # Remove some
         await db.remove_item(inv_id, 30)
+        async with aiosqlite.connect(db.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute("SELECT quantity FROM inventory WHERE id = ?", (inv_id,))
+            row = await cursor.fetchone()
+        assert row['quantity'] == 70
+
         inventory = await db.get_inventory(char_id)
-        assert inventory[0]['quantity'] == 70
+        assert inventory == []
         
         # Remove all remaining
         await db.remove_item(inv_id, 100)

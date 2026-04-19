@@ -295,6 +295,73 @@ Make it feel like a "Previously on..." recap that gets players excited to contin
     # =========================================================================
     # GAME STATE COMMANDS
     # =========================================================================
+
+    @app_commands.command(name="debug_gamestate", description="Admin-only debug dump for the current game state")
+    @app_commands.guild_only()
+    async def debug_gamestate(self, interaction: discord.Interaction):
+        """Show a compact admin-only snapshot of session, combat, and inventory state."""
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Administrator permission required.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            session = await self._resolve_context_session(
+                interaction.guild.id,
+                interaction.channel.id,
+                interaction.user.id,
+                statuses=['active', 'paused', 'inactive'],
+            )
+
+            if not session:
+                await interaction.followup.send("No session found for this context.", ephemeral=True)
+                return
+
+            game_state = await self.db.get_game_state(session['id'])
+            combat = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
+            combatants = await self.db.get_combat_participants(combat['id']) if combat else []
+            players = await self.db.get_session_players(session['id'])
+
+            lines = [
+                f"Session: {session['name']} (id={session['id']}, status={session.get('status')})",
+                f"Channel: {interaction.channel.id}",
+            ]
+
+            if game_state:
+                lines.append(
+                    f"GameState: location={game_state.get('current_location')!r} location_id={game_state.get('current_location_id')} scene={game_state.get('current_scene')!r} turn_count={game_state.get('turn_count')}"
+                )
+            else:
+                lines.append("GameState: none")
+
+            if combat:
+                lines.append(
+                    f"Combat: id={combat['id']} round={combat.get('round_number')} current_turn={combat.get('current_turn')} initiative_order={combat.get('initiative_order')}"
+                )
+                for combatant in combatants:
+                    lines.append(
+                        f"- Combatant id={combatant['id']} name={combatant['name']} hp={combatant['current_hp']}/{combatant['max_hp']} player={combatant.get('is_player')} type={combatant.get('participant_type')} participant_id={combatant.get('participant_id')} turn_order={combatant.get('turn_order')}"
+                    )
+            else:
+                lines.append("Combat: none")
+
+            if players:
+                lines.append("Players:")
+                for player in players:
+                    char = await self.db.get_character(player['character_id']) if player.get('character_id') else None
+                    if char:
+                        inventory = await self.db.get_inventory(char['id'])
+                        lines.append(
+                            f"- user_id={player['user_id']} character={char['name']} char_id={char['id']} gold={char.get('gold')} inventory_count={len(inventory)}"
+                        )
+                    else:
+                        lines.append(f"- user_id={player['user_id']} character=None")
+
+            await interaction.followup.send(f"```text\n" + "\n".join(lines[:80]) + "\n```", ephemeral=True)
+        except Exception as exc:
+            logger.error("Failed to build debug gamestate: %s", exc, exc_info=True)
+            await interaction.followup.send("❌ Failed to build debug gamestate.", ephemeral=True)
     
     @app_commands.command(name="resume", description="Resume a paused or previous game session")
     @app_commands.describe(session_id="The session ID to resume (optional - uses most recent)")

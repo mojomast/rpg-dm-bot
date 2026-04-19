@@ -7,34 +7,13 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from logging.handlers import RotatingFileHandler
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from datetime import datetime, timezone
 
-# Ensure logs directory exists
-os.makedirs('logs', exist_ok=True)
-
-# Set up logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        RotatingFileHandler('logs/rpg.log', maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-
-# Show INFO and above in console (including our LLM API logs)
-logging.getLogger().handlers[1].setLevel(logging.DEBUG)
-logging.getLogger('aiosqlite').setLevel(logging.WARNING)
-logging.getLogger('discord').setLevel(logging.INFO)
-logging.getLogger('rpg.llm').setLevel(logging.DEBUG)
-
 logger = logging.getLogger('rpg')
-logger.info("Logging to file: logs/rpg.log")
 
 ALLOWED_BOT_CHANNEL_ID = 1494536176453816431
 
@@ -81,6 +60,7 @@ class RPGBot(commands.Bot):
         
     async def setup_hook(self):
         """Called when the bot is starting up"""
+        logger.info("Bot setup starting")
         # Initialize database
         from src.database import Database
         self.db = Database(DATABASE_PATH)
@@ -188,6 +168,23 @@ class RPGBot(commands.Bot):
         # Process commands
         await self.process_commands(message)
 
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Log interaction metadata without calling an invalid super method."""
+        try:
+            interaction_type = getattr(interaction.type, 'name', str(interaction.type))
+            command = getattr(interaction, 'command', None)
+            logger.info(
+                "[INTERACTION] type=%s user_id=%s guild_id=%s channel_id=%s command=%s custom_id=%s",
+                interaction_type,
+                getattr(interaction.user, 'id', None),
+                getattr(interaction.guild, 'id', None),
+                getattr(interaction.channel, 'id', None),
+                getattr(command, 'qualified_name', None),
+                getattr(getattr(interaction, 'data', None), 'get', lambda *_: None)('custom_id') if getattr(interaction, 'data', None) else None,
+            )
+        except Exception:
+            logger.exception("Failed to log interaction metadata")
+
     async def close(self):
         """Clean up when bot shuts down"""
         if self.llm:
@@ -216,6 +213,13 @@ async def only_allow_allowed_channel(interaction: discord.Interaction) -> bool:
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
     """Handle application command errors"""
+    command_name = getattr(getattr(interaction, 'command', None), 'qualified_name', 'unknown')
+    log_context = {
+        'command': command_name,
+        'user_id': getattr(interaction.user, 'id', None),
+        'guild_id': getattr(interaction.guild, 'id', None),
+        'channel_id': getattr(interaction.channel, 'id', None),
+    }
     if isinstance(error, discord.app_commands.CommandOnCooldown):
         await interaction.response.send_message(
             f"⏳ This command is on cooldown. Try again in {error.retry_after:.1f}s",
@@ -227,7 +231,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
             ephemeral=True
         )
     else:
-        logger.error(f"Command error: {error}", exc_info=True)
+        logger.error("Command error: %s | context=%s", error, log_context, exc_info=True)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(
@@ -240,7 +244,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
                     ephemeral=True
                 )
         except Exception as e:
-            logger.error(f"Failed to send error response to interaction: {e}")
+            logger.error("Failed to send error response to interaction: %s | context=%s", e, log_context, exc_info=True)
 
 
 # Basic commands

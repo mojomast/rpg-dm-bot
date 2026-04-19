@@ -845,7 +845,8 @@ class TestToolErrorHandling:
             mock_context
         )
         
-        assert "Unknown tool" in result or "Error" in result
+        assert result["success"] is False
+        assert "Unknown tool" in result["error"]
 
     async def test_missing_required_args(self, tool_executor, mock_context):
         """Test calling tool with missing required arguments"""

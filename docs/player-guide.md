@@ -62,6 +62,7 @@ Spellcasting classes like Mage, Cleric, Bard, Warlock, Paladin, and Ranger have 
 - `@` mention the bot in the campaign channel with anything you want to say or do
 - Use `/dm` for direct DM interactions, for example `/dm I search the room for hidden doors`
 - Use `/action` for quick action buttons like Explore, Talk, Search, Rest, and Continue
+- DM responses can offer up to 4 clickable action choices; if a button label is shortened, the full choice text is still used behind the scenes when you click it
 - The bot answers in the active session's bound game channel
 
 ## Tips

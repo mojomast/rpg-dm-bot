@@ -61,10 +61,10 @@ class ChatHandler:
     def extract_response_options(self, response_text: str) -> List[str]:
         if not response_text:
             return []
-        options = [match.group(1).strip() for match in re.finditer(r"^\s*[1-3][.)]\s*(.+)", response_text, re.MULTILINE)]
+        options = [match.group(1).strip() for match in re.finditer(r"^\s*[1-4][.)]\s*(.+)", response_text, re.MULTILINE)]
         if options:
             return options
-        return [match.group(1).strip() for match in re.finditer(r"^\s*[A-C][.)]\s*(.+)", response_text, re.MULTILINE)]
+        return [match.group(1).strip() for match in re.finditer(r"^\s*[A-D][.)]\s*(.+)", response_text, re.MULTILINE)]
 
     async def build_batch_character_context(self, messages: List[Dict[str, Any]]) -> str:
         """Build a character summary for every player acting in a batch."""

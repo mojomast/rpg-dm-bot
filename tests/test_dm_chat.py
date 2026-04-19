@@ -7,7 +7,7 @@ import pytest
 
 import src.cogs.dm_chat as dm_chat_module
 from src.chat_handler import ChatHandler
-from src.cogs.dm_chat import DMChat, GameActionsView, InfoButton
+from src.cogs.dm_chat import DMChat, GameActionsView, InfoButton, PlayerActionButton
 from src.utils import resolve_runtime_session
 
 
@@ -43,6 +43,34 @@ class TestDMChatHelpers:
         )
 
         assert options == ["Open the door", "Search the room", "Talk to the guard"]
+
+    def test_extract_response_options_supports_four_numbered_choices(self):
+        cog = DMChat(make_dm_chat_bot_stub())
+
+        options = cog.extract_response_options(
+            "1. Open the door\n2) Search the room\n3. Talk to the guard\n4. Climb out the window"
+        )
+
+        assert options == [
+            "Open the door",
+            "Search the room",
+            "Talk to the guard",
+            "Climb out the window",
+        ]
+
+    def test_extract_response_options_supports_four_lettered_choices(self):
+        cog = DMChat(make_dm_chat_bot_stub())
+
+        options = cog.extract_response_options(
+            "A. Open the door\nB) Search the room\nC. Talk to the guard\nD. Climb out the window"
+        )
+
+        assert options == [
+            "Open the door",
+            "Search the room",
+            "Talk to the guard",
+            "Climb out the window",
+        ]
 
     def test_clear_all_guild_histories_filters_by_guild(self):
         cog = DMChat(make_dm_chat_bot_stub())
@@ -149,6 +177,31 @@ class TestDMChatHelpers:
 
         assert allowed is True
         interaction.response.send_message.assert_not_called()
+
+    def test_game_actions_view_renders_four_option_buttons_with_info_buttons_on_second_row(self):
+        view = GameActionsView(
+            SimpleNamespace(),
+            options=["One", "Two", "Three", "Four"],
+        )
+
+        option_buttons = [item for item in view.children if isinstance(item, PlayerActionButton)]
+        info_buttons = [item for item in view.children if isinstance(item, InfoButton)]
+
+        assert len(option_buttons) == 4
+        assert [button.option_text for button in option_buttons] == ["One", "Two", "Three", "Four"]
+        assert all(button.row == 0 for button in option_buttons)
+        assert all(button.row == 1 for button in info_buttons)
+
+    def test_player_action_button_preserves_full_option_text_when_label_is_shortened(self):
+        long_option = "Investigate the far side of the ruined chapel and inspect every cracked stone for hidden sigils or levers"
+        button = PlayerActionButton(
+            label=long_option[:77] + "...",
+            action="option_1",
+            option_text=long_option,
+        )
+
+        assert button.label.endswith("...")
+        assert button.option_text == long_option
 
     @pytest.mark.asyncio
     async def test_info_button_defers_before_loading(self):

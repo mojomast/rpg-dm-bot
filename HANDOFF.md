@@ -118,6 +118,7 @@ This pass closed the remaining Discord runtime gaps from the production log tria
 **`src/cogs/dm_chat.py`:**
 - Owner-locked slash-command DM action views so other players cannot click through someone else's private action surface
 - Deferred info-button interactions immediately and bound slash-command followup messages so timed-out views are removed cleanly
+- DM action views now support up to 4 extracted choice buttons and preserve full option text even when button labels are shortened for Discord UI limits
 
 **`src/chat_handler.py`:**
 - Normalized tool-loop result handling so dicts and JSON-string tool errors surface consistently to the DM loop
@@ -136,6 +137,7 @@ This pass closed the remaining Discord runtime gaps from the production log tria
 
 **Tests:**
 - Added focused regression coverage for DM action ownership, info-button deferral, tool-result normalization, combat HP sync, miss-turn advancement, stale combat item use, and failed flee turn consumption
+- Added DM chat coverage for 4-option extraction/rendering and full option-text preservation behind shortened button labels
 
 #### Verification
 

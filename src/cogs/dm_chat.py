@@ -37,9 +37,10 @@ from src.prompts import PROACTIVE_DM_GUIDELINES
 class PlayerActionButton(ui.Button):
     """A button for quick player actions"""
     
-    def __init__(self, label: str, action: str, style: discord.ButtonStyle = discord.ButtonStyle.primary, emoji: str = None):
-        super().__init__(label=label, style=style, emoji=emoji)
+    def __init__(self, label: str, action: str, style: discord.ButtonStyle = discord.ButtonStyle.primary, emoji: str = None, option_text: str | None = None, row: int | None = None):
+        super().__init__(label=label, style=style, emoji=emoji, row=row)
         self.action = action
+        self.option_text = option_text or label
     
     async def callback(self, interaction: discord.Interaction):
         logger.info("[BUTTON] %s clicked %s in #%s", interaction.user, self.action, interaction.channel)
@@ -61,7 +62,7 @@ class PlayerActionButton(ui.Button):
                 'continue': f"{char['name']} continues forward.",
             }
             if self.action.startswith('option_'):
-                option_text = self.label
+                option_text = self.option_text
                 prompt = f"{char['name']} chooses: {option_text}"
             else:
                 prompt = action_prompts.get(self.action, f"{char['name']} does: {self.action}")
@@ -88,8 +89,8 @@ class PlayerActionButton(ui.Button):
 class InfoButton(ui.Button):
     """A button for viewing game info (character sheet, quest, etc)"""
     
-    def __init__(self, label: str, info_type: str, style: discord.ButtonStyle = discord.ButtonStyle.secondary, emoji: str = None):
-        super().__init__(label=label, style=style, emoji=emoji, custom_id=f"info_{info_type}")
+    def __init__(self, label: str, info_type: str, style: discord.ButtonStyle = discord.ButtonStyle.secondary, emoji: str = None, row: int | None = None):
+        super().__init__(label=label, style=style, emoji=emoji, custom_id=f"info_{info_type}", row=row)
         self.info_type = info_type
     
     async def callback(self, interaction: discord.Interaction):
@@ -346,20 +347,23 @@ class GameActionsView(ui.View):
 
         # Add option buttons if provided (from DM response)
         if options:
-            for i, option in enumerate(options[:3], 1):
+            for i, option in enumerate(options[:4], 1):
+                display_label = option if len(option) <= 80 else option[:77].rstrip() + "..."
                 self.add_item(PlayerActionButton(
-                    label=option[:80],
+                    label=display_label,
                     action=f"option_{i}",
                     style=discord.ButtonStyle.primary,
-                    emoji="🎯"
+                    emoji="🎯",
+                    option_text=option,
+                    row=0,
                 ))
 
         # Add info buttons
-        self.add_item(InfoButton(label="Character", info_type="character", emoji="📜"))
-        self.add_item(InfoButton(label="Quest", info_type="quest", emoji="📋"))
-        self.add_item(InfoButton(label="Location", info_type="location", emoji="🗺️"))
-        self.add_item(InfoButton(label="Inventory", info_type="inventory", emoji="🎒"))
-        self.add_item(InfoButton(label="Party", info_type="party", emoji="👥"))
+        self.add_item(InfoButton(label="Character", info_type="character", emoji="📜", row=1))
+        self.add_item(InfoButton(label="Quest", info_type="quest", emoji="📋", row=1))
+        self.add_item(InfoButton(label="Location", info_type="location", emoji="🗺️", row=1))
+        self.add_item(InfoButton(label="Inventory", info_type="inventory", emoji="🎒", row=1))
+        self.add_item(InfoButton(label="Party", info_type="party", emoji="👥", row=1))
 
     def bind_message(self, message: discord.Message | None):
         self.message = message

@@ -16,7 +16,7 @@ from datetime import datetime
 
 from src.chat_handler import ChatActor, ChatHandler
 from src.mechanics_tracker import new_tracker, get_tracker
-from src.utils import is_allowed_bot_channel, send_chunked
+from src.utils import is_allowed_bot_channel, safe_respond, send_chunked
 
 logger = logging.getLogger('rpg.dm_chat')
 
@@ -38,46 +38,47 @@ class PlayerActionButton(ui.Button):
     """A button for quick player actions"""
     
     def __init__(self, label: str, action: str, style: discord.ButtonStyle = discord.ButtonStyle.primary, emoji: str = None):
-        super().__init__(label=label, style=style, emoji=emoji, custom_id=f"action_{action}")
+        super().__init__(label=label, style=style, emoji=emoji)
         self.action = action
     
     async def callback(self, interaction: discord.Interaction):
-        # Defer to show we're processing
-        await interaction.response.defer()
-        
-        # Get the cog to process the action
-        cog = interaction.client.get_cog('DMChat')
-        if not cog:
-            await interaction.followup.send("Error: DM not available", ephemeral=True)
-            return
-        
-        # Get character
-        char = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
-        if not char:
-            await interaction.followup.send("❌ You need a character first! Use `/game menu`", ephemeral=True)
-            return
-        
-        # Build the action prompt
-        action_prompts = {
-            'look': f"{char['name']} looks around carefully.",
-            'continue': f"{char['name']} continues forward.",
-        }
-        if self.action.startswith('option_'):
-            option_text = self.label
-            prompt = f"{char['name']} chooses: {option_text}"
-        else:
-            prompt = action_prompts.get(self.action, f"{char['name']} does: {self.action}")
+        logger.info("[BUTTON] %s clicked %s in #%s", interaction.user, self.action, interaction.channel)
+        try:
+            await interaction.response.defer()
 
-        response, mechanics_text = await cog.process_dm_input(
-            channel=interaction.channel,
-            guild=interaction.guild,
-            author=interaction.user,
-            user_message=prompt,
-        )
+            cog = interaction.client.get_cog('DMChat')
+            if not cog:
+                await interaction.followup.send("Error: DM not available", ephemeral=True)
+                return
 
-        full_response = cog.build_full_response(response, mechanics_text)
-        view = GameActionsView(cog, options=cog.extract_response_options(response))
-        await send_chunked(interaction.followup, full_response, view=view)
+            char = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
+            if not char:
+                await interaction.followup.send("❌ You need a character first! Use `/game menu`", ephemeral=True)
+                return
+
+            action_prompts = {
+                'look': f"{char['name']} looks around carefully.",
+                'continue': f"{char['name']} continues forward.",
+            }
+            if self.action.startswith('option_'):
+                option_text = self.label
+                prompt = f"{char['name']} chooses: {option_text}"
+            else:
+                prompt = action_prompts.get(self.action, f"{char['name']} does: {self.action}")
+
+            response, mechanics_text = await cog.process_dm_input(
+                channel=interaction.channel,
+                guild=interaction.guild,
+                author=interaction.user,
+                user_message=prompt,
+            )
+
+            full_response = cog.build_full_response(response, mechanics_text)
+            view = GameActionsView(cog, options=cog.extract_response_options(response))
+            await send_chunked(interaction.followup, full_response, view=view)
+        except Exception as exc:
+            logger.error("PlayerActionButton callback failed: %s", exc, exc_info=True)
+            await interaction.followup.send("❌ That action failed. Try again or use `/dm`.", ephemeral=True)
 
 
 class InfoButton(ui.Button):
@@ -88,33 +89,39 @@ class InfoButton(ui.Button):
         self.info_type = info_type
     
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog('DMChat')
-        if not cog:
-            await interaction.response.send_message("Error: DM not available", ephemeral=True)
-            return
-        
-        if self.info_type == 'character':
-            await self._show_character_sheet(interaction, cog)
-        elif self.info_type == 'quest':
-            await self._show_quest_info(interaction, cog)
-        elif self.info_type == 'location':
-            await self._show_location_info(interaction, cog)
-        elif self.info_type == 'inventory':
-            await self._show_inventory(interaction, cog)
-        elif self.info_type == 'party':
-            await self._show_party_info(interaction, cog)
+        logger.info("[BUTTON] %s clicked info_%s in #%s", interaction.user, self.info_type, interaction.channel)
+        try:
+            cog = interaction.client.get_cog('DMChat')
+            if not cog:
+                await safe_respond(interaction, content="Error: DM not available", ephemeral=True)
+                return
+
+            if self.info_type == 'character':
+                await self._show_character_sheet(interaction, cog)
+            elif self.info_type == 'quest':
+                await self._show_quest_info(interaction, cog)
+            elif self.info_type == 'location':
+                await self._show_location_info(interaction, cog)
+            elif self.info_type == 'inventory':
+                await self._show_inventory(interaction, cog)
+            elif self.info_type == 'party':
+                await self._show_party_info(interaction, cog)
+        except Exception as exc:
+            logger.error("InfoButton callback failed for %s: %s", self.info_type, exc, exc_info=True)
+            await safe_respond(interaction, content="❌ That button failed. Try the slash command instead.", ephemeral=True)
     
     async def _show_character_sheet(self, interaction: discord.Interaction, cog):
         char = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
         if not char:
-            await interaction.response.send_message("❌ No character found!", ephemeral=True)
+            await safe_respond(interaction, content="❌ No character found!", ephemeral=True)
             return
         
         char_class = char.get('char_class') or char.get('class', 'Unknown')
+        backstory = char.get('backstory') or '*No backstory yet*'
         
         embed = discord.Embed(
             title=f"📜 {char['name']}",
-            description=char.get('backstory', '*No backstory yet*')[:200],
+            description=backstory[:200],
             color=discord.Color.gold()
         )
         embed.add_field(
@@ -151,17 +158,17 @@ class InfoButton(ui.Button):
             inline=True
         )
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_respond(interaction, embed=embed, ephemeral=True)
     
     async def _show_quest_info(self, interaction: discord.Interaction, cog):
         session = await cog.resolve_session(interaction.guild.id, interaction.user.id, interaction.channel.id)
         if not session or not session.get('current_quest_id'):
-            await interaction.response.send_message("📋 No active quest!", ephemeral=True)
+            await safe_respond(interaction, content="📋 No active quest!", ephemeral=True)
             return
         
         quest = await cog.db.get_quest(session['current_quest_id'])
         if not quest:
-            await interaction.response.send_message("📋 Quest not found!", ephemeral=True)
+            await safe_respond(interaction, content="📋 Quest not found!", ephemeral=True)
             return
         
         stages = await cog.db.get_quest_stages(quest['id'])
@@ -204,12 +211,12 @@ class InfoButton(ui.Button):
             if reward_text:
                 embed.add_field(name="🎁 Rewards", value="\n".join(reward_text), inline=False)
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_respond(interaction, embed=embed, ephemeral=True)
     
     async def _show_location_info(self, interaction: discord.Interaction, cog):
         session = await cog.resolve_session(interaction.guild.id, interaction.user.id, interaction.channel.id)
         if not session:
-            await interaction.response.send_message("🗺️ No active session!", ephemeral=True)
+            await safe_respond(interaction, content="🗺️ No active session!", ephemeral=True)
             return
         
         game_state = await cog.db.get_game_state(session['id'])
@@ -219,7 +226,7 @@ class InfoButton(ui.Button):
 
         if not location:
             loc_name = game_state.get('current_location', 'Unknown') if game_state else 'Unknown'
-            await interaction.response.send_message(f"🗺️ Current location: **{loc_name}**", ephemeral=True)
+            await safe_respond(interaction, content=f"🗺️ Current location: **{loc_name}**", ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -254,14 +261,15 @@ class InfoButton(ui.Button):
             npc_list = [f"• {npc['name']}" + (" 🛒" if npc.get('is_merchant') else "") for npc in npcs[:5]]
             embed.add_field(name="👥 NPCs Here", value="\n".join(npc_list), inline=False)
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_respond(interaction, embed=embed, ephemeral=True)
     
     async def _show_inventory(self, interaction: discord.Interaction, cog):
         char = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
         if not char:
-            await interaction.response.send_message("❌ No character found!", ephemeral=True)
+            await safe_respond(interaction, content="❌ No character found!", ephemeral=True)
             return
         
+        char = await cog.db.get_active_character(interaction.user.id, interaction.guild.id)
         inventory = await cog.db.get_inventory(char['id'])
         
         embed = discord.Embed(
@@ -280,12 +288,12 @@ class InfoButton(ui.Button):
         else:
             embed.add_field(name="📦 Items", value="*Your pack is empty*", inline=False)
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_respond(interaction, embed=embed, ephemeral=True)
     
     async def _show_party_info(self, interaction: discord.Interaction, cog):
         session = await cog.resolve_session(interaction.guild.id, interaction.user.id, interaction.channel.id)
         if not session:
-            await interaction.response.send_message("👥 No active session!", ephemeral=True)
+            await safe_respond(interaction, content="👥 No active session!", ephemeral=True)
             return
         
         players = await cog.db.get_session_players(session['id'])
@@ -319,7 +327,7 @@ class InfoButton(ui.Button):
                 npc_text.append(f"{loyalty_emoji} **{npc['name']}** ({npc.get('party_role', 'Companion')})")
             embed.add_field(name="🤝 NPC Companions", value="\n".join(npc_text), inline=False)
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_respond(interaction, embed=embed, ephemeral=True)
 
 
 class GameActionsView(ui.View):
@@ -328,7 +336,8 @@ class GameActionsView(ui.View):
     def __init__(self, cog, options: List[str] = None, timeout: float = 300):
         super().__init__(timeout=timeout)
         self.cog = cog
-        
+        self.message = None
+
         # Add option buttons if provided (from DM response)
         if options:
             for i, option in enumerate(options[:3], 1):
@@ -338,13 +347,29 @@ class GameActionsView(ui.View):
                     style=discord.ButtonStyle.primary,
                     emoji="🎯"
                 ))
-        
+
         # Add info buttons
         self.add_item(InfoButton(label="Character", info_type="character", emoji="📜"))
         self.add_item(InfoButton(label="Quest", info_type="quest", emoji="📋"))
         self.add_item(InfoButton(label="Location", info_type="location", emoji="🗺️"))
         self.add_item(InfoButton(label="Inventory", info_type="inventory", emoji="🎒"))
         self.add_item(InfoButton(label="Party", info_type="party", emoji="👥"))
+
+    def bind_message(self, message: discord.Message | None):
+        self.message = message
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except Exception:
+                logger.debug("Failed to clear expired GameActionsView", exc_info=True)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: ui.Item):
+        logger.error("GameActionsView error for item %s: %s", getattr(item, 'custom_id', getattr(item, 'label', 'unknown')), error, exc_info=True)
+        await safe_respond(interaction, content="❌ That interaction failed. Try again with `/dm` or `/action`.", ephemeral=True)
 
 
 class QuickActionsView(ui.View):
@@ -770,12 +795,14 @@ class DMChat(commands.Cog):
         bot_mentioned = self.bot.user in message.mentions
         is_dm_channel = "dungeon-master" in message.channel.name.lower() or "dm-chat" in message.channel.name.lower()
         
-        if not (bot_mentioned or is_dm_channel):
+        if not is_dm_channel:
             return
         
-        # Remove bot mention from message
-        content = message.content.replace(f'<@{self.bot.user.id}>', '').strip()
-        content = message.content.replace(f'<@!{self.bot.user.id}>', '').strip()
+        if bot_mentioned:
+            return
+
+        # Remove bot mention from message if present
+        content = message.content.replace(f'<@{self.bot.user.id}>', '').replace(f'<@!{self.bot.user.id}>', '').strip()
         
         if not content:
             content = "Hello!"

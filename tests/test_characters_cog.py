@@ -19,8 +19,9 @@ async def test_character_create_delegates_to_canonical_interview_with_channel_co
         mock_interaction.guild,
         channel_id=11111,
     )
-    mock_interaction.response.send_message.assert_awaited_once()
-    assert mock_interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    mock_interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    mock_interaction.followup.send.assert_awaited_once()
+    assert mock_interaction.followup.send.await_args.kwargs["ephemeral"] is True
 
 
 @pytest.mark.asyncio
@@ -30,7 +31,8 @@ async def test_character_create_surfaces_error_when_game_master_missing(mock_int
 
     await Characters.create_character.callback(cog, mock_interaction)
 
-    mock_interaction.response.send_message.assert_awaited_once()
-    kwargs = mock_interaction.response.send_message.await_args.kwargs
+    mock_interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    mock_interaction.followup.send.assert_awaited_once()
+    kwargs = mock_interaction.followup.send.await_args.kwargs
     assert kwargs["ephemeral"] is True
-    assert "GameMaster cog is not loaded" in mock_interaction.response.send_message.await_args.args[0]
+    assert "GameMaster cog is not loaded" in mock_interaction.followup.send.await_args.args[0]

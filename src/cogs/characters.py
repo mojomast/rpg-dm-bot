@@ -229,9 +229,11 @@ class Characters(commands.Cog):
     @character_group.command(name="create", description="Create a new character")
     async def create_character(self, interaction: discord.Interaction):
         """Start the canonical session-bound character creation interview."""
+        await interaction.response.defer(ephemeral=True)
+
         game_master = self.bot.get_cog('GameMaster')
         if not game_master:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Character creation is unavailable because the GameMaster cog is not loaded.",
                 ephemeral=True
             )
@@ -243,7 +245,7 @@ class Characters(commands.Cog):
             channel_id=interaction.channel.id,
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "🎭 Check your DMs. Character creation now uses the canonical session-bound interview flow.",
             ephemeral=True
         )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+import discord
+
 from src.content_packs import load_session_content_file
 
 ALLOWED_BOT_CHANNEL_ID = 1494536176453816431
@@ -35,9 +37,27 @@ async def ensure_interaction_owner(interaction, owner_user_id: int, resource: st
 async def send_chunked(target, content: str, view=None, max_len: int = 2000):
     """Send long text content in Discord-sized chunks."""
     chunks = [content[i:i + max_len] for i in range(0, len(content), max_len)] or [""]
+    last_message = None
     for index, chunk in enumerate(chunks):
         kwargs = {'view': view} if view and index == len(chunks) - 1 else {}
-        await target.send(chunk, **kwargs)
+        last_message = await target.send(chunk, **kwargs)
+    if view and hasattr(view, 'bind_message'):
+        view.bind_message(last_message)
+    return last_message
+
+
+async def safe_respond(interaction, **kwargs):
+    """Send an interaction response or fall back to followup if already acknowledged."""
+    try:
+        if interaction.response.is_done():
+            return await interaction.followup.send(**kwargs)
+        return await interaction.response.send_message(**kwargs)
+    except discord.errors.InteractionResponded:
+        return await interaction.followup.send(**kwargs)
+    except Exception:
+        if interaction.response.is_done():
+            return await interaction.followup.send(**kwargs)
+        raise
 
 
 async def resolve_runtime_session(

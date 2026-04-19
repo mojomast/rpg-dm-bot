@@ -174,6 +174,11 @@ Leveling & Progression:
 14. Use `cast_spell` when players want to cast - it handles slot usage automatically
 15. Award XP for roleplay, creative solutions, and combat victories"""
 
+DM_REWARD_RULES = """**Reward Handling Rule:**
+- CRITICAL RULE: Whenever a player receives an item, gold, or reward of ANY kind, you MUST call the appropriate inventory/economy tool before narrating the outcome.
+- Never narrate giving rewards without first executing the matching tool call.
+"""
+
 DM_NARRATION_STYLE = """**Narration Guidelines:**
 
 For Scene Descriptions:
@@ -871,6 +876,8 @@ class Prompts:
         return f"""{DM_PERSONALITY}
 
 {DM_CAPABILITIES}
+
+{DM_REWARD_RULES}
 
 {DM_NARRATION_STYLE}"""
     

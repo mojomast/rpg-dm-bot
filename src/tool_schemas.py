@@ -63,7 +63,7 @@ UPDATE_CHARACTER_HP_SCHEMA = {
             "properties": {
                 "character_id": {
                     "type": "integer",
-                    "description": "The character's ID"
+                    "description": "The character's ID. If omitted, use the active character for the current user/guild context."
                 },
                 "hp_change": {
                     "type": "integer",
@@ -166,7 +166,7 @@ GIVE_ITEM_SCHEMA = {
                     "description": "Item properties (e.g., {'damage': '1d8', 'bonus_strength': 2})"
                 }
             },
-            "required": ["character_id", "item_id", "item_name", "item_type"]
+            "required": ["item_id", "item_name", "item_type"]
         }
     }
 }
@@ -203,10 +203,10 @@ GET_INVENTORY_SCHEMA = {
             "properties": {
                 "character_id": {
                     "type": "integer",
-                    "description": "The character's ID"
+                    "description": "The character's ID. If omitted, use the active character for the current user/guild context."
                 }
             },
-            "required": ["character_id"]
+            "required": []
         }
     }
 }
@@ -221,7 +221,7 @@ GIVE_GOLD_SCHEMA = {
             "properties": {
                 "character_id": {
                     "type": "integer",
-                    "description": "The character's ID"
+                    "description": "The character's ID. If omitted, use the active character for the current user/guild context."
                 },
                 "amount": {
                     "type": "integer",
@@ -232,7 +232,7 @@ GIVE_GOLD_SCHEMA = {
                     "description": "Reason for the gold (e.g., 'loot from chest', 'quest reward')"
                 }
             },
-            "required": ["character_id", "amount"]
+            "required": ["amount"]
         }
     }
 }
@@ -247,7 +247,7 @@ TAKE_GOLD_SCHEMA = {
             "properties": {
                 "character_id": {
                     "type": "integer",
-                    "description": "The character's ID"
+                    "description": "The character's ID. If omitted, use the active character for the current user/guild context."
                 },
                 "amount": {
                     "type": "integer",
@@ -258,7 +258,7 @@ TAKE_GOLD_SCHEMA = {
                     "description": "Reason for removal (e.g., 'purchased sword', 'inn stay')"
                 }
             },
-            "required": ["character_id", "amount"]
+            "required": ["amount"]
         }
     }
 }

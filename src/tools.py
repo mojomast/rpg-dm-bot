@@ -117,6 +117,13 @@ class ToolExecutor:
             return await self.db.get_active_character(user_id, guild_id)
 
         return None
+
+    async def _resolve_inventory_character(self, context: Dict[str, Any], args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Resolve an inventory/economy character from args first, then runtime context."""
+        character_id = args.get('character_id')
+        if character_id:
+            return await self.db.get_character(character_id)
+        return await self._get_context_character(context)
     
     async def _get_session_for_context(self, context: Dict[str, Any]) -> Optional[Dict]:
         """Get the correct session for the given context.
@@ -184,15 +191,15 @@ class ToolExecutor:
             
             # Inventory tools
             elif tool_name == "give_item":
-                return await self._give_item(tool_args)
+                return await self._give_item(context, tool_args)
             elif tool_name == "remove_item":
                 return await self._remove_item(tool_args)
             elif tool_name == "get_inventory":
-                return await self._get_inventory(tool_args)
+                return await self._get_inventory(context, tool_args)
             elif tool_name == "give_gold":
-                return await self._give_gold(tool_args)
+                return await self._give_gold(context, tool_args)
             elif tool_name == "take_gold":
-                return await self._take_gold(tool_args)
+                return await self._take_gold(context, tool_args)
             
             # Combat tools
             elif tool_name == "start_combat":
@@ -488,9 +495,13 @@ Backstory: {char['backstory'] or 'Unknown'}"""
     # INVENTORY TOOL IMPLEMENTATIONS
     # =========================================================================
     
-    async def _give_item(self, args: Dict) -> str:
+    async def _give_item(self, context: Dict, args: Dict) -> str:
         """Give item to character"""
-        char_id = args.get('character_id')
+        char = await self._resolve_inventory_character(context, args)
+        if not char:
+            return {"success": False, "error": "Character not found"}
+
+        char_id = char['id']
         item_id = args.get('item_id')
         item_name = args.get('item_name')
         item_type = args.get('item_type')
@@ -499,7 +510,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
 
         if item_type == 'gold':
             amount = args.get('amount', quantity)
-            return await self._give_gold({
+            return await self._give_gold(context, {
                 'character_id': char_id,
                 'amount': amount,
                 'reason': args.get('reason', item_name or 'loot'),
@@ -520,9 +531,13 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             return f"Removed {quantity}x item from inventory"
         return "Error: Item not found"
     
-    async def _get_inventory(self, args: Dict) -> str:
+    async def _get_inventory(self, context: Dict, args: Dict) -> str:
         """Get character inventory"""
-        char_id = args.get('character_id')
+        char = await self._resolve_inventory_character(context, args)
+        if not char:
+            return {"success": False, "error": "Character not found"}
+
+        char_id = char['id']
         
         items = await self.db.get_inventory(char_id)
         if not items:
@@ -536,28 +551,35 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         
         return "**Inventory:**\n" + "\n".join(lines)
     
-    async def _give_gold(self, args: Dict) -> str:
+    async def _give_gold(self, context: Dict, args: Dict) -> str:
         """Give gold to character"""
-        char_id = args.get('character_id')
+        char = await self._resolve_inventory_character(context, args)
+        if not char:
+            return {"success": False, "error": "Character not found"}
+
+        char_id = char['id']
         amount = args.get('amount', 0)
         reason = args.get('reason', 'reward')
         
         new_gold = await self.db.update_gold(char_id, amount)
-        self._log_inventory_mutation("give_gold", char_id, {"success": True, "amount": amount, "new_gold": new_gold})
+        self._log_inventory_mutation("give_gold", char_id, {"success": True, "amount": amount, "new_gold": new_gold, "character": char['name']})
         return f"Gained {amount} gold ({reason}). Total: {new_gold} gold"
     
-    async def _take_gold(self, args: Dict) -> str:
+    async def _take_gold(self, context: Dict, args: Dict) -> str:
         """Remove gold from character"""
-        char_id = args.get('character_id')
+        char = await self._resolve_inventory_character(context, args)
+        if not char:
+            return {"success": False, "error": "Character not found"}
+
+        char_id = char['id']
         amount = args.get('amount', 0)
         reason = args.get('reason', 'purchase')
         
-        char = await self.db.get_character(char_id)
         if char['gold'] < amount:
             return f"Error: Not enough gold. Has {char['gold']}, needs {amount}"
         
         new_gold = await self.db.update_gold(char_id, -amount)
-        self._log_inventory_mutation("take_gold", char_id, {"success": True, "amount": amount, "new_gold": new_gold})
+        self._log_inventory_mutation("take_gold", char_id, {"success": True, "amount": amount, "new_gold": new_gold, "character": char['name']})
         return f"Spent {amount} gold ({reason}). Remaining: {new_gold} gold"
     
     # =========================================================================

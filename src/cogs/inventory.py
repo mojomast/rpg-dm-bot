@@ -235,7 +235,11 @@ class ShopBuyDropdown(discord.ui.Select):
             self.character_id, item['id'], item['name'],
             item.get('type', 'misc'), 1, props
         )
-        
+
+        refreshed_char = await self.bot.db.get_character(self.character_id)
+        if self.view and hasattr(self.view, 'character'):
+            self.view.character = refreshed_char
+
         await interaction.response.send_message(
             f"✅ Purchased **{item['name']}** for {price} gold!",
             ephemeral=True
@@ -264,6 +268,10 @@ class InventoryView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await ensure_interaction_owner(interaction, self.owner_user_id, "this inventory")
+
+    async def refresh(self):
+        self.character = await self.bot.db.get_character(self.character['id'])
+        self.items = await self.bot.db.get_inventory(self.character['id'])
     
     def get_filtered_items(self) -> List[Dict]:
         if self.filter_type == "all":
@@ -330,6 +338,7 @@ class InventoryFilterDropdown(discord.ui.Select):
         super().__init__(placeholder="📂 Filter items...", options=options, row=0)
     
     async def callback(self, interaction: discord.Interaction):
+        await self.view.refresh()
         self.view.filter_type = self.values[0]
         
         items = self.view.get_filtered_items()
@@ -405,6 +414,9 @@ class InventoryActionDropdown(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "0":
             return
+
+        await self.view.refresh()
+        self.item_map = {i['id']: i for i in self.view.items}
         
         item_id = int(self.values[0])
         item = self.item_map.get(item_id)
@@ -541,6 +553,9 @@ class UseItemButton(discord.ui.Button):
             description="\n".join(effects) or "Item used!",
             color=discord.Color.green()
         )
+
+        refreshed = await self.bot.db.get_character(self.character['id'])
+        self.character.update(refreshed)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
         self.view.stop()
@@ -568,6 +583,9 @@ class EquipItemButton(discord.ui.Button):
             description=f"Equipped **{self.item['item_name']}** to {EQUIPMENT_SLOTS.get(self.slot, self.slot)}!",
             color=discord.Color.green()
         )
+
+        refreshed = await self.bot.db.get_character(self.character['id'])
+        self.character.update(refreshed)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
         self.view.stop()
@@ -584,6 +602,8 @@ class UnequipItemButton(discord.ui.Button):
     
     async def callback(self, interaction: discord.Interaction):
         await self.bot.db.unequip_item(self.item['id'])
+        refreshed = await self.bot.db.get_character(self.character['id'])
+        self.character.update(refreshed)
         
         await interaction.response.send_message(
             f"📤 Unequipped **{self.item['item_name']}**",

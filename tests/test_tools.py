@@ -228,6 +228,34 @@ class TestInventoryTools:
         assert "100 gold" in result
         assert "treasure" in result
 
+    async def test_give_gold_uses_context_character_when_id_omitted(self, tool_executor_with_character, mock_context):
+        """Economy tools should resolve the active character from runtime context when character_id is omitted."""
+        executor, db, char_id = tool_executor_with_character
+
+        result = await executor.execute_tool(
+            "give_gold",
+            {"amount": 25, "reason": "narrative reward"},
+            mock_context,
+        )
+
+        char = await db.get_character(char_id)
+        assert "25 gold" in result
+        assert char['gold'] == 25
+
+    async def test_get_inventory_uses_context_character_when_id_omitted(self, tool_executor_with_character, mock_context, sample_item):
+        """Inventory tool should resolve the active character from runtime context when character_id is omitted."""
+        executor, db, char_id = tool_executor_with_character
+        await db.add_item(char_id, sample_item['id'], sample_item['name'], sample_item['type'])
+
+        result = await executor.execute_tool(
+            "get_inventory",
+            {},
+            mock_context,
+        )
+
+        assert "Inventory" in result
+        assert sample_item['name'] in result
+
     async def test_take_gold(self, tool_executor_with_character, mock_context):
         """Test taking gold from character"""
         executor, db, char_id = tool_executor_with_character

@@ -7,7 +7,7 @@ import pytest
 
 import src.cogs.dm_chat as dm_chat_module
 from src.chat_handler import ChatHandler
-from src.cogs.dm_chat import DMChat
+from src.cogs.dm_chat import DMChat, GameActionsView, InfoButton
 from src.utils import resolve_runtime_session
 
 
@@ -17,6 +17,11 @@ class DummyTarget:
 
     async def send(self, content, **kwargs):
         self.messages.append((content, kwargs))
+
+
+class DummyMessage:
+    async def edit(self, **kwargs):
+        self.kwargs = kwargs
 
 
 def make_dm_chat_bot_stub():
@@ -117,6 +122,55 @@ class TestDMChatHelpers:
         assert mechanics == ""
         assert bot.db.save_message.await_count == 2
 
+    @pytest.mark.asyncio
+    async def test_game_actions_view_rejects_non_owner(self):
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=456),
+            response=SimpleNamespace(is_done=lambda: False, send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        view = GameActionsView(SimpleNamespace(), owner_user_id=123)
+
+        allowed = await view.interaction_check(interaction)
+
+        assert allowed is False
+        interaction.response.send_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_game_actions_view_allows_owner(self):
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(is_done=lambda: False, send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        view = GameActionsView(SimpleNamespace(), owner_user_id=123)
+
+        allowed = await view.interaction_check(interaction)
+
+        assert allowed is True
+        interaction.response.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_info_button_defers_before_loading(self):
+        order = []
+
+        class FakeButton(InfoButton):
+            async def _show_character_sheet(self, interaction, cog):
+                order.append("show")
+
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
+            channel=SimpleNamespace(),
+            guild=SimpleNamespace(id=67890),
+            client=SimpleNamespace(get_cog=lambda name: SimpleNamespace()),
+            response=SimpleNamespace(defer=AsyncMock(side_effect=lambda **kwargs: order.append("defer") or None), is_done=lambda: True),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await FakeButton(label="Character", info_type="character").callback(interaction)
+
+        assert order == ["defer", "show"]
+
 
 class StubChatContextDb:
     async def get_active_character(self, user_id, guild_id):
@@ -163,6 +217,38 @@ class TestChatHandlerContext:
         assert "ACTIVE COMBAT:" in context
         assert "Turn: 2" in context
         assert "Aria: 14 HP, Initiative 12" in context
+        assert "/combat attack <target>" in context
+
+    @pytest.mark.asyncio
+    async def test_get_game_context_appends_noncombat_command_hints(self):
+        handler = ChatHandler(
+            StubChatContextDb(),
+            llm=None,
+            prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+            tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+            tools=None,
+        )
+
+        context = await handler.get_game_context(guild_id=123, user_id=456, channel_id=999, session_id=10)
+
+        assert "AVAILABLE PLAYER COMMANDS" in context
+        assert "/dm <message>" in context
+        assert "/combat start" in context
+
+    def test_normalize_tool_result_parses_json_error_strings(self):
+        handler = ChatHandler(
+            StubChatContextDb(),
+            llm=None,
+            prompts=SimpleNamespace(get_dm_system_prompt=lambda: "prompt"),
+            tool_schemas=SimpleNamespace(get_all_schemas=lambda: []),
+            tools=None,
+        )
+
+        normalized, message = handler._normalize_tool_result('{"success": false, "error": "not_adjacent"}')
+
+        assert normalized["success"] is False
+        assert normalized["error"] == "not_adjacent"
+        assert message == '{"success": false, "error": "not_adjacent"}'
 
     @pytest.mark.asyncio
     async def test_process_batched_messages_includes_all_batch_characters(self):

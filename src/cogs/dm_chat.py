@@ -16,7 +16,7 @@ from datetime import datetime
 
 from src.chat_handler import ChatActor, ChatHandler
 from src.mechanics_tracker import new_tracker, get_tracker
-from src.utils import is_allowed_bot_channel, safe_respond, send_chunked
+from src.utils import ensure_interaction_owner, is_allowed_bot_channel, safe_respond, send_chunked
 
 logger = logging.getLogger('rpg.dm_chat')
 
@@ -74,7 +74,11 @@ class PlayerActionButton(ui.Button):
             )
 
             full_response = cog.build_full_response(response, mechanics_text)
-            view = GameActionsView(cog, options=cog.extract_response_options(response))
+            view = GameActionsView(
+                cog,
+                options=cog.extract_response_options(response),
+                owner_user_id=interaction.user.id,
+            )
             await send_chunked(interaction.followup, full_response, view=view)
         except Exception as exc:
             logger.error("PlayerActionButton callback failed: %s", exc, exc_info=True)
@@ -91,6 +95,7 @@ class InfoButton(ui.Button):
     async def callback(self, interaction: discord.Interaction):
         logger.info("[BUTTON] %s clicked info_%s in #%s", interaction.user, self.info_type, interaction.channel)
         try:
+            await interaction.response.defer(ephemeral=True)
             cog = interaction.client.get_cog('DMChat')
             if not cog:
                 await safe_respond(interaction, content="Error: DM not available", ephemeral=True)
@@ -333,10 +338,11 @@ class InfoButton(ui.Button):
 class GameActionsView(ui.View):
     """View containing game action buttons"""
     
-    def __init__(self, cog, options: List[str] = None, timeout: float = 300):
+    def __init__(self, cog, options: List[str] = None, timeout: float = 300, owner_user_id: int | None = None):
         super().__init__(timeout=timeout)
         self.cog = cog
         self.message = None
+        self.owner_user_id = owner_user_id
 
         # Add option buttons if provided (from DM response)
         if options:
@@ -357,6 +363,11 @@ class GameActionsView(ui.View):
 
     def bind_message(self, message: discord.Message | None):
         self.message = message
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.owner_user_id is None:
+            return True
+        return await ensure_interaction_owner(interaction, self.owner_user_id, "these DM actions")
 
     async def on_timeout(self):
         for child in self.children:
@@ -856,7 +867,7 @@ class DMChat(commands.Cog):
         full_response += response
         
         # Create view with action buttons
-        view = GameActionsView(self, options=self.extract_response_options(response))
+        view = GameActionsView(self, options=self.extract_response_options(response), owner_user_id=interaction.user.id)
         
         # Create embed for response
         embed = discord.Embed(
@@ -869,7 +880,8 @@ class DMChat(commands.Cog):
         )
         embed.set_footer(text=f"{char['name']}: \"{message[:50]}{'...' if len(message) > 50 else ''}\"")
         
-        await interaction.followup.send(embed=embed, view=view)
+        sent = await interaction.followup.send(embed=embed, view=view, wait=True)
+        view.bind_message(sent)
     
     @app_commands.command(name="action", description="Quick actions for common RPG activities")
     @app_commands.describe(action="What action do you want to take?")
@@ -931,7 +943,7 @@ class DMChat(commands.Cog):
         }
         
         # Create view with action buttons
-        view = GameActionsView(self, options=self.extract_response_options(response))
+        view = GameActionsView(self, options=self.extract_response_options(response), owner_user_id=interaction.user.id)
         
         embed = discord.Embed(
             title=action_titles.get(action, "Action"),
@@ -940,7 +952,8 @@ class DMChat(commands.Cog):
         )
         embed.set_footer(text=f"Playing as {char['name']}")
         
-        await interaction.followup.send(embed=embed, view=view)
+        sent = await interaction.followup.send(embed=embed, view=view, wait=True)
+        view.bind_message(sent)
     
     @app_commands.command(name="narrate", description="Have the DM narrate a scene")
     @app_commands.describe(
@@ -1032,7 +1045,7 @@ class DMChat(commands.Cog):
         full_response += response
         
         # Create view with action buttons
-        view = GameActionsView(self, options=self.extract_response_options(response))
+        view = GameActionsView(self, options=self.extract_response_options(response), owner_user_id=interaction.user.id)
         
         embed = discord.Embed(
             title=f"🎲 {skill.title()} Check",
@@ -1040,7 +1053,8 @@ class DMChat(commands.Cog):
             color=discord.Color.blue()
         )
         
-        await interaction.followup.send(embed=embed, view=view)
+        sent = await interaction.followup.send(embed=embed, view=view, wait=True)
+        view.bind_message(sent)
     
     @app_commands.command(name="dm_clear", description="Clear the DM conversation history")
     @app_commands.guild_only()
@@ -1075,7 +1089,7 @@ class DMChat(commands.Cog):
         full_response += response
         
         # Create view with action buttons
-        view = GameActionsView(self, options=self.extract_response_options(response))
+        view = GameActionsView(self, options=self.extract_response_options(response), owner_user_id=interaction.user.id)
         
         embed = discord.Embed(
             title="🏰 Scene Set",
@@ -1083,7 +1097,8 @@ class DMChat(commands.Cog):
             color=discord.Color.dark_green()
         )
         
-        await interaction.followup.send(embed=embed, view=view)
+        sent = await interaction.followup.send(embed=embed, view=view, wait=True)
+        view.bind_message(sent)
     
     @app_commands.command(name="reset", description="Reset the DM's memory for this channel (clears conversation history)")
     @app_commands.guild_only()

@@ -71,8 +71,9 @@ Character Management:
 - `update_character_stats` - Modify character stats
 
 Inventory & Economy:
-- `give_item` - Give an item to a character
+- `give_item` - Give a non-currency item to a character
 - `remove_item` - Remove an item from inventory
+- `get_inventory` - Check a character's current items
 - `give_gold` - Award gold to a character
 - `take_gold` - Remove gold from a character
 
@@ -174,9 +175,49 @@ Leveling & Progression:
 14. Use `cast_spell` when players want to cast - it handles slot usage automatically
 15. Award XP for roleplay, creative solutions, and combat victories"""
 
+DM_CURRENCY_RULE = """**Currency Rule:**
+- Use `give_gold` and `take_gold` for currency changes.
+- Gold is not an inventory item; do not use `give_item` or `remove_item` for gold.
+"""
+
 DM_REWARD_RULES = """**Reward Handling Rule:**
 - CRITICAL RULE: Whenever a player receives an item, gold, or reward of ANY kind, you MUST call the appropriate inventory/economy tool before narrating the outcome.
 - Never narrate giving rewards without first executing the matching tool call.
+"""
+
+SLASH_COMMAND_CONTEXT = {
+    "always_available": [
+        "`/dm <message>` - Talk to the DM or describe your action",
+        "`/action` - Quick actions like look, search, talk, or continue",
+        "`/check <skill>` - Make a skill check",
+        "`/inventory view` - See your items and gold",
+        "`/inventory quickuse <item>` - Use a consumable item quickly",
+        "`/character sheet` - View your character stats",
+    ],
+    "in_combat": [
+        "`/combat attack <target>` - Attack an enemy",
+        "`/combat status` - See combatant HP and turn order",
+        "`/combat next` - Advance to the next turn when appropriate",
+        "`/inventory quickuse <item>` - Use a consumable during battle",
+    ],
+    "in_town": [
+        "`/inventory shop` - Browse and buy items",
+        "`/quest list` - View available quests",
+        "`/quest accept <id>` - Accept a quest",
+        "`/npc talk <name>` - Talk to an NPC",
+    ],
+    "no_combat": [
+        "`/combat start` - Begin a combat encounter",
+        "`/combat spawn <name> <hp>` - Add an enemy (DM only)",
+        "`/combat initiative` - Roll initiative to begin combat",
+    ],
+}
+
+PLAYER_GUIDANCE_RULE = """**Player Guidance Rule:**
+- At the END of every response where the player faces a choice, decision point, or new situation, append a brief `Tip:` line suggesting 1-2 relevant slash commands they can use.
+- Keep it brief and natural.
+- Never list more than 3 commands at once.
+- Never mention internal tool names to players; only mention slash commands.
 """
 
 DM_NARRATION_STYLE = """**Narration Guidelines:**
@@ -878,6 +919,10 @@ class Prompts:
 {DM_CAPABILITIES}
 
 {DM_REWARD_RULES}
+
+{DM_CURRENCY_RULE}
+
+{PLAYER_GUIDANCE_RULE}
 
 {DM_NARRATION_STYLE}"""
     

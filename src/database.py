@@ -6030,6 +6030,7 @@ class Database:
         """End combat, sync HP, and distribute rewards"""
         # Sync all HP
         hp_results = await self.sync_all_combat_to_characters(encounter_id)
+        combatants = await self.get_combatants(encounter_id)
         
         # Award XP
         xp_results = []
@@ -6039,7 +6040,6 @@ class Database:
         # Award gold
         gold_results = []
         if gold_per_character > 0:
-            combatants = await self.get_combatants(encounter_id)
             for combatant in combatants:
                 if combatant['is_player'] and combatant['current_hp'] > 0:
                     new_gold = await self.update_gold(combatant['participant_id'], gold_per_character)
@@ -6053,7 +6053,6 @@ class Database:
         # Distribute loot (to first surviving player for simplicity)
         loot_results = []
         if loot_items:
-            combatants = await self.get_combatants(encounter_id)
             survivors = [c for c in combatants if c['is_player'] and c['current_hp'] > 0]
             if survivors:
                 for item in loot_items:

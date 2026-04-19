@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from src.mechanics_tracker import new_tracker
-from src.prompts import PROACTIVE_DM_GUIDELINES
+from src.prompts import PROACTIVE_DM_GUIDELINES, SLASH_COMMAND_CONTEXT
 
 logger = logging.getLogger("rpg.chat_handler")
 
@@ -102,6 +102,7 @@ class ChatHandler:
     ) -> str:
         """Build context about the current game state."""
         context_parts: List[str] = []
+        current_location = None
 
         char = None
         if include_character_context:
@@ -152,7 +153,6 @@ Game Description: {session.get('description', 'An adventure awaits!')}"""
                         context_parts.append(f"  Backstory: {party_char['backstory'][:500]}...")
 
             game_state = await self.db.get_game_state(session["id"])
-            current_location = None
             if game_state:
                 if game_state.get("current_scene"):
                     context_parts.append(f"\nCURRENT SCENE: {game_state['current_scene']}")
@@ -251,6 +251,17 @@ CURRENT STAGE: {current_stage['title']}
                     context_parts.append(
                         f"- {char_info['name']}: {participant['current_hp']} HP, Initiative {participant['initiative']}"
                     )
+
+        hints = list(SLASH_COMMAND_CONTEXT["always_available"])
+        if combat:
+            hints.extend(SLASH_COMMAND_CONTEXT["in_combat"])
+        else:
+            hints.extend(SLASH_COMMAND_CONTEXT["no_combat"])
+            if current_location and current_location.get("location_type") in {"town", "city", "village"}:
+                hints.extend(SLASH_COMMAND_CONTEXT["in_town"])
+
+        context_parts.append("\nAVAILABLE PLAYER COMMANDS (mention relevant ones naturally when helpful):")
+        context_parts.extend(f"- {hint}" for hint in hints)
 
         return "\n".join(context_parts) if context_parts else "No active game context."
 
@@ -390,17 +401,18 @@ CRITICAL:
                     logger.info("Executing tool: %s with args: %s", tool_name, tool_args)
                     tool_context = await self._resolve_tool_context(context, tool_args)
                     tool_result = await self.tools.execute_tool(tool_name, tool_args, tool_context)
-                    if isinstance(tool_result, dict) and (tool_result.get("success") is False or tool_result.get("error")):
-                        logger.warning("[TOOL RESULT] name=%s result=%s", tool_name, tool_result)
+                    normalized_result, tool_message = self._normalize_tool_result(tool_result)
+                    if normalized_result.get("success") is False or normalized_result.get("error"):
+                        logger.warning("[TOOL RESULT] name=%s result=%s", tool_name, normalized_result)
                     tool_results.append({
                         "tool_name": tool_name,
                         "args": tool_args,
-                        "result": tool_result,
+                        "result": normalized_result,
                     })
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": json.dumps(tool_result) if isinstance(tool_result, dict) else str(tool_result),
+                        "content": tool_message,
                     })
             except Exception as exc:
                 logger.error("Error in DM chat: %s", exc, exc_info=True)
@@ -424,6 +436,31 @@ CRITICAL:
                 response_text = "*The Dungeon Master hesitates, but the action still resolves.*"
 
         return response_text or "*The Dungeon Master remains silent.*", tool_results
+
+    def _normalize_tool_result(self, tool_result: Any) -> tuple[Dict[str, Any], str]:
+        if isinstance(tool_result, dict):
+            message = (
+                tool_result.get("message")
+                or tool_result.get("result")
+                or tool_result.get("error")
+                or json.dumps(tool_result)
+            )
+            return tool_result, json.dumps(tool_result)
+
+        if isinstance(tool_result, str):
+            stripped = tool_result.strip()
+            if stripped.startswith("{") and stripped.endswith("}"):
+                try:
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, dict):
+                        parsed.setdefault("message", parsed.get("result") or parsed.get("error") or stripped)
+                        return parsed, stripped
+                except json.JSONDecodeError:
+                    pass
+            return {"success": not stripped.startswith("Error:"), "message": stripped}, stripped
+
+        text = str(tool_result)
+        return {"success": True, "message": text}, text
 
     async def process_single_message(
         self,

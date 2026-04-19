@@ -53,6 +53,24 @@ async def resolve_attack(db, attacker_char: dict, target_combatant: dict) -> dic
     }
 
 
+async def get_combat_resolution_state(db, encounter_id: int) -> dict:
+    """Return whether one side has been eliminated in the encounter."""
+    combatants = await db.get_combat_participants(encounter_id)
+    alive_players = [
+        c for c in combatants
+        if c.get('is_player') and c.get('current_hp', 0) > 0 and c.get('status', 'active') != 'fled'
+    ]
+    alive_enemies = [
+        c for c in combatants
+        if not c.get('is_player') and c.get('current_hp', 0) > 0 and c.get('status', 'active') != 'fled'
+    ]
+    return {
+        'alive_players': alive_players,
+        'alive_enemies': alive_enemies,
+        'resolved': not alive_players or not alive_enemies,
+    }
+
+
 class CombatView(discord.ui.View):
     """Interactive combat action buttons"""
     
@@ -107,8 +125,27 @@ class CombatView(discord.ui.View):
                     return
             await channel.send(f"⚔️ {mention} — it's your turn!")
 
+    async def _end_combat_if_resolved(self, combat: dict, channel) -> bool:
+        resolution = await get_combat_resolution_state(self.bot.db, combat['id'])
+        if not resolution['resolved']:
+            return False
+
+        if resolution['alive_players'] and not resolution['alive_enemies']:
+            await self.bot.db.end_combat(combat['id'])
+            await channel.send("⚔️ **Victory!** The last enemy falls and combat ends.")
+            return True
+
+        if resolution['alive_enemies'] and not resolution['alive_players']:
+            await self.bot.db.end_combat(combat['id'])
+            await channel.send("💀 **Defeat!** No conscious party members remain.")
+            return True
+
+        return False
+
     async def _auto_advance_enemy_turns(self, combat: dict, channel):
         while True:
+            if await self._end_combat_if_resolved(combat, channel):
+                return
             current = await self.bot.db.get_current_combatant(combat['id'])
             if not current or current.get('is_player'):
                 if current:
@@ -132,6 +169,9 @@ class CombatView(discord.ui.View):
             else:
                 lines.append("It misses.")
             await channel.send("\n".join(lines))
+
+            if await self._end_combat_if_resolved(combat, channel):
+                return
 
             result = await self.bot.db.advance_combat_turn(combat['id'])
             if result.get('error'):
@@ -229,9 +269,11 @@ class CombatView(discord.ui.View):
             )
             await self._auto_advance_enemy_turns(combat, interaction.channel)
         else:
+            await self.bot.db.advance_combat_turn(combat['id'])
             await interaction.response.send_message(
-                f"❌ Failed to flee! (Rolled {roll}, needed 12+)\nThe enemies get an opportunity attack!"
+                f"❌ Failed to flee! (Rolled {roll}, needed 12+)\nYou lose your turn and the battle surges on."
             )
+            await self._auto_advance_enemy_turns(combat, interaction.channel)
 
 
 class TargetSelectView(discord.ui.View):
@@ -280,6 +322,9 @@ class TargetSelectView(discord.ui.View):
         target_combatant = next((c for c in await self.bot.db.get_combat_participants(self.encounter_id) if c['id'] == target_id), None)
         if not target_combatant:
             await interaction.response.send_message("Target not found!", ephemeral=True)
+            return
+        if target_combatant.get('is_player') or target_combatant.get('current_hp', 0) <= 0 or target_combatant.get('status') == 'fled':
+            await interaction.response.send_message("That target is no longer a valid enemy.", ephemeral=True)
             return
 
         attack = await resolve_attack(self.bot.db, char, target_combatant)
@@ -336,6 +381,15 @@ class CombatItemView(discord.ui.View):
 
     async def item_selected(self, interaction: discord.Interaction):
         item_id = int(interaction.data['values'][0])
+        combat = await self.bot.db.get_active_combat(interaction.guild.id, interaction.channel.id)
+        if not combat:
+            await interaction.response.send_message("❌ No active combat!", ephemeral=True)
+            return
+        current = await self.bot.db.get_current_combatant(combat['id'])
+        if not current or current.get('participant_type') != 'character' or current.get('participant_id') != self.character['id']:
+            await interaction.response.send_message("Not your turn!", ephemeral=True)
+            return
+
         inventory = await self.bot.db.get_inventory(self.character['id'])
         item = next((entry for entry in inventory if entry['id'] == item_id), None)
         if not item:
@@ -367,17 +421,20 @@ class CombatItemView(discord.ui.View):
             lines.append(f"💚 Restored **{roll['total']}** HP")
             lines.append(f"HP: {result['new_hp']}/{result['max_hp']}")
         elif effect_type == 'restore_mana':
-            new_mana = min(self.character['max_mana'], self.character['mana'] + int(effect.get('value', 0)))
-            restored = new_mana - self.character['mana']
+            fresh_character = await self.bot.db.get_character(self.character['id'])
+            new_mana = min(fresh_character['max_mana'], fresh_character['mana'] + int(effect.get('value', 0)))
+            restored = new_mana - fresh_character['mana']
             await self.bot.db.update_character(self.character['id'], mana=new_mana)
             lines.append(f"✨ Restored **{restored}** mana")
-            lines.append(f"Mana: {new_mana}/{self.character['max_mana']}")
+            lines.append(f"Mana: {new_mana}/{fresh_character['max_mana']}")
         else:
             await interaction.response.send_message("That item cannot be used in combat yet.", ephemeral=True)
             return
 
         await self.bot.db.remove_item(item_id, 1)
         await interaction.response.send_message("\n".join(lines))
+        await self.bot.db.advance_combat_turn(combat['id'])
+        await Combat(self.bot)._auto_advance_enemy_turns(combat, interaction.channel)
 
 
 class Combat(commands.Cog):
@@ -447,7 +504,7 @@ class Combat(commands.Cog):
         
         embed = discord.Embed(
             title="⚔️ Combat Started!",
-            description="A battle begins!\n\n**DM:** Use `/combat spawn` to add enemies\n**Players:** Your characters will be added when you act",
+            description="A battle begins!\n\n**DM:** Use `/combat spawn` to add enemies\n**Players:** Your session party is already in the encounter. Roll initiative, then act when you are called.",
             color=discord.Color.red()
         )
         embed.add_field(
@@ -657,7 +714,7 @@ class Combat(commands.Cog):
         combatants = await self.db.get_combat_participants(combat['id'])
         target_combatant = None
         for c in combatants:
-            if target.lower() in c['name'].lower() and c['current_hp'] > 0:
+            if target.lower() in c['name'].lower() and c['current_hp'] > 0 and not c['is_player'] and c.get('status') != 'fled':
                 target_combatant = c
                 break
         

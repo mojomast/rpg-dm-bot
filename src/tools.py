@@ -499,7 +499,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Give item to character"""
         char = await self._resolve_inventory_character(context, args)
         if not char:
-            return {"success": False, "error": "Character not found"}
+            return "Error: Character not found"
 
         char_id = char['id']
         item_id = args.get('item_id')
@@ -509,12 +509,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         properties = args.get('properties', {})
 
         if item_type == 'gold':
-            amount = args.get('amount', quantity)
-            return await self._give_gold(context, {
-                'character_id': char_id,
-                'amount': amount,
-                'reason': args.get('reason', item_name or 'loot'),
-            })
+            return "Error: Use give_gold for currency rewards"
         
         inv_id = await self.db.add_item(char_id, item_id, item_name, item_type, quantity, properties)
         result = {"success": True, "inventory_id": inv_id, "item": item_name, "quantity": quantity, "character_id": char_id}
@@ -535,7 +530,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Get character inventory"""
         char = await self._resolve_inventory_character(context, args)
         if not char:
-            return {"success": False, "error": "Character not found"}
+            return "Error: Character not found"
 
         char_id = char['id']
         
@@ -555,7 +550,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Give gold to character"""
         char = await self._resolve_inventory_character(context, args)
         if not char:
-            return {"success": False, "error": "Character not found"}
+            return "Error: Character not found"
 
         char_id = char['id']
         amount = args.get('amount', 0)
@@ -569,7 +564,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         """Remove gold from character"""
         char = await self._resolve_inventory_character(context, args)
         if not char:
-            return {"success": False, "error": "Character not found"}
+            return "Error: Character not found"
 
         char_id = char['id']
         amount = args.get('amount', 0)
@@ -875,6 +870,8 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         result = await self.db.update_combatant_hp(target_id, -damage)
         if 'error' in result:
             return f"Error: {result['error']}"
+        if result.get('participant_type') == 'character' and result.get('participant_id'):
+            await self.db.update_character_hp(result['participant_id'], -damage)
         
         status = f"💀 {result['name']} is DOWN!" if result['is_dead'] else f"{result['name']}: {result['new_hp']}/{result['max_hp']} HP"
         return f"Dealt {damage} {damage_type} damage to {result['name']}! {status}"
@@ -887,6 +884,8 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         result = await self.db.update_combatant_hp(target_id, healing)
         if 'error' in result:
             return f"Error: {result['error']}"
+        if result.get('participant_type') == 'character' and result.get('participant_id'):
+            await self.db.update_character_hp(result['participant_id'], healing)
         
         return f"Healed {result['name']} for {healing} HP! Now at {result['new_hp']}/{result['max_hp']} HP"
     
@@ -1048,6 +1047,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         # Roll to hit
         attack_roll = self.dice.roll(f"1d20+{attack_bonus}")
         target_ac = target.get('armor_class') or target.get('combat_stats', {}).get('ac') or 10
+        target_ac += sum(2 for effect in target.get('status_effects', []) if effect.get('effect') == 'defending')
         
         hit = attack_roll['total'] >= target_ac or attack_roll['critical']
         
@@ -1076,7 +1076,7 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         else:
             result_lines.append("❌ **MISS!**")
 
-        if hit:
+        if not attack_roll['fumble']:
             advance_result = await self.db.advance_combat_turn(combat['id'])
             if 'error' not in advance_result:
                 result_lines.append(f"Next turn: {advance_result['current_combatant']['name']}")

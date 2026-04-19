@@ -256,6 +256,30 @@ class TestInventoryTools:
         assert "Inventory" in result
         assert sample_item['name'] in result
 
+    @pytest.mark.parametrize("tool_name,args", [
+        ("give_item", {"item_id": "potion", "item_name": "Potion", "item_type": "consumable"}),
+        ("get_inventory", {}),
+        ("give_gold", {"amount": 5}),
+        ("take_gold", {"amount": 5}),
+    ])
+    async def test_inventory_tools_return_string_error_when_character_missing(self, tool_executor, mock_context, tool_name, args):
+        empty_context = {"guild_id": 67890, "user_id": 99999, "channel_id": 11111}
+
+        result = await tool_executor.execute_tool(tool_name, args, empty_context)
+
+        assert result == "Error: Character not found"
+
+    async def test_give_item_rejects_gold_and_directs_to_give_gold(self, tool_executor_with_character, mock_context):
+        executor, _db, _char_id = tool_executor_with_character
+
+        result = await executor.execute_tool(
+            "give_item",
+            {"item_id": "gold", "item_name": "Gold", "item_type": "gold", "quantity": 10},
+            mock_context,
+        )
+
+        assert result == "Error: Use give_gold for currency rewards"
+
     async def test_take_gold(self, tool_executor_with_character, mock_context):
         """Test taking gold from character"""
         executor, db, char_id = tool_executor_with_character
@@ -669,6 +693,78 @@ class TestCombatTools:
         char = await db.get_character(char_id)
         assert char['hp'] == char['max_hp'] - 4
 
+    async def test_deal_damage_syncs_player_target_hp_to_character_sheet(self, tool_executor_with_character, mock_context):
+        executor, db, char_id = tool_executor_with_character
+        encounter_id = await db.create_combat(67890, 11111)
+        participant_id = await db.add_combatant(encounter_id, "character", char_id, "Hero", 20, 20, 2, is_player=True)
+
+        await executor.execute_tool(
+            "deal_damage",
+            {"target_id": participant_id, "damage": 3, "damage_type": "physical"},
+            mock_context,
+        )
+
+        char = await db.get_character(char_id)
+        assert char['hp'] == char['max_hp'] - 3
+
+    async def test_heal_combatant_syncs_player_target_hp_to_character_sheet(self, tool_executor_with_character, mock_context):
+        executor, db, char_id = tool_executor_with_character
+        encounter_id = await db.create_combat(67890, 11111)
+        participant_id = await db.add_combatant(encounter_id, "character", char_id, "Hero", 20, 20, 2, is_player=True)
+        await db.update_combatant_hp(participant_id, -5)
+        await db.update_character_hp(char_id, -5)
+
+        await executor.execute_tool(
+            "heal_combatant",
+            {"target_id": participant_id, "healing": 4},
+            mock_context,
+        )
+
+        char = await db.get_character(char_id)
+        assert char['hp'] == char['max_hp'] - 1
+
+    async def test_roll_attack_miss_still_advances_turn(self, tool_executor_with_character, mock_context):
+        executor, db, char_id = tool_executor_with_character
+        session_id = await db.create_session(67890, "Miss Advances", 12345)
+        await db.update_session(session_id, status='active')
+        await db.update_character(char_id, session_id=session_id)
+        await db.add_session_player(session_id, char_id)
+        await db.bind_session_channel(session_id, mock_context['channel_id'], set_primary=True)
+        mock_context['session_id'] = session_id
+        await executor.execute_tool("start_combat", {}, mock_context)
+        combat = await db.get_active_combat(channel_id=mock_context['channel_id'])
+
+        enemy_id = await db.add_combatant(combat['id'], "enemy", 999, "Orc", 20, 20, 5, is_player=False)
+        player_participant = next(
+            c for c in await db.get_combat_participants(combat['id'])
+            if c['participant_type'] == 'character' and c['participant_id'] == char_id
+        )
+        await db.set_initiative_order(combat['id'], [player_participant['id'], enemy_id])
+        await db.set_current_turn(combat['id'], 0)
+
+        original_roll = executor.dice.roll
+        rolls = iter([
+            {"total": 2, "rolls": [2], "kept": [2], "modifier": 0, "critical": False, "fumble": False},
+        ])
+        executor.dice.roll = lambda *args, **kwargs: next(rolls)
+        try:
+            result = await executor.execute_tool(
+                "roll_attack",
+                {
+                    "attacker_id": player_participant['id'],
+                    "target_id": enemy_id,
+                    "attack_bonus": 0,
+                    "damage_dice": "1d8",
+                },
+                mock_context,
+            )
+        finally:
+            executor.dice.roll = original_roll
+
+        assert "MISS" in result
+        current = await db.get_current_combatant(combat['id'])
+        assert current['id'] == enemy_id
+
     async def test_create_faction_tool(self, tool_executor, mock_context):
         """Faction tool should create and persist a faction."""
         session_id = await tool_executor.db.create_session(67890, "Faction Tool Test", 12345)
@@ -990,6 +1086,24 @@ class TestHardeningRegressions:
         result = await executor.execute_tool(
             "end_combat_with_rewards",
             {"victory": True, "bonus_xp": 25, "bonus_gold": 10},
+            mock_context,
+        )
+
+        assert "VICTORY" in result
+        assert "Error" not in result
+
+    async def test_end_combat_with_rewards_handles_zero_reward_victory(self, tool_executor_with_character, mock_context):
+        """Victory should still succeed when no XP, gold, or loot are awarded."""
+        executor, db, char_id = tool_executor_with_character
+        mock_context['user_id'] = 12345
+        mock_context['guild_id'] = 67890
+
+        await db.create_session(guild_id=67890, name="Empty Rewards", dm_user_id=12345)
+        await executor.execute_tool("start_combat", {}, mock_context)
+
+        result = await executor.execute_tool(
+            "end_combat_with_rewards",
+            {"victory": True},
             mock_context,
         )
 

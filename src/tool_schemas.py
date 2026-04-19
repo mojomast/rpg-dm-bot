@@ -136,7 +136,7 @@ GIVE_ITEM_SCHEMA = {
     "type": "function",
     "function": {
         "name": "give_item",
-        "description": "Give an item to a character's inventory.",
+        "description": "Give a non-currency item to a character's inventory.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -215,7 +215,7 @@ GIVE_GOLD_SCHEMA = {
     "type": "function",
     "function": {
         "name": "give_gold",
-        "description": "Give gold to a character.",
+        "description": "Give gold to a character. Use this for currency rewards; gold is not an inventory item.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -241,7 +241,7 @@ TAKE_GOLD_SCHEMA = {
     "type": "function",
     "function": {
         "name": "take_gold",
-        "description": "Remove gold from a character (for purchases, theft, etc.).",
+        "description": "Remove gold from a character (for purchases, theft, etc.). Use this for currency changes; gold is not an inventory item.",
         "parameters": {
             "type": "object",
             "properties": {

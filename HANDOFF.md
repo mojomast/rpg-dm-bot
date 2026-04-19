@@ -2,7 +2,7 @@
 
 **Date:** April 17, 2026  
 **Project:** RPG Dungeon Master Discord Bot  
-**Status:** Recent hardening complete, with location-connection editing and template-backed monster spawning landed; larger campaign architecture still partial
+**Status:** Discord runtime hardening is substantially closed out for logging, DM interactions, combat turn flow, inventory sync, and command guidance; larger campaign architecture is still partial
 
 > **🤖 AI-Generated Project**: This entire project was created by giving Claude Opus 4.5 a single prompt asking it to transform [ussybot](https://github.com/kyleawayan/ussybot) into an RPG Dungeon Master bot.
 
@@ -107,7 +107,48 @@ Results:
 
 #### Remaining Limitation
 
-- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, and inventory/items; `/character create` also now routes into the same canonical character creation path. Combat setup/spawn drift, campaign creator review/edit placeholders, web location connection admin, and story item/event editor contract drift are closed. Remaining work is now the larger roadmap/admin systems and deeper canonicalization gaps.
+- The current v1 Discord runtime pack-awareness slices are landed for GM interview creation, spells, skills, inventory/items, DM action views, combat turn enforcement, reward syncing, and command guidance. `/character create` also now routes into the same canonical character creation path. Remaining work is now the larger roadmap/admin systems and deeper canonicalization gaps.
+
+### Runtime Hardening Follow-up (April 19, 2026)
+
+This pass closed the remaining Discord runtime gaps from the production log triage and multi-domain repair brief.
+
+#### Changes Made
+
+**`src/cogs/dm_chat.py`:**
+- Owner-locked slash-command DM action views so other players cannot click through someone else's private action surface
+- Deferred info-button interactions immediately and bound slash-command followup messages so timed-out views are removed cleanly
+
+**`src/chat_handler.py`:**
+- Normalized tool-loop result handling so dicts and JSON-string tool errors surface consistently to the DM loop
+
+**`src/tools.py` + `src/tool_schemas.py` + `src/prompts.py`:**
+- Normalized missing-character inventory/economy errors to plain runtime strings
+- Added explicit currency guidance so gold uses `give_gold`/`take_gold`, not inventory item tools
+- Synced generic combat damage/heal tools back to character HP for player combatants
+- Made tool attack AC respect the `defending` status and advance turn after resolved non-fumble attacks
+
+**`src/cogs/combat.py`:**
+- Revalidated combat item use against the active turn, consumed the turn on successful item use, and continued enemy auto-turns
+- Failed flee now consumes the turn instead of allowing unlimited retries
+- Rejected stale/invalid attack targets and ended combat automatically when one side is eliminated
+- Updated combat-start guidance copy to match the current auto-join behavior for session party members
+
+**Tests:**
+- Added focused regression coverage for DM action ownership, info-button deferral, tool-result normalization, combat HP sync, miss-turn advancement, stale combat item use, and failed flee turn consumption
+
+#### Verification
+
+Local verification completed with:
+
+```bash
+.venv/bin/python -m compileall src/cogs/dm_chat.py src/chat_handler.py src/tools.py src/cogs/combat.py tests/test_dm_chat.py tests/test_tools.py tests/test_combat_cog.py
+.venv/bin/pytest tests/ -q
+```
+
+Results:
+- compile checks passed
+- full test suite passed (`259 passed`)
 
 ### Additional Admin/Contract Cleanup (same day follow-up)
 

@@ -53,9 +53,9 @@ uvicorn api:app --reload --port 8000
 - If `DISCORD_GUILD_ID` is set, commands sync to that guild on startup.
 - Otherwise, commands sync globally.
 
-## Discord Channel Guard
-- The live bot only responds in the approved campaign channel configured in code.
-- If you need to change that channel, update the allowed channel constant and restart the bot.
+## Discord Channel Routing
+- The live bot responds in the active session's bound game channel.
+- If you move play to another channel, re-bind or resume the session there so runtime context stays aligned.
 
 ## Frontend Build
 ```bash

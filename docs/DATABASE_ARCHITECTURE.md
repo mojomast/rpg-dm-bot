@@ -574,6 +574,9 @@ Use this checklist to verify all systems are properly connected:
 - [x] Damage syncs to character HP via `sync_combat_damage_to_character()`
 - [x] Combat end awards XP/gold/loot via `end_combat_with_rewards()`
 - [x] `get_active_combat(channel_id=)` properly detects active combat
+- [x] Persisted initiative order/current turn drive UI and tool turn enforcement
+- [x] Fled combatants are excluded from future turn processing
+- [x] Player-target combat damage and healing stay synced to character sheets
 - [ ] Enemy templates, armor class, and boss runtime state are not yet normalized end to end
 
 ### ⚠️ World System (Implemented With Drift)

@@ -8,7 +8,7 @@ It is designed for two modes of play: players can join and play through Discord 
 - AI DM narration, NPC dialogue, and tool-driven gameplay flow
 - Browser chat with shared session state and live dashboard panels
 - Web admin tools for campaigns, locations, NPCs, items, spells, and game data
-- Discord responses are restricted to the campaign's approved channel
+- Discord responses are routed through the session-bound game channel and current session context
 - Content-pack aware runtime data for themed campaigns
 
 ## Quick Start

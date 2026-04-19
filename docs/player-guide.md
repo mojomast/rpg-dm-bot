@@ -20,13 +20,11 @@ Combat is turn-based and usually starts when the DM triggers an encounter or the
 | Command | What it does |
 | --- | --- |
 | `/combat attack` | Attack a target |
-| `/combat defend` | Take a defensive stance |
-| `/combat spell` | Cast a spell |
-| `/combat item` | Use an item |
-| `/combat flee` | Try to escape |
 | `/combat status` | View combat status |
+| `/combat next` | Advance to the next turn when needed |
 
-The AI DM narrates combat actions, so just describe what your character wants to do.
+During your turn, the combat action buttons let you attack, defend, use consumables, or attempt to flee.
+The AI DM narrates combat actions, so you can also describe what your character wants to do.
 
 ## Spells & Abilities
 Spellcasting classes like Mage, Cleric, Bard, Warlock, Paladin, and Ranger have cantrips and leveled spells.
@@ -64,7 +62,7 @@ Spellcasting classes like Mage, Cleric, Bard, Warlock, Paladin, and Ranger have 
 - `@` mention the bot in the campaign channel with anything you want to say or do
 - Use `/dm` for direct DM interactions, for example `/dm I search the room for hidden doors`
 - Use `/action` for quick action buttons like Explore, Talk, Search, Rest, and Continue
-- The bot only answers in the approved campaign channel
+- The bot answers in the active session's bound game channel
 
 ## Tips
 - The DM is an AI, so describe your actions in natural language for best results.

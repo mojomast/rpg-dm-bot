@@ -173,8 +173,11 @@ async def test_inventory_quick_use_uses_character_session_pack_item_effects(mock
 async def test_combat_item_button_uses_runtime_pack_item_effect(mock_interaction):
     character = {"id": 1, "name": "Aria", "hp": 5, "max_hp": 12, "mana": 0, "max_mana": 5, "session_id": 9}
     item = {"id": 77, "item_id": "battle_tonic", "item_name": "Battle Tonic", "item_type": "consumable", "quantity": 1}
+    current = {"id": 1, "participant_type": "character", "participant_id": 1}
     db = SimpleNamespace(
+        get_active_combat=AsyncMock(return_value={"id": 5}),
         get_active_character=AsyncMock(return_value=character),
+        get_current_combatant=AsyncMock(return_value=current),
         get_inventory=AsyncMock(return_value=[item]),
     )
     bot = SimpleNamespace(db=db)

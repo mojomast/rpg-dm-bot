@@ -394,9 +394,13 @@ class TestCombatTools:
         )
         
         result = await tool_executor.execute_tool("roll_initiative", {}, mock_context)
+        combat = await tool_executor.db.get_active_combat(channel_id=mock_context['channel_id'])
+        current = await tool_executor.db.get_current_combatant(combat['id'])
         
         assert "Initiative Order" in result
         assert "Goblin" in result
+        assert current is not None
+        assert "turn" in result.lower()
 
     async def test_deal_damage(self, tool_executor, mock_context):
         """Test dealing damage in combat"""
@@ -591,6 +595,51 @@ class TestCombatTools:
 
         assert "vs AC 15" in result
         assert "MISS" in result
+
+    async def test_roll_attack_syncs_player_target_hp_to_character_sheet(self, tool_executor_with_character, mock_context):
+        """Tool attack damage against a player should also update the character sheet HP."""
+        executor, db, char_id = tool_executor_with_character
+        session_id = await db.create_session(67890, "Combat Sync Test", 12345)
+        await db.update_session(session_id, status='active')
+        await db.update_character(char_id, session_id=session_id)
+        await db.add_session_player(session_id, char_id)
+        await db.bind_session_channel(session_id, mock_context['channel_id'], set_primary=True)
+        mock_context['session_id'] = session_id
+        await executor.execute_tool("start_combat", {}, mock_context)
+        combat = await db.get_active_combat(channel_id=mock_context['channel_id'])
+
+        enemy_id = await db.add_combatant(
+            combat['id'], "enemy", 999, "Orc", 20, 20, 5, is_player=False
+        )
+        player_participant = next(
+            c for c in await db.get_combat_participants(combat['id'])
+            if c['participant_type'] == 'character' and c['participant_id'] == char_id
+        )
+        await db.set_initiative_order(combat['id'], [enemy_id, player_participant['id']])
+        await db.set_current_turn(combat['id'], 0)
+
+        original_roll = executor.dice.roll
+        rolls = iter([
+            {"total": 18, "rolls": [13], "kept": [13], "modifier": 5, "critical": False, "fumble": False},
+            {"total": 4, "rolls": [4], "kept": [4], "modifier": 0, "critical": False, "fumble": False},
+        ])
+        executor.dice.roll = lambda *args, **kwargs: next(rolls)
+        try:
+            await executor.execute_tool(
+                "roll_attack",
+                {
+                    "attacker_id": enemy_id,
+                    "target_id": player_participant['id'],
+                    "attack_bonus": 5,
+                    "damage_dice": "1d8",
+                },
+                mock_context,
+            )
+        finally:
+            executor.dice.roll = original_roll
+
+        char = await db.get_character(char_id)
+        assert char['hp'] == char['max_hp'] - 4
 
     async def test_create_faction_tool(self, tool_executor, mock_context):
         """Faction tool should create and persist a faction."""

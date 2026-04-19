@@ -817,21 +817,30 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         
         combatants = await self.db.get_combatants(combat['id'])
         results = []
+        ordered_ids = []
         
         for c in combatants:
             roll = self.dice.roll(f"1d20+{c['initiative']}")
             # Update initiative with rolled value
             await self.db.update_combatant_initiative(c['id'], roll['total'])
-            results.append((c['name'], roll['total'], c['is_player']))
-        
+            results.append((c['id'], c['name'], roll['total'], c['is_player']))
+         
         # Sort by initiative
-        results.sort(key=lambda x: x[1], reverse=True)
-        
+        results.sort(key=lambda x: x[2], reverse=True)
+        ordered_ids = [result[0] for result in results]
+        await self.db.set_initiative_order(combat['id'], ordered_ids)
+        await self.db.set_current_turn(combat['id'], 0)
+         
         lines = ["**Initiative Order:**"]
-        for i, (name, init, is_player) in enumerate(results):
+        for i, (_combatant_id, name, init, is_player) in enumerate(results):
             marker = "🎮" if is_player else "👹"
             lines.append(f"{i+1}. {marker} {name}: {init}")
-        
+
+        current = await self.db.get_current_combatant(combat['id'])
+        if current:
+            lines.append("")
+            lines.append(f"➡️ {current['name']}'s turn")
+         
         return "\n".join(lines)
     
     async def _deal_damage(self, context: Dict, args: Dict) -> str:
@@ -896,13 +905,18 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             return "No active combat."
         
         combatants = await self.db.get_combatants(combat['id'])
+        current = await self.db.get_current_combatant(combat['id'])
         
         lines = [f"**Combat Status** (Round {combat['round_number']})"]
+        if current:
+            lines.append(f"Current turn: {current['name']}")
         for c in combatants:
             hp_bar = "█" * int(c['current_hp'] / c['max_hp'] * 10) + "░" * (10 - int(c['current_hp'] / c['max_hp'] * 10))
             status = " ".join([f"[{e['effect']}]" for e in c['status_effects']])
             dead = "💀" if c['current_hp'] <= 0 else ""
             marker = "🎮" if c['is_player'] else "👹"
+            if c.get('status') == 'fled':
+                dead = "🏃"
             lines.append(f"{dead}{marker} {c['name']}: AC {c.get('armor_class', 10)} | {hp_bar} {c['current_hp']}/{c['max_hp']} {status}")
         
         return "\n".join(lines)
@@ -1004,6 +1018,10 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         
         if not attacker or not target:
             return "Error: Invalid attacker or target."
+
+        current = await self.db.get_current_combatant(combat['id'])
+        if current and current['id'] != attacker_id:
+            return f"Error: It is {current['name']}'s turn, not {attacker['name']}'s."
         
         # Roll to hit
         attack_roll = self.dice.roll(f"1d20+{attack_bonus}")
@@ -1021,6 +1039,8 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             damage_roll = self.dice.roll(damage_dice)
             total_damage = damage_roll['total'] * 2  # Double damage on crit
             await self.db.update_combatant_hp(target_id, -total_damage)
+            if target.get('participant_type') == 'character' and target.get('participant_id'):
+                await self.db.update_character_hp(target['participant_id'], -total_damage)
             result_lines.append(f"Damage: {damage_roll['total']} x2 = **{total_damage}** {damage_type} damage!")
         elif attack_roll['fumble']:
             result_lines.append("💥 **CRITICAL MISS!** The attack goes wildly astray!")
@@ -1028,9 +1048,16 @@ Backstory: {char['backstory'] or 'Unknown'}"""
             result_lines.append("✅ **HIT!**")
             damage_roll = self.dice.roll(damage_dice)
             await self.db.update_combatant_hp(target_id, -damage_roll['total'])
+            if target.get('participant_type') == 'character' and target.get('participant_id'):
+                await self.db.update_character_hp(target['participant_id'], -damage_roll['total'])
             result_lines.append(f"Damage: **{damage_roll['total']}** {damage_type} damage!")
         else:
             result_lines.append("❌ **MISS!**")
+
+        if hit:
+            advance_result = await self.db.advance_combat_turn(combat['id'])
+            if 'error' not in advance_result:
+                result_lines.append(f"Next turn: {advance_result['current_combatant']['name']}")
         
         return "\n".join(result_lines)
     

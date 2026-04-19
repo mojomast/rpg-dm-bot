@@ -409,6 +409,7 @@ class Database:
                     armor_class INTEGER DEFAULT 10,
                     combat_stats TEXT DEFAULT '{}',
                     status_effects TEXT DEFAULT '[]',
+                    status TEXT DEFAULT 'active',
                     turn_order INTEGER DEFAULT 0,
                     FOREIGN KEY (encounter_id) REFERENCES combat_encounters(id)
                 )
@@ -1245,10 +1246,14 @@ class Database:
             if 'encounter_tier' not in columns:
                 await db.execute("ALTER TABLE combat_participants ADD COLUMN encounter_tier TEXT DEFAULT 'standard'")
                 await db.commit()
+            if 'status' not in columns:
+                await db.execute("ALTER TABLE combat_participants ADD COLUMN status TEXT DEFAULT 'active'")
+                await db.commit()
 
             await db.execute("UPDATE combat_participants SET resource_state = COALESCE(NULLIF(resource_state, ''), '{}')")
             await db.execute("UPDATE combat_participants SET phase_state = COALESCE(NULLIF(phase_state, ''), '{}')")
             await db.execute("UPDATE combat_participants SET encounter_tier = COALESCE(NULLIF(encounter_tier, ''), 'standard')")
+            await db.execute("UPDATE combat_participants SET status = COALESCE(NULLIF(status, ''), 'active')")
             await db.commit()
         except Exception:
             pass
@@ -2881,6 +2886,7 @@ class Database:
                 c['combat_stats'] = self._normalize_combat_stats(c.get('combat_stats'))
                 c['resource_state'] = _loads_json_value(c.get('resource_state'), {})
                 c['phase_state'] = _loads_json_value(c.get('phase_state'), {})
+                c['character_id'] = c['participant_id'] if c.get('participant_type') == 'character' else None
                 combatants.append(c)
             return combatants
     
@@ -2904,11 +2910,46 @@ class Database:
             
             return {
                 "name": combatant['name'],
+                "participant_id": combatant['participant_id'],
+                "participant_type": combatant['participant_type'],
                 "old_hp": combatant['current_hp'],
                 "new_hp": new_hp,
                 "max_hp": combatant['max_hp'],
                 "is_dead": new_hp <= 0
             }
+
+    async def get_current_combatant(self, encounter_id: int) -> Optional[Dict[str, Any]]:
+        """Get the current combatant using persisted turn order/current_turn."""
+        combat = await self.get_active_combat(channel_id=None, guild_id=None)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM combat_encounters WHERE id = ?", (encounter_id,))
+            combat_row = await cursor.fetchone()
+            if not combat_row:
+                return None
+            combat_data = dict(combat_row)
+            current_turn = combat_data.get('current_turn', 0)
+
+        participants = await self.get_combat_participants(encounter_id)
+        active_participants = [
+            participant for participant in participants
+            if participant.get('current_hp', 0) > 0 and participant.get('status', 'active') != 'fled'
+        ]
+        if not active_participants:
+            return None
+        if current_turn >= len(active_participants):
+            current_turn = 0
+        return active_participants[current_turn]
+
+    async def set_combatant_status(self, participant_id: int, status: str) -> bool:
+        """Update a combat participant status."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE combat_participants SET status = ? WHERE id = ?",
+                (status, participant_id),
+            )
+            await db.commit()
+            return True
     
     async def update_combatant_initiative(self, participant_id: int, initiative: int) -> bool:
         """Update a combatant's initiative value"""
@@ -3007,8 +3048,11 @@ class Database:
                 return {"error": "Combat not found"}
             
             combat = dict(combat)
-            combatants = await self.get_combatants(encounter_id)
-            alive_combatants = [c for c in combatants if c['current_hp'] > 0]
+            combatants = await self.get_combat_participants(encounter_id)
+            alive_combatants = [
+                c for c in combatants
+                if c['current_hp'] > 0 and c.get('status', 'active') != 'fled'
+            ]
             
             if not alive_combatants:
                 return {"error": "No alive combatants"}
@@ -3021,8 +3065,11 @@ class Database:
                 new_round += 1
 
             await self.tick_combat_status_effects(alive_combatants[new_turn]['id'])
-            refreshed_combatants = await self.get_combatants(encounter_id)
-            alive_combatants = [c for c in refreshed_combatants if c['current_hp'] > 0]
+            refreshed_combatants = await self.get_combat_participants(encounter_id)
+            alive_combatants = [
+                c for c in refreshed_combatants
+                if c['current_hp'] > 0 and c.get('status', 'active') != 'fled'
+            ]
             
             await db.execute("""
                 UPDATE combat_encounters SET current_turn = ?, round_number = ?

@@ -135,6 +135,10 @@ class RPGBot(commands.Bot):
         self._started_at = datetime.now(timezone.utc)
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
+
+        from src.cogs.dm_chat import GameActionsView
+        self.add_view(GameActionsView(cog=None, options=None, timeout=None))
+        logger.info("Registered persistent GameActionsView for static info buttons")
         
         # Set presence
         activity = discord.Activity(

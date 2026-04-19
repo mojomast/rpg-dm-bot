@@ -354,7 +354,9 @@ class TargetSelectView(discord.ui.View):
         
         await self.bot.db.advance_combat_turn(combat['id'])
         await interaction.response.send_message("\n".join(lines))
-        await Combat(self.bot)._auto_advance_enemy_turns(combat, interaction.channel)
+        cog = self.bot.get_cog('Combat')
+        if cog:
+            await cog._auto_advance_enemy_turns(combat, interaction.channel)
 
 
 class CombatItemView(discord.ui.View):
@@ -434,7 +436,9 @@ class CombatItemView(discord.ui.View):
         await self.bot.db.remove_item(item_id, 1)
         await interaction.response.send_message("\n".join(lines))
         await self.bot.db.advance_combat_turn(combat['id'])
-        await Combat(self.bot)._auto_advance_enemy_turns(combat, interaction.channel)
+        cog = self.bot.get_cog('Combat')
+        if cog:
+            await cog._auto_advance_enemy_turns(combat, interaction.channel)
 
 
 class Combat(commands.Cog):
@@ -680,7 +684,9 @@ class Combat(commands.Cog):
             color=discord.Color.blurple(),
         )
         await interaction.response.send_message(embed=embed)
-        await self._auto_advance_enemy_turns(combat, interaction.channel)
+        refreshed = await self.db.get_active_combat(interaction.guild.id, interaction.channel.id)
+        if refreshed:
+            await self._auto_advance_enemy_turns(refreshed, interaction.channel)
     
     @combat_group.command(name="attack", description="Attack a target in combat")
     @app_commands.describe(target="Name of the target to attack")

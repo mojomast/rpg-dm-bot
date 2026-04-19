@@ -16,7 +16,7 @@ from datetime import datetime
 
 from src.chat_handler import ChatActor, ChatHandler
 from src.mechanics_tracker import new_tracker, get_tracker
-from src.utils import send_chunked
+from src.utils import is_allowed_bot_channel, send_chunked
 
 logger = logging.getLogger('rpg.dm_chat')
 
@@ -402,6 +402,9 @@ class DMChat(commands.Cog):
         if not self.proactive_dm_check.is_running():
             self.proactive_dm_check.start()
 
+    def _can_respond_in_channel(self, channel_id: int) -> bool:
+        return is_allowed_bot_channel(channel_id)
+
     async def cog_unload(self):
         if self.proactive_dm_check.is_running():
             self.proactive_dm_check.cancel()
@@ -568,6 +571,8 @@ class DMChat(commands.Cog):
 
         guild_id = channel.guild.id
         channel_id = channel.id
+        if not self._can_respond_in_channel(channel_id):
+            return "", ""
         first_user_id = messages[0]['user_id']
         session_id = await self.get_active_session_id(guild_id, first_user_id, channel_id)
         if session_id:
@@ -619,6 +624,8 @@ class DMChat(commands.Cog):
             tuple: (response_text, mechanics_text) - The DM response and formatted game mechanics
         """
         channel_id = channel.id
+        if not self._can_respond_in_channel(channel_id):
+            return "", ""
         guild_id = guild.id
         user_id = author.id
         session_id = await self.get_active_session_id(guild_id, user_id, channel_id)
@@ -669,6 +676,8 @@ class DMChat(commands.Cog):
     async def queue_player_message(self, message: discord.Message, content: str):
         """Queue a player message for batched processing"""
         channel_id = message.channel.id
+        if not self._can_respond_in_channel(channel_id):
+            return
         guild_id = message.guild.id
         user_id = message.author.id
         
@@ -729,6 +738,8 @@ class DMChat(commands.Cog):
             # Process batched messages
             async with channel.typing():
                 response, mechanics_text = await self.process_batched_messages(channel, messages)
+                if not response and not mechanics_text:
+                    return
                 
                 # Build full response with mechanics
                 full_response = self.build_full_response(response, mechanics_text)
@@ -750,6 +761,9 @@ class DMChat(commands.Cog):
         
         # Ignore DMs
         if not message.guild:
+            return
+
+        if not self._can_respond_in_channel(message.channel.id):
             return
         
         # Check if bot was mentioned or if it's a DM channel
@@ -775,6 +789,10 @@ class DMChat(commands.Cog):
     async def dm_command(self, interaction: discord.Interaction, message: str):
         """Interact with the AI Dungeon Master"""
         await interaction.response.defer()
+
+        if not self._can_respond_in_channel(interaction.channel.id):
+            await interaction.followup.send("❌ The bot only responds in the approved game channel.", ephemeral=True)
+            return
         
         # Check if user has a character
         char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
@@ -841,6 +859,10 @@ class DMChat(commands.Cog):
     async def quick_action(self, interaction: discord.Interaction, action: str):
         """Quick action command for common activities"""
         await interaction.response.defer()
+
+        if not self._can_respond_in_channel(interaction.channel.id):
+            await interaction.followup.send("❌ The bot only responds in the approved game channel.", ephemeral=True)
+            return
         
         char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
         
@@ -914,6 +936,10 @@ class DMChat(commands.Cog):
     ):
         """Have the DM narrate a scene"""
         await interaction.response.defer()
+
+        if not self._can_respond_in_channel(interaction.channel.id):
+            await interaction.followup.send("❌ The bot only responds in the approved game channel.", ephemeral=True)
+            return
         
         prompt = f"Narrate this scene in a {tone} tone: {scene}"
         
@@ -962,6 +988,10 @@ class DMChat(commands.Cog):
     ):
         """Make a skill check with DM narration"""
         await interaction.response.defer()
+
+        if not self._can_respond_in_channel(interaction.channel.id):
+            await interaction.followup.send("❌ The bot only responds in the approved game channel.", ephemeral=True)
+            return
         
         dc_text = f" against DC {difficulty}" if difficulty else ""
         prompt = f"I want to make a {skill} check{dc_text}. Roll the dice and narrate the result."
@@ -1002,6 +1032,10 @@ class DMChat(commands.Cog):
     async def set_scene(self, interaction: discord.Interaction, description: str):
         """Set a scene for the DM to build upon"""
         await interaction.response.defer()
+
+        if not self._can_respond_in_channel(interaction.channel.id):
+            await interaction.followup.send("❌ The bot only responds in the approved game channel.", ephemeral=True)
+            return
         
         prompt = f"Set the following scene for our adventure and describe what the players see, hear, and feel: {description}"
         

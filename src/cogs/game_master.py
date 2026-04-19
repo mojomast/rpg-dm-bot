@@ -2018,7 +2018,10 @@ class GameMaster(commands.Cog):
         # Build inventory text - get from database since items are now stored
         equipped_items = await self.db.get_equipped_items(char_id)
         all_inventory = await self.db.get_inventory(char_id)
-        other_items = [i for i in all_inventory if not i['is_equipped'] and i['item_type'] != 'currency']
+        other_items = [
+            i for i in all_inventory
+            if not i['is_equipped'] and i['item_type'] not in {'currency', 'gold'} and str(i.get('item_name', '')).strip().lower() != 'gold'
+        ]
         
         inventory_text = ""
         if equipped_items:

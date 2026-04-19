@@ -18,6 +18,7 @@ You also have access to DM-only slash commands that players cannot use.
 - `/dm npc create [name]` - create a new NPC on the fly
 - `/dm spawn [enemy type]` - spawn enemies to trigger combat
 - `/dm reward [player]` - grant items, gold, or XP to a player
+- `/inventory transfer_gold [player] [amount]` - move gold between player characters
 - `/dm quest create` - create a quest
 - `/dm quest edit [quest]` - edit an existing quest
 - `/check [player] [skill]` - force a skill check for a player
@@ -42,3 +43,4 @@ You also have access to DM-only slash commands that players cannot use.
 - Use `/dm narrate` to redirect the story if players go off-track.
 - NPCs created with `/dm npc create` are persistent and can be re-encountered.
 - The AI remembers party backstories, active quests, and current location when generating responses.
+- Discord bot replies are restricted to the campaign's approved channel.

@@ -44,6 +44,7 @@ Spellcasting classes like Mage, Cleric, Bard, Warlock, Paladin, and Ranger have 
 - `/inventory unequip [item]` - unequip an item
 - `/inventory shop` - visit the in-game shop
 - `/inventory give [item] [player]` - trade with a party member
+- `/inventory transfer_gold [player] [amount]` - send gold to another player
 
 ## Quests
 - `/quest list` - view available and active quests
@@ -63,6 +64,7 @@ Spellcasting classes like Mage, Cleric, Bard, Warlock, Paladin, and Ranger have 
 - `@` mention the bot in the campaign channel with anything you want to say or do
 - Use `/dm` for direct DM interactions, for example `/dm I search the room for hidden doors`
 - Use `/action` for quick action buttons like Explore, Talk, Search, Rest, and Continue
+- The bot only answers in the approved campaign channel
 
 ## Tips
 - The DM is an AI, so describe your actions in natural language for best results.

@@ -6,10 +6,17 @@ from typing import Any, Dict, Optional
 
 from src.content_packs import load_session_content_file
 
+ALLOWED_BOT_CHANNEL_ID = 1494536176453816431
+
 
 def get_character_class(character: dict, default: str = "Unknown") -> str:
     """Return the normalized character class field used across older/newer rows."""
     return character.get('char_class') or character.get('class') or default
+
+
+def is_allowed_bot_channel(channel_id: Optional[int]) -> bool:
+    """Return True only for the single approved Discord channel."""
+    return channel_id == ALLOWED_BOT_CHANNEL_ID
 
 
 async def ensure_interaction_owner(interaction, owner_user_id: int, resource: str = "this interface") -> bool:

@@ -41,6 +41,8 @@ Optional OpenRouter headers:
 python run.py
 ```
 
+Restart the bot after any code change so slash commands, prompts, and runtime guards stay live.
+
 ## Running the Web Dashboard
 ```bash
 cd web
@@ -50,6 +52,10 @@ uvicorn api:app --reload --port 8000
 ## Updating Slash Commands
 - If `DISCORD_GUILD_ID` is set, commands sync to that guild on startup.
 - Otherwise, commands sync globally.
+
+## Discord Channel Guard
+- The live bot only responds in the approved campaign channel configured in code.
+- If you need to change that channel, update the allowed channel constant and restart the bot.
 
 ## Frontend Build
 ```bash

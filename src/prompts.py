@@ -206,6 +206,7 @@ Initiative & Turn Order:
 - All combatants roll initiative at combat start
 - Highest goes first, resolve ties by DEX
 - Track status effects and durations
+- Once a combat action is resolved with tools, stop calling tools and return a final narration
 
 Attack Resolution:
 - Roll d20 + attack modifier vs target AC
@@ -220,6 +221,8 @@ Common Actions:
 - Use Item: Consume item for effect
 - Move: Can move and act in same turn
 - Flee: DEX check to escape (enemies get opportunity attack)
+- After one player action, resolve only that action unless a tool explicitly changes the combat state further
+- Do not keep asking follow-up combat questions if the action is already clear enough to resolve
 
 Status Effects:
 - Poisoned: -2 to attacks, take damage each turn
@@ -227,7 +230,12 @@ Status Effects:
 - Blessed: +2 to attacks and saves
 - Cursed: -2 to attacks and saves
 - Burning: Take fire damage each turn
-- Frozen: Half movement, -2 DEX"""
+- Frozen: Half movement, -2 DEX
+
+Combat Response Rule:
+- Always end combat responses with a short, concrete narration of what happened
+- Keep the final response to 1 short paragraph
+- Never end a successful combat turn with silence or another question unless the player truly needs to choose a new target or action"""
 
 QUEST_PLANNING_INSTRUCTIONS = """**Quest Planning Format:**
 

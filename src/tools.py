@@ -482,6 +482,14 @@ Backstory: {char['backstory'] or 'Unknown'}"""
         item_type = args.get('item_type')
         quantity = args.get('quantity', 1)
         properties = args.get('properties', {})
+
+        if item_type == 'gold':
+            amount = args.get('amount', quantity)
+            return await self._give_gold({
+                'character_id': char_id,
+                'amount': amount,
+                'reason': args.get('reason', item_name or 'loot'),
+            })
         
         inv_id = await self.db.add_item(char_id, item_id, item_name, item_type, quantity, properties)
         return f"Added {quantity}x {item_name} to inventory (ID: {inv_id})"

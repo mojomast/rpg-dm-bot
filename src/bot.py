@@ -36,6 +36,12 @@ logging.getLogger('rpg.llm').setLevel(logging.DEBUG)
 logger = logging.getLogger('rpg')
 logger.info("Logging to file: logs/rpg.log")
 
+ALLOWED_BOT_CHANNEL_ID = 1494536176453816431
+
+
+def is_allowed_channel(channel_id: int | None) -> bool:
+    return channel_id == ALLOWED_BOT_CHANNEL_ID
+
 TOKEN = os.getenv('DISCORD_TOKEN')
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN environment variable is not set. Check your .env file.")
@@ -162,6 +168,9 @@ class RPGBot(commands.Bot):
         # Ignore messages from bots (including self)
         if message.author.bot:
             return
+
+        if not is_allowed_channel(getattr(message.channel, "id", None)):
+            return
         
         # Ignore messages before bot was ready
         if self._started_at is None:
@@ -178,7 +187,7 @@ class RPGBot(commands.Bot):
         
         # Process commands
         await self.process_commands(message)
-    
+
     async def close(self):
         """Clean up when bot shuts down"""
         if self.llm:
@@ -188,6 +197,19 @@ class RPGBot(commands.Bot):
 
 # Create bot instance
 bot = RPGBot()
+
+
+@bot.tree.interaction_check
+async def only_allow_allowed_channel(interaction: discord.Interaction) -> bool:
+    channel = getattr(interaction, "channel", None)
+    if channel and is_allowed_channel(channel.id):
+        return True
+
+    if interaction.response.is_done():
+        await interaction.followup.send("❌ The bot only responds in the approved game channel.", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ The bot only responds in the approved game channel.", ephemeral=True)
+    return False
 
 
 # Global error handler

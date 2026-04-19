@@ -594,7 +594,7 @@ class Combat(commands.Cog):
         embed = discord.Embed(
             title="⚔️ Attack!",
             description="\n".join(lines),
-            color=discord.Color.red() if attack['hit'] else discord.Color.grey()
+            color=discord.Color.red() if attack['hit'] else discord.Color.light_grey()
         )
         
         await interaction.response.send_message(embed=embed)

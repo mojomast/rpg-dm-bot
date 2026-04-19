@@ -4,9 +4,11 @@ It is designed for two modes of play: players can join and play through Discord 
 
 ## Highlights
 - Persistent characters, sessions, combat, quests, spells, skills, and inventory
+- Real gold balance handling, including player-to-player gold transfer
 - AI DM narration, NPC dialogue, and tool-driven gameplay flow
 - Browser chat with shared session state and live dashboard panels
 - Web admin tools for campaigns, locations, NPCs, items, spells, and game data
+- Discord responses are restricted to the campaign's approved channel
 - Content-pack aware runtime data for themed campaigns
 
 ## Quick Start

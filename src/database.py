@@ -1537,6 +1537,10 @@ class Database:
             for row in rows:
                 item = dict(row)
                 item['properties'] = json.loads(item['properties'])
+                if item.get('item_type') in {'gold', 'currency'}:
+                    continue
+                if str(item.get('item_name', '')).strip().lower() == 'gold':
+                    continue
                 items.append(item)
             return items
     
@@ -1622,6 +1626,43 @@ class Database:
                 "SELECT gold FROM characters WHERE id = ?", (character_id,))
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def transfer_gold(self, from_character_id: int, to_character_id: int, amount: int) -> Dict[str, Any]:
+        """Transfer gold between characters atomically."""
+        if amount <= 0:
+            return {"error": "Amount must be greater than zero"}
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            cursor = await db.execute("SELECT id, gold FROM characters WHERE id = ?", (from_character_id,))
+            from_row = await cursor.fetchone()
+            if not from_row:
+                return {"error": "Source character not found"}
+
+            cursor = await db.execute("SELECT id, gold FROM characters WHERE id = ?", (to_character_id,))
+            to_row = await cursor.fetchone()
+            if not to_row:
+                return {"error": "Target character not found"}
+
+            if from_row["gold"] < amount:
+                return {"error": f"Not enough gold. Has {from_row['gold']}, needs {amount}"}
+
+            now = datetime.utcnow().isoformat()
+            await db.execute(
+                "UPDATE characters SET gold = gold - ?, updated_at = ? WHERE id = ?",
+                (amount, now, from_character_id),
+            )
+            await db.execute(
+                "UPDATE characters SET gold = gold + ?, updated_at = ? WHERE id = ?",
+                (amount, now, to_character_id),
+            )
+            await db.commit()
+
+            return {
+                "from_gold": from_row["gold"] - amount,
+                "to_gold": to_row["gold"] + amount,
+            }
     
     # ========================================================================
     # SPELL & ABILITY METHODS

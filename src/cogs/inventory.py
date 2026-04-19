@@ -346,6 +346,10 @@ class InventoryFilterDropdown(discord.ui.Select):
             # Group by type
             by_type = {}
             for item in items:
+                if item.get('item_type') in {'gold', 'currency'}:
+                    continue
+                if str(item.get('item_name', '')).strip().lower() == 'gold':
+                    continue
                 item_type = item['item_type']
                 if item_type not in by_type:
                     by_type[item_type] = []
@@ -1025,6 +1029,13 @@ class Inventory(commands.Cog):
                 ephemeral=True
             )
             return
+
+        if item['item_type'] == 'gold':
+            await interaction.response.send_message(
+                "❌ Gold is currency, not an inventory item. Use the gold transfer flow instead.",
+                ephemeral=True
+            )
+            return
         
         # Remove from giver
         await self.db.remove_item(item_id, quantity)
@@ -1037,6 +1048,38 @@ class Inventory(commands.Cog):
         
         await interaction.response.send_message(
             f"🎁 **{giver_char['name']}** gave {quantity}x **{item['item_name']}** to **{receiver_char['name']}**!"
+        )
+
+    @inventory_group.command(name="transfer_gold", description="Transfer gold to another player")
+    @app_commands.describe(
+        player="The player to receive the gold",
+        amount="Amount of gold to transfer"
+    )
+    async def transfer_gold(
+        self,
+        interaction: discord.Interaction,
+        player: discord.Member,
+        amount: int,
+    ):
+        giver_char = await self.db.get_active_character(interaction.user.id, interaction.guild.id)
+        receiver_char = await self.db.get_active_character(player.id, interaction.guild.id)
+
+        if not giver_char:
+            await interaction.response.send_message("❌ You don't have a character!", ephemeral=True)
+            return
+
+        if not receiver_char:
+            await interaction.response.send_message(f"❌ {player.display_name} doesn't have a character!", ephemeral=True)
+            return
+
+        result = await self.db.transfer_gold(giver_char['id'], receiver_char['id'], amount)
+        if result.get('error'):
+            await interaction.response.send_message(f"❌ {result['error']}", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            f"💸 **{giver_char['name']}** sent **{amount} gold** to **{receiver_char['name']}**!\n"
+            f"{giver_char['name']}: {result['from_gold']} gold | {receiver_char['name']}: {result['to_gold']} gold"
         )
     
     @inventory_group.command(name="shop", description="Visit the shop")

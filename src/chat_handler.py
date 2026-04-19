@@ -368,7 +368,7 @@ CRITICAL:
                 content = response.get("content", "")
 
                 if not tool_calls:
-                    response_text = content
+                    response_text = content.strip()
                     break
 
                 messages.append({
@@ -404,6 +404,19 @@ CRITICAL:
 
         if not response_text:
             logger.warning("MAX_TOOL_ROUNDS (%d) exhausted without a final text response.", MAX_TOOL_ROUNDS)
+            if tool_results:
+                last_result = tool_results[-1].get("result")
+                if isinstance(last_result, dict):
+                    response_text = (
+                        last_result.get("message")
+                        or last_result.get("result")
+                        or last_result.get("error")
+                        or ""
+                    )
+                elif isinstance(last_result, str):
+                    response_text = last_result.strip()
+            if not response_text:
+                response_text = "*The Dungeon Master hesitates, but the action still resolves.*"
 
         return response_text or "*The Dungeon Master remains silent.*", tool_results
 
